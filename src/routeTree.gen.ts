@@ -9,38 +9,270 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as RiderRouteImport } from './routes/rider'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as RiderProfileRouteImport } from './routes/rider.profile'
+import { Route as RiderPayslipsRouteImport } from './routes/rider.payslips'
+import { Route as RiderDashboardRouteImport } from './routes/rider.dashboard'
+import { Route as AdminUploadRouteImport } from './routes/admin.upload'
+import { Route as AdminRidersRouteImport } from './routes/admin.riders'
+import { Route as AdminReportsRouteImport } from './routes/admin.reports'
+import { Route as AdminPricingRouteImport } from './routes/admin.pricing'
+import { Route as AdminPayrollRouteImport } from './routes/admin.payroll'
+import { Route as AdminDeductionsRouteImport } from './routes/admin.deductions'
+import { Route as AdminDashboardRouteImport } from './routes/admin.dashboard'
+import { Route as AdminClientsRouteImport } from './routes/admin.clients'
+import { Route as AdminAttendanceRouteImport } from './routes/admin.attendance'
+import { Route as AdminPricingNewRouteImport } from './routes/admin.pricing.new'
+import { Route as AdminPricingIdRouteImport } from './routes/admin.pricing.$id'
 
+const RiderRoute = RiderRouteImport.update({
+  id: '/rider',
+  path: '/rider',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RiderProfileRoute = RiderProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => RiderRoute,
+} as any)
+const RiderPayslipsRoute = RiderPayslipsRouteImport.update({
+  id: '/payslips',
+  path: '/payslips',
+  getParentRoute: () => RiderRoute,
+} as any)
+const RiderDashboardRoute = RiderDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => RiderRoute,
+} as any)
+const AdminUploadRoute = AdminUploadRouteImport.update({
+  id: '/upload',
+  path: '/upload',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminRidersRoute = AdminRidersRouteImport.update({
+  id: '/riders',
+  path: '/riders',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminReportsRoute = AdminReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminPricingRoute = AdminPricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminPayrollRoute = AdminPayrollRouteImport.update({
+  id: '/payroll',
+  path: '/payroll',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminDeductionsRoute = AdminDeductionsRouteImport.update({
+  id: '/deductions',
+  path: '/deductions',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminDashboardRoute = AdminDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminClientsRoute = AdminClientsRouteImport.update({
+  id: '/clients',
+  path: '/clients',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAttendanceRoute = AdminAttendanceRouteImport.update({
+  id: '/attendance',
+  path: '/attendance',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminPricingNewRoute = AdminPricingNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => AdminPricingRoute,
+} as any)
+const AdminPricingIdRoute = AdminPricingIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AdminPricingRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/login': typeof LoginRoute
+  '/rider': typeof RiderRouteWithChildren
+  '/admin/attendance': typeof AdminAttendanceRoute
+  '/admin/clients': typeof AdminClientsRoute
+  '/admin/dashboard': typeof AdminDashboardRoute
+  '/admin/deductions': typeof AdminDeductionsRoute
+  '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/pricing': typeof AdminPricingRouteWithChildren
+  '/admin/reports': typeof AdminReportsRoute
+  '/admin/riders': typeof AdminRidersRoute
+  '/admin/upload': typeof AdminUploadRoute
+  '/rider/dashboard': typeof RiderDashboardRoute
+  '/rider/payslips': typeof RiderPayslipsRoute
+  '/rider/profile': typeof RiderProfileRoute
+  '/admin/pricing/$id': typeof AdminPricingIdRoute
+  '/admin/pricing/new': typeof AdminPricingNewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/login': typeof LoginRoute
+  '/rider': typeof RiderRouteWithChildren
+  '/admin/attendance': typeof AdminAttendanceRoute
+  '/admin/clients': typeof AdminClientsRoute
+  '/admin/dashboard': typeof AdminDashboardRoute
+  '/admin/deductions': typeof AdminDeductionsRoute
+  '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/pricing': typeof AdminPricingRouteWithChildren
+  '/admin/reports': typeof AdminReportsRoute
+  '/admin/riders': typeof AdminRidersRoute
+  '/admin/upload': typeof AdminUploadRoute
+  '/rider/dashboard': typeof RiderDashboardRoute
+  '/rider/payslips': typeof RiderPayslipsRoute
+  '/rider/profile': typeof RiderProfileRoute
+  '/admin/pricing/$id': typeof AdminPricingIdRoute
+  '/admin/pricing/new': typeof AdminPricingNewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/login': typeof LoginRoute
+  '/rider': typeof RiderRouteWithChildren
+  '/admin/attendance': typeof AdminAttendanceRoute
+  '/admin/clients': typeof AdminClientsRoute
+  '/admin/dashboard': typeof AdminDashboardRoute
+  '/admin/deductions': typeof AdminDeductionsRoute
+  '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/pricing': typeof AdminPricingRouteWithChildren
+  '/admin/reports': typeof AdminReportsRoute
+  '/admin/riders': typeof AdminRidersRoute
+  '/admin/upload': typeof AdminUploadRoute
+  '/rider/dashboard': typeof RiderDashboardRoute
+  '/rider/payslips': typeof RiderPayslipsRoute
+  '/rider/profile': typeof RiderProfileRoute
+  '/admin/pricing/$id': typeof AdminPricingIdRoute
+  '/admin/pricing/new': typeof AdminPricingNewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/login'
+    | '/rider'
+    | '/admin/attendance'
+    | '/admin/clients'
+    | '/admin/dashboard'
+    | '/admin/deductions'
+    | '/admin/payroll'
+    | '/admin/pricing'
+    | '/admin/reports'
+    | '/admin/riders'
+    | '/admin/upload'
+    | '/rider/dashboard'
+    | '/rider/payslips'
+    | '/rider/profile'
+    | '/admin/pricing/$id'
+    | '/admin/pricing/new'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/admin'
+    | '/login'
+    | '/rider'
+    | '/admin/attendance'
+    | '/admin/clients'
+    | '/admin/dashboard'
+    | '/admin/deductions'
+    | '/admin/payroll'
+    | '/admin/pricing'
+    | '/admin/reports'
+    | '/admin/riders'
+    | '/admin/upload'
+    | '/rider/dashboard'
+    | '/rider/payslips'
+    | '/rider/profile'
+    | '/admin/pricing/$id'
+    | '/admin/pricing/new'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/login'
+    | '/rider'
+    | '/admin/attendance'
+    | '/admin/clients'
+    | '/admin/dashboard'
+    | '/admin/deductions'
+    | '/admin/payroll'
+    | '/admin/pricing'
+    | '/admin/reports'
+    | '/admin/riders'
+    | '/admin/upload'
+    | '/rider/dashboard'
+    | '/rider/payslips'
+    | '/rider/profile'
+    | '/admin/pricing/$id'
+    | '/admin/pricing/new'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
+  LoginRoute: typeof LoginRoute
+  RiderRoute: typeof RiderRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/rider': {
+      id: '/rider'
+      path: '/rider'
+      fullPath: '/rider'
+      preLoaderRoute: typeof RiderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,22 +280,167 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/rider/profile': {
+      id: '/rider/profile'
+      path: '/profile'
+      fullPath: '/rider/profile'
+      preLoaderRoute: typeof RiderProfileRouteImport
+      parentRoute: typeof RiderRoute
+    }
+    '/rider/payslips': {
+      id: '/rider/payslips'
+      path: '/payslips'
+      fullPath: '/rider/payslips'
+      preLoaderRoute: typeof RiderPayslipsRouteImport
+      parentRoute: typeof RiderRoute
+    }
+    '/rider/dashboard': {
+      id: '/rider/dashboard'
+      path: '/dashboard'
+      fullPath: '/rider/dashboard'
+      preLoaderRoute: typeof RiderDashboardRouteImport
+      parentRoute: typeof RiderRoute
+    }
+    '/admin/upload': {
+      id: '/admin/upload'
+      path: '/upload'
+      fullPath: '/admin/upload'
+      preLoaderRoute: typeof AdminUploadRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/riders': {
+      id: '/admin/riders'
+      path: '/riders'
+      fullPath: '/admin/riders'
+      preLoaderRoute: typeof AdminRidersRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/reports': {
+      id: '/admin/reports'
+      path: '/reports'
+      fullPath: '/admin/reports'
+      preLoaderRoute: typeof AdminReportsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/pricing': {
+      id: '/admin/pricing'
+      path: '/pricing'
+      fullPath: '/admin/pricing'
+      preLoaderRoute: typeof AdminPricingRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/payroll': {
+      id: '/admin/payroll'
+      path: '/payroll'
+      fullPath: '/admin/payroll'
+      preLoaderRoute: typeof AdminPayrollRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/deductions': {
+      id: '/admin/deductions'
+      path: '/deductions'
+      fullPath: '/admin/deductions'
+      preLoaderRoute: typeof AdminDeductionsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/dashboard': {
+      id: '/admin/dashboard'
+      path: '/dashboard'
+      fullPath: '/admin/dashboard'
+      preLoaderRoute: typeof AdminDashboardRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/clients': {
+      id: '/admin/clients'
+      path: '/clients'
+      fullPath: '/admin/clients'
+      preLoaderRoute: typeof AdminClientsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/attendance': {
+      id: '/admin/attendance'
+      path: '/attendance'
+      fullPath: '/admin/attendance'
+      preLoaderRoute: typeof AdminAttendanceRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/pricing/new': {
+      id: '/admin/pricing/new'
+      path: '/new'
+      fullPath: '/admin/pricing/new'
+      preLoaderRoute: typeof AdminPricingNewRouteImport
+      parentRoute: typeof AdminPricingRoute
+    }
+    '/admin/pricing/$id': {
+      id: '/admin/pricing/$id'
+      path: '/$id'
+      fullPath: '/admin/pricing/$id'
+      preLoaderRoute: typeof AdminPricingIdRouteImport
+      parentRoute: typeof AdminPricingRoute
+    }
   }
 }
 
+interface AdminPricingRouteChildren {
+  AdminPricingIdRoute: typeof AdminPricingIdRoute
+  AdminPricingNewRoute: typeof AdminPricingNewRoute
+}
+
+const AdminPricingRouteChildren: AdminPricingRouteChildren = {
+  AdminPricingIdRoute: AdminPricingIdRoute,
+  AdminPricingNewRoute: AdminPricingNewRoute,
+}
+
+const AdminPricingRouteWithChildren = AdminPricingRoute._addFileChildren(
+  AdminPricingRouteChildren,
+)
+
+interface AdminRouteChildren {
+  AdminAttendanceRoute: typeof AdminAttendanceRoute
+  AdminClientsRoute: typeof AdminClientsRoute
+  AdminDashboardRoute: typeof AdminDashboardRoute
+  AdminDeductionsRoute: typeof AdminDeductionsRoute
+  AdminPayrollRoute: typeof AdminPayrollRoute
+  AdminPricingRoute: typeof AdminPricingRouteWithChildren
+  AdminReportsRoute: typeof AdminReportsRoute
+  AdminRidersRoute: typeof AdminRidersRoute
+  AdminUploadRoute: typeof AdminUploadRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminAttendanceRoute: AdminAttendanceRoute,
+  AdminClientsRoute: AdminClientsRoute,
+  AdminDashboardRoute: AdminDashboardRoute,
+  AdminDeductionsRoute: AdminDeductionsRoute,
+  AdminPayrollRoute: AdminPayrollRoute,
+  AdminPricingRoute: AdminPricingRouteWithChildren,
+  AdminReportsRoute: AdminReportsRoute,
+  AdminRidersRoute: AdminRidersRoute,
+  AdminUploadRoute: AdminUploadRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
+interface RiderRouteChildren {
+  RiderDashboardRoute: typeof RiderDashboardRoute
+  RiderPayslipsRoute: typeof RiderPayslipsRoute
+  RiderProfileRoute: typeof RiderProfileRoute
+}
+
+const RiderRouteChildren: RiderRouteChildren = {
+  RiderDashboardRoute: RiderDashboardRoute,
+  RiderPayslipsRoute: RiderPayslipsRoute,
+  RiderProfileRoute: RiderProfileRoute,
+}
+
+const RiderRouteWithChildren = RiderRoute._addFileChildren(RiderRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
+  LoginRoute: LoginRoute,
+  RiderRoute: RiderRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
