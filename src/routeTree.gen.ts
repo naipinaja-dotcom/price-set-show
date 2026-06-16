@@ -19,11 +19,14 @@ import { Route as RiderDashboardRouteImport } from './routes/rider.dashboard'
 import { Route as AdminUploadRouteImport } from './routes/admin.upload'
 import { Route as AdminRidersRouteImport } from './routes/admin.riders'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
+import { Route as AdminPricingRouteImport } from './routes/admin.pricing'
 import { Route as AdminPayrollRouteImport } from './routes/admin.payroll'
 import { Route as AdminDeductionsRouteImport } from './routes/admin.deductions'
 import { Route as AdminDashboardRouteImport } from './routes/admin.dashboard'
 import { Route as AdminClientsRouteImport } from './routes/admin.clients'
 import { Route as AdminAttendanceRouteImport } from './routes/admin.attendance'
+import { Route as AdminPricingNewRouteImport } from './routes/admin.pricing.new'
+import { Route as AdminPricingIdRouteImport } from './routes/admin.pricing.$id'
 
 const RiderRoute = RiderRouteImport.update({
   id: '/rider',
@@ -75,6 +78,11 @@ const AdminReportsRoute = AdminReportsRouteImport.update({
   path: '/reports',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminPricingRoute = AdminPricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminPayrollRoute = AdminPayrollRouteImport.update({
   id: '/payroll',
   path: '/payroll',
@@ -100,6 +108,16 @@ const AdminAttendanceRoute = AdminAttendanceRouteImport.update({
   path: '/attendance',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminPricingNewRoute = AdminPricingNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => AdminPricingRoute,
+} as any)
+const AdminPricingIdRoute = AdminPricingIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AdminPricingRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -111,12 +129,15 @@ export interface FileRoutesByFullPath {
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/deductions': typeof AdminDeductionsRoute
   '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/pricing': typeof AdminPricingRouteWithChildren
   '/admin/reports': typeof AdminReportsRoute
   '/admin/riders': typeof AdminRidersRoute
   '/admin/upload': typeof AdminUploadRoute
   '/rider/dashboard': typeof RiderDashboardRoute
   '/rider/payslips': typeof RiderPayslipsRoute
   '/rider/profile': typeof RiderProfileRoute
+  '/admin/pricing/$id': typeof AdminPricingIdRoute
+  '/admin/pricing/new': typeof AdminPricingNewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -128,12 +149,15 @@ export interface FileRoutesByTo {
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/deductions': typeof AdminDeductionsRoute
   '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/pricing': typeof AdminPricingRouteWithChildren
   '/admin/reports': typeof AdminReportsRoute
   '/admin/riders': typeof AdminRidersRoute
   '/admin/upload': typeof AdminUploadRoute
   '/rider/dashboard': typeof RiderDashboardRoute
   '/rider/payslips': typeof RiderPayslipsRoute
   '/rider/profile': typeof RiderProfileRoute
+  '/admin/pricing/$id': typeof AdminPricingIdRoute
+  '/admin/pricing/new': typeof AdminPricingNewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -146,12 +170,15 @@ export interface FileRoutesById {
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/deductions': typeof AdminDeductionsRoute
   '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/pricing': typeof AdminPricingRouteWithChildren
   '/admin/reports': typeof AdminReportsRoute
   '/admin/riders': typeof AdminRidersRoute
   '/admin/upload': typeof AdminUploadRoute
   '/rider/dashboard': typeof RiderDashboardRoute
   '/rider/payslips': typeof RiderPayslipsRoute
   '/rider/profile': typeof RiderProfileRoute
+  '/admin/pricing/$id': typeof AdminPricingIdRoute
+  '/admin/pricing/new': typeof AdminPricingNewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -165,12 +192,15 @@ export interface FileRouteTypes {
     | '/admin/dashboard'
     | '/admin/deductions'
     | '/admin/payroll'
+    | '/admin/pricing'
     | '/admin/reports'
     | '/admin/riders'
     | '/admin/upload'
     | '/rider/dashboard'
     | '/rider/payslips'
     | '/rider/profile'
+    | '/admin/pricing/$id'
+    | '/admin/pricing/new'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -182,12 +212,15 @@ export interface FileRouteTypes {
     | '/admin/dashboard'
     | '/admin/deductions'
     | '/admin/payroll'
+    | '/admin/pricing'
     | '/admin/reports'
     | '/admin/riders'
     | '/admin/upload'
     | '/rider/dashboard'
     | '/rider/payslips'
     | '/rider/profile'
+    | '/admin/pricing/$id'
+    | '/admin/pricing/new'
   id:
     | '__root__'
     | '/'
@@ -199,12 +232,15 @@ export interface FileRouteTypes {
     | '/admin/dashboard'
     | '/admin/deductions'
     | '/admin/payroll'
+    | '/admin/pricing'
     | '/admin/reports'
     | '/admin/riders'
     | '/admin/upload'
     | '/rider/dashboard'
     | '/rider/payslips'
     | '/rider/profile'
+    | '/admin/pricing/$id'
+    | '/admin/pricing/new'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -286,6 +322,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminReportsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/pricing': {
+      id: '/admin/pricing'
+      path: '/pricing'
+      fullPath: '/admin/pricing'
+      preLoaderRoute: typeof AdminPricingRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/payroll': {
       id: '/admin/payroll'
       path: '/payroll'
@@ -321,8 +364,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAttendanceRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/pricing/new': {
+      id: '/admin/pricing/new'
+      path: '/new'
+      fullPath: '/admin/pricing/new'
+      preLoaderRoute: typeof AdminPricingNewRouteImport
+      parentRoute: typeof AdminPricingRoute
+    }
+    '/admin/pricing/$id': {
+      id: '/admin/pricing/$id'
+      path: '/$id'
+      fullPath: '/admin/pricing/$id'
+      preLoaderRoute: typeof AdminPricingIdRouteImport
+      parentRoute: typeof AdminPricingRoute
+    }
   }
 }
+
+interface AdminPricingRouteChildren {
+  AdminPricingIdRoute: typeof AdminPricingIdRoute
+  AdminPricingNewRoute: typeof AdminPricingNewRoute
+}
+
+const AdminPricingRouteChildren: AdminPricingRouteChildren = {
+  AdminPricingIdRoute: AdminPricingIdRoute,
+  AdminPricingNewRoute: AdminPricingNewRoute,
+}
+
+const AdminPricingRouteWithChildren = AdminPricingRoute._addFileChildren(
+  AdminPricingRouteChildren,
+)
 
 interface AdminRouteChildren {
   AdminAttendanceRoute: typeof AdminAttendanceRoute
@@ -330,6 +401,7 @@ interface AdminRouteChildren {
   AdminDashboardRoute: typeof AdminDashboardRoute
   AdminDeductionsRoute: typeof AdminDeductionsRoute
   AdminPayrollRoute: typeof AdminPayrollRoute
+  AdminPricingRoute: typeof AdminPricingRouteWithChildren
   AdminReportsRoute: typeof AdminReportsRoute
   AdminRidersRoute: typeof AdminRidersRoute
   AdminUploadRoute: typeof AdminUploadRoute
@@ -341,6 +413,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminDashboardRoute: AdminDashboardRoute,
   AdminDeductionsRoute: AdminDeductionsRoute,
   AdminPayrollRoute: AdminPayrollRoute,
+  AdminPricingRoute: AdminPricingRouteWithChildren,
   AdminReportsRoute: AdminReportsRoute,
   AdminRidersRoute: AdminRidersRoute,
   AdminUploadRoute: AdminUploadRoute,
