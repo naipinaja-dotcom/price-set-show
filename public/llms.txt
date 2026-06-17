@@ -1,0 +1,9 @@
+# DASH Payroll
+
+> Sistem payroll terpadu PT. Dash Elektrik Indonesia untuk mengelola skema pricing, attendance, potongan, dan slip gaji rider dari satu tempat.
+
+DASH Payroll adalah aplikasi internal yang membantu operator logistik menghitung gaji rider berdasarkan skema pricing yang fleksibel, data attendance, dan potongan-potongan terkait.
+
+## Pages
+
+- [Masuk](/login): Halaman login untuk admin dan rider.
