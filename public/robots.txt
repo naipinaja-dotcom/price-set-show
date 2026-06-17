@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /rider/
+
+Sitemap: https://price-set-show.lovable.app/sitemap.xml

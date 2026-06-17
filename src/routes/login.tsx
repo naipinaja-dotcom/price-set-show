@@ -6,6 +6,17 @@ import { Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
+  head: () => ({
+    meta: [
+      { title: "Masuk — DASH Payroll" },
+      { name: "description", content: "Masuk ke DASH Payroll sebagai admin atau rider untuk mengakses dashboard payroll, attendance, dan slip gaji." },
+      { property: "og:title", content: "Masuk — DASH Payroll" },
+      { property: "og:description", content: "Masuk ke DASH Payroll sebagai admin atau rider." },
+      { property: "og:url", content: "https://price-set-show.lovable.app/login" },
+      { property: "og:type", content: "website" },
+    ],
+    links: [{ rel: "canonical", href: "https://price-set-show.lovable.app/login" }],
+  }),
 });
 
 function LoginPage() {
@@ -44,7 +55,7 @@ function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen grid lg:grid-cols-2 bg-background">
+    <main className="min-h-screen grid lg:grid-cols-2 bg-background">
       <div className="hidden lg:flex flex-col justify-between p-12 bg-primary text-primary-foreground">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-primary-foreground/15 grid place-items-center font-bold">D</div>
@@ -147,6 +158,6 @@ function LoginPage() {
           </p>
         </form>
       </div>
-    </div>
+    </main>
   );
 }

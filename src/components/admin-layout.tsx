@@ -86,6 +86,7 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
               onClick={handleLogout}
               className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"
               title="Logout"
+              aria-label="Logout"
             >
               <LogOut className="w-4 h-4" />
             </button>
@@ -100,7 +101,7 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
           <aside className="absolute left-0 top-0 bottom-0 w-64 bg-sidebar border-r border-border flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <span className="text-sm font-semibold">DASH Payroll</span>
-              <button onClick={() => setMobileOpen(false)} className="p-1">
+              <button onClick={() => setMobileOpen(false)} className="p-1" aria-label="Tutup menu">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -141,6 +142,7 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
           <button
             className="lg:hidden p-1.5 -ml-1 rounded-md hover:bg-muted"
             onClick={() => setMobileOpen(true)}
+            aria-label="Buka menu"
           >
             <Menu className="w-5 h-5" />
           </button>
