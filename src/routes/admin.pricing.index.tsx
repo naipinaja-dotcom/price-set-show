@@ -18,7 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-export const Route = createFileRoute("/admin/pricing")({
+export const Route = createFileRoute("/admin/pricing/")({
   component: PricingListPage,
 });
 
