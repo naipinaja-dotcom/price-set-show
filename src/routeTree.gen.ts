@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as RiderRouteImport } from './routes/rider'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AdminRouteImport } from './routes/admin'
@@ -28,6 +29,11 @@ import { Route as AdminPricingIndexRouteImport } from './routes/admin.pricing.in
 import { Route as AdminPricingNewRouteImport } from './routes/admin.pricing.new'
 import { Route as AdminPricingIdRouteImport } from './routes/admin.pricing.$id'
 
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RiderRoute = RiderRouteImport.update({
   id: '/rider',
   path: '/rider',
@@ -124,6 +130,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
   '/rider': typeof RiderRouteWithChildren
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/admin/attendance': typeof AdminAttendanceRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
@@ -144,6 +151,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
   '/rider': typeof RiderRouteWithChildren
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/admin/attendance': typeof AdminAttendanceRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
@@ -165,6 +173,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
   '/rider': typeof RiderRouteWithChildren
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/admin/attendance': typeof AdminAttendanceRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/login'
     | '/rider'
+    | '/sitemap.xml'
     | '/admin/attendance'
     | '/admin/clients'
     | '/admin/dashboard'
@@ -207,6 +217,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/login'
     | '/rider'
+    | '/sitemap.xml'
     | '/admin/attendance'
     | '/admin/clients'
     | '/admin/dashboard'
@@ -227,6 +238,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/login'
     | '/rider'
+    | '/sitemap.xml'
     | '/admin/attendance'
     | '/admin/clients'
     | '/admin/dashboard'
@@ -248,10 +260,18 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
   LoginRoute: typeof LoginRoute
   RiderRoute: typeof RiderRouteWithChildren
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/rider': {
       id: '/rider'
       path: '/rider'
@@ -430,17 +450,8 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
   LoginRoute: LoginRoute,
   RiderRoute: RiderRouteWithChildren,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
