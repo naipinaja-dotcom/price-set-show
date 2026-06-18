@@ -18,7 +18,7 @@ export function RiderLayout({ children, title }: { children: ReactNode; title: s
       <header className="h-14 border-b border-border bg-card flex items-center justify-between px-4 sticky top-0 z-10">
         <div>
           <h1 className="text-base font-semibold leading-tight">{title}</h1>
-          <p className="text-[11px] text-muted-foreground">{user?.employeeId ?? user?.name}</p>
+          <p className="text-[11px] text-muted-foreground">{user?.employeeId ?? user?.fullName}</p>
         </div>
         <button
           onClick={() => {
