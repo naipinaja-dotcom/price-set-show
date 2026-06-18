@@ -9,9 +9,9 @@ export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
       { title: "Masuk — DASH Payroll" },
-      { name: "description", content: "Masuk ke DASH Payroll sebagai admin atau rider untuk mengakses dashboard payroll, attendance, dan slip gaji." },
+      { name: "description", content: "Masuk ke DASH Payroll sebagai admin untuk mengakses dashboard payroll, attendance, dan slip gaji." },
       { property: "og:title", content: "Masuk — DASH Payroll" },
-      { property: "og:description", content: "Masuk ke DASH Payroll sebagai admin atau rider." },
+      { property: "og:description", content: "Masuk ke DASH Payroll sebagai admin." },
       { property: "og:url", content: "https://price-set-show.lovable.app/login" },
       { property: "og:type", content: "website" },
     ],
@@ -20,13 +20,12 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
-  const { user, loginAdmin, loginRider, loading: authLoading } = useAuth();
+  const { user, loginAdmin, signUpAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"admin" | "rider">("admin");
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [empId, setEmpId] = useState("");
-  const [pin, setPin] = useState("");
+  const [fullName, setFullName] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   if (authLoading) return null;
@@ -36,16 +35,17 @@ function LoginPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      if (tab === "admin") {
+      if (mode === "signup") {
+        if (!email || !password || !fullName) throw new Error("Semua field wajib diisi");
+        if (password.length < 6) throw new Error("Password minimal 6 karakter");
+        await signUpAdmin(email, password, fullName);
+        toast.success("Akun dibuat. Silakan login.");
+        setMode("login");
+      } else {
         if (!email || !password) throw new Error("Email & password wajib diisi");
         await loginAdmin(email, password);
         toast.success("Berhasil masuk");
         navigate({ to: "/admin/dashboard" });
-      } else {
-        if (!empId || !pin) throw new Error("MTR Code & PIN wajib diisi");
-        await loginRider(empId, pin);
-        toast.success("Berhasil masuk");
-        navigate({ to: "/rider/dashboard" });
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Login gagal");
@@ -77,72 +77,46 @@ function LoginPage() {
 
       <div className="flex items-center justify-center p-6">
         <form onSubmit={submit} className="w-full max-w-sm">
-          <h1 className="text-xl font-semibold mb-1">Masuk ke DASH</h1>
-          <p className="text-sm text-muted-foreground mb-6">Pilih tipe akun untuk melanjutkan.</p>
+          <h1 className="text-xl font-semibold mb-1">{mode === "signup" ? "Daftar Admin" : "Masuk ke DASH"}</h1>
+          <p className="text-sm text-muted-foreground mb-6">
+            {mode === "signup"
+              ? "Buat akun admin. User pertama otomatis menjadi admin."
+              : "Masuk dengan email & password admin Anda."}
+          </p>
 
-          <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-md mb-5">
-            {(["admin", "rider"] as const).map((t) => (
-              <button
-                type="button"
-                key={t}
-                onClick={() => setTab(t)}
-                className={
-                  "py-1.5 text-sm rounded-md transition-colors " +
-                  (tab === t ? "bg-card shadow-sm font-medium" : "text-muted-foreground")
-                }
-              >
-                {t === "admin" ? "Admin" : "Rider"}
-              </button>
-            ))}
+          <div className="space-y-3">
+            {mode === "signup" && (
+              <div>
+                <label className="text-sm font-medium">Nama Lengkap</label>
+                <input
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Nama lengkap"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+            )}
+            <div>
+              <label className="text-sm font-medium">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="admin@dash.id"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
           </div>
-
-          {tab === "admin" ? (
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium">Email</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@dash.id"
-                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium">Employee ID (MTR Code)</label>
-                <input
-                  value={empId}
-                  onChange={(e) => setEmpId(e.target.value)}
-                  placeholder="MTR0009741"
-                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm uppercase outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">PIN</label>
-                <input
-                  type="password"
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="••••"
-                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-            </div>
-          )}
 
           <button
             type="submit"
@@ -150,12 +124,16 @@ function LoginPage() {
             className="mt-5 w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-medium hover:opacity-90 disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-            Masuk
+            {mode === "signup" ? "Daftar" : "Masuk"}
           </button>
 
-          <p className="mt-4 text-[11px] text-muted-foreground text-center">
-            Mode demo · login menerima kredensial apa saja. Akan diganti Supabase setelah project di-connect.
-          </p>
+          <button
+            type="button"
+            onClick={() => setMode(mode === "signup" ? "login" : "signup")}
+            className="mt-4 w-full text-xs text-muted-foreground hover:text-foreground"
+          >
+            {mode === "signup" ? "Sudah punya akun? Masuk" : "Belum punya akun? Daftar admin"}
+          </button>
         </form>
       </div>
     </main>

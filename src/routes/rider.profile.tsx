@@ -12,9 +12,9 @@ function ProfilePage() {
     <RiderLayout title="Profil">
       <div className="flex flex-col items-center py-6">
         <div className="w-16 h-16 rounded-full bg-primary-soft text-primary-soft-foreground grid place-items-center text-xl font-semibold">
-          {user?.name?.charAt(0) ?? "R"}
+          {user?.fullName?.charAt(0) ?? "R"}
         </div>
-        <div className="mt-3 text-sm font-semibold">{user?.name}</div>
+        <div className="mt-3 text-sm font-semibold">{user?.fullName}</div>
         <div className="text-xs text-muted-foreground">{user?.employeeId}</div>
       </div>
       <div className="space-y-2">

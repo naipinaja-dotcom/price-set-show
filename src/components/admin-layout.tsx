@@ -76,10 +76,10 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
         <div className="border-t border-border p-3">
           <div className="flex items-center gap-2 px-2 py-2">
             <div className="w-8 h-8 rounded-full bg-primary-soft text-primary-soft-foreground grid place-items-center text-xs font-semibold">
-              {user?.name?.charAt(0) ?? "A"}
+              {user?.fullName?.charAt(0) ?? "A"}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium truncate">{user?.name}</div>
+              <div className="text-xs font-medium truncate">{user?.fullName}</div>
               <div className="text-[11px] text-muted-foreground truncate">Admin</div>
             </div>
             <button
