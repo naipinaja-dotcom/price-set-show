@@ -26,17 +26,19 @@ function write<T>(k: string, v: T) {
   window.localStorage.setItem(k, JSON.stringify(v));
 }
 
-const DEFAULT_CLIENTS: MockClient[] = [
-  { id: "c1", name: "JNE Express", code: "JNE" },
-  { id: "c2", name: "SiCepat", code: "SCP" },
-  { id: "c3", name: "Anteraja", code: "ATR" },
-];
+import { supabase } from "@/integrations/supabase/client";
 
-export function listClients(): MockClient[] {
-  const stored = read<MockClient[] | null>(CLIENTS_KEY, null);
-  if (stored && stored.length) return stored;
-  write(CLIENTS_KEY, DEFAULT_CLIENTS);
-  return DEFAULT_CLIENTS;
+export async function listClients(): Promise<MockClient[]> {
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id, name, code")
+    .eq("active", true)
+    .order("name");
+  if (error) {
+    console.error("[listClients]", error);
+    return [];
+  }
+  return (data ?? []) as MockClient[];
 }
 
 export function listPricingSchemes(): PricingScheme[] {
