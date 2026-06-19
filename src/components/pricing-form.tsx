@@ -383,7 +383,7 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
   const [tierSubtab, setTierSubtab] = useState<"distance" | "weight" | "stop">("distance");
 
   useEffect(() => {
-    setClients(listClients());
+    listClients().then(setClients);
   }, []);
 
   const activeType = PRICING_TYPES.find((t) => t.key === calcType)!;
