@@ -31,7 +31,7 @@ function PricingListPage() {
 
   const refresh = () => {
     setSchemes(listPricingSchemes());
-    setClients(listClients());
+    listClients().then(setClients);
   };
   useEffect(refresh, []);
 
