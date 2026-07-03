@@ -234,6 +234,7 @@ export type Database = {
           batch_id: string | null
           client_id: string | null
           created_at: string
+          dash_delivery_id: string | null
           delivery_date: string
           destination_address: string | null
           distance_km: number | null
@@ -241,6 +242,7 @@ export type Database = {
           driver_code: string | null
           fee: number
           id: string
+          provider_order_id: string | null
           receiver_name: string | null
           rider_id: string | null
           service_type: string | null
@@ -251,6 +253,7 @@ export type Database = {
           batch_id?: string | null
           client_id?: string | null
           created_at?: string
+          dash_delivery_id?: string | null
           delivery_date: string
           destination_address?: string | null
           distance_km?: number | null
@@ -258,6 +261,7 @@ export type Database = {
           driver_code?: string | null
           fee?: number
           id?: string
+          provider_order_id?: string | null
           receiver_name?: string | null
           rider_id?: string | null
           service_type?: string | null
@@ -268,6 +272,7 @@ export type Database = {
           batch_id?: string | null
           client_id?: string | null
           created_at?: string
+          dash_delivery_id?: string | null
           delivery_date?: string
           destination_address?: string | null
           distance_km?: number | null
@@ -275,6 +280,7 @@ export type Database = {
           driver_code?: string | null
           fee?: number
           id?: string
+          provider_order_id?: string | null
           receiver_name?: string | null
           rider_id?: string | null
           service_type?: string | null
@@ -300,6 +306,73 @@ export type Database = {
             columns: ["rider_id"]
             isOneToOne: false
             referencedRelation: "riders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_details: {
+        Row: {
+          base_amount: number
+          calculation_type: string | null
+          client_id: string
+          component_label: string | null
+          created_at: string
+          detail_breakdown: Json | null
+          id: string
+          invoice_date: string
+          rider_id: string | null
+          surcharge_amount: number
+          total_amount: number
+          upload_batch_id: string | null
+        }
+        Insert: {
+          base_amount?: number
+          calculation_type?: string | null
+          client_id: string
+          component_label?: string | null
+          created_at?: string
+          detail_breakdown?: Json | null
+          id?: string
+          invoice_date: string
+          rider_id?: string | null
+          surcharge_amount?: number
+          total_amount?: number
+          upload_batch_id?: string | null
+        }
+        Update: {
+          base_amount?: number
+          calculation_type?: string | null
+          client_id?: string
+          component_label?: string | null
+          created_at?: string
+          detail_breakdown?: Json | null
+          id?: string
+          invoice_date?: string
+          rider_id?: string | null
+          surcharge_amount?: number
+          total_amount?: number
+          upload_batch_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_details_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_details_rider_id_fkey"
+            columns: ["rider_id"]
+            isOneToOne: false
+            referencedRelation: "riders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_details_upload_batch_id_fkey"
+            columns: ["upload_batch_id"]
+            isOneToOne: false
+            referencedRelation: "upload_batches"
             referencedColumns: ["id"]
           },
         ]
