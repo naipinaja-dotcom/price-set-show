@@ -9,6 +9,8 @@ import {
   Wallet,
   FileBarChart2,
   Calculator,
+  Coins,
+  TrendingUp,
   LogOut,
   Menu,
   X,
@@ -23,8 +25,10 @@ const NAV = [
   { to: "/admin/pricing", label: "Pricing Schemes", icon: Tag },
   { to: "/admin/attendance", label: "Attendance Rules", icon: Clock },
   { to: "/admin/upload", label: "Upload Data", icon: Upload },
+  { to: "/admin/calculate", label: "Hitung Fee", icon: Coins },
   { to: "/admin/deductions", label: "Deductions", icon: Wallet },
   { to: "/admin/payroll", label: "Payroll Run", icon: Calculator },
+  { to: "/admin/pnl", label: "PnL / Margin", icon: TrendingUp },
   { to: "/admin/reports", label: "Reports", icon: FileBarChart2 },
 ] as const;
 

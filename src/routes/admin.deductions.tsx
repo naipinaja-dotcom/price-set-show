@@ -2,8 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
+import { parseRupiah } from "@/lib/format";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2 } from "lucide-react";
+import { Plus, Trash2, Loader2, X } from "lucide-react";
 
 export const Route = createFileRoute("/admin/deductions")({ component: DeductionsPage });
 
@@ -36,6 +37,10 @@ function DeductionsPage() {
 function DTypesTab() {
   const [rows, setRows] = useState<DType[]>([]);
   const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [nf, setNf] = useState({ code: "", name: "", description: "", installmentable: false });
+  const [saving, setSaving] = useState(false);
+
   const load = async () => {
     setLoading(true);
     const { data, error } = await supabase.from("deduction_types").select("*").order("name");
@@ -44,13 +49,21 @@ function DTypesTab() {
   };
   useEffect(() => { load(); }, []);
 
-  const add = async () => {
-    const code = prompt("Kode (mis. SIM, BBM)"); if (!code) return;
-    const name = prompt("Nama"); if (!name) return;
-    const installmentable = confirm("Bisa dicicil?");
-    const { error } = await supabase.from("deduction_types").insert({ code, name, installmentable });
+  const save = async () => {
+    if (!nf.code.trim() || !nf.name.trim()) return toast.error("Kode & nama wajib diisi");
+    setSaving(true);
+    const { error } = await supabase.from("deduction_types").insert({
+      code: nf.code.trim().toUpperCase(),
+      name: nf.name.trim(),
+      description: nf.description.trim() || null,
+      installmentable: nf.installmentable,
+    });
+    setSaving(false);
     if (error) return toast.error(error.message);
-    toast.success("Ditambahkan"); load();
+    toast.success("Jenis potongan ditambahkan");
+    setNf({ code: "", name: "", description: "", installmentable: false });
+    setAdding(false);
+    load();
   };
   const remove = async (id: string) => {
     if (!confirm("Hapus jenis potongan?")) return;
@@ -58,13 +71,48 @@ function DTypesTab() {
     if (error) return toast.error(error.message); load();
   };
 
+  const inputCls = "mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm";
+
   return (
     <div>
       <div className="flex justify-end mb-3">
-        <button onClick={add} className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm">
+        <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm">
           <Plus className="w-4 h-4" /> Tambah Jenis
         </button>
       </div>
+
+      {adding && (
+        <div className="rounded-lg border border-border bg-card p-4 mb-3">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium">Jenis Potongan Baru</h3>
+            <button onClick={() => setAdding(false)} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium">Kode</label>
+              <input value={nf.code} onChange={(e) => setNf({ ...nf, code: e.target.value })} placeholder="mis. SIM, BBM" className={inputCls} />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Nama</label>
+              <input value={nf.name} onChange={(e) => setNf({ ...nf, name: e.target.value })} placeholder="mis. Cicilan SIM" className={inputCls} />
+            </div>
+          </div>
+          <div className="mt-3">
+            <label className="text-sm font-medium">Keterangan <span className="font-normal text-muted-foreground">(opsional)</span></label>
+            <input value={nf.description} onChange={(e) => setNf({ ...nf, description: e.target.value })} className={inputCls} />
+          </div>
+          <label className="flex items-center gap-2 mt-3 text-sm">
+            <input type="checkbox" checked={nf.installmentable} onChange={(e) => setNf({ ...nf, installmentable: e.target.checked })} /> Bisa dicicil
+          </label>
+          <div className="flex justify-end gap-2 mt-4">
+            <button onClick={() => setAdding(false)} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-muted">Batal</button>
+            <button onClick={save} disabled={saving} className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm disabled:opacity-50">
+              {saving ? "Menyimpan…" : "Simpan"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-lg border border-border overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted text-left"><tr><th className="p-3">Kode</th><th>Nama</th><th>Bisa Dicicil</th><th>Status</th><th></th></tr></thead>
@@ -131,7 +179,12 @@ function AddTab() {
       </div>
       <div>
         <label className="font-medium">Jenis Potongan</label>
-        <select value={f.deduction_type_id} onChange={(e) => setF({ ...f, deduction_type_id: e.target.value })}
+        <select value={f.deduction_type_id} onChange={(e) => {
+            const id = e.target.value;
+            const t = types.find((x) => x.id === id);
+            // reset "Dicicil" kalau jenis yang dipilih tidak boleh dicicil
+            setF({ ...f, deduction_type_id: id, installment: t?.installmentable ? f.installment : false });
+          }}
           className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
           <option value="">— pilih jenis —</option>
           {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -139,7 +192,9 @@ function AddTab() {
       </div>
       <div>
         <label className="font-medium">Nominal Total (Rp)</label>
-        <input type="number" value={f.total_amount} onChange={(e) => setF({ ...f, total_amount: +e.target.value })}
+        <input inputMode="numeric" placeholder="0"
+          value={f.total_amount ? f.total_amount.toLocaleString("id-ID") : ""}
+          onChange={(e) => setF({ ...f, total_amount: parseRupiah(e.target.value) })}
           className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
       </div>
       <div>
@@ -147,9 +202,20 @@ function AddTab() {
         <input type="date" value={f.start_date} onChange={(e) => setF({ ...f, start_date: e.target.value })}
           className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
       </div>
-      <label className="flex items-center gap-2">
-        <input type="checkbox" checked={f.installment} onChange={(e) => setF({ ...f, installment: e.target.checked })} /> Dicicil
-      </label>
+      {(() => {
+        const canInstallment = !!types.find((t) => t.id === f.deduction_type_id)?.installmentable;
+        return (
+          <>
+            <label className={`flex items-center gap-2 ${canInstallment ? "" : "opacity-50 cursor-not-allowed"}`}>
+              <input type="checkbox" disabled={!canInstallment} checked={f.installment && canInstallment}
+                onChange={(e) => setF({ ...f, installment: e.target.checked })} /> Dicicil
+            </label>
+            {f.deduction_type_id && !canInstallment && (
+              <p className="text-xs text-muted-foreground">Jenis potongan ini tidak bisa dicicil.</p>
+            )}
+          </>
+        );
+      })()}
       {f.installment && (
         <div>
           <label className="font-medium">Jumlah Cicilan</label>

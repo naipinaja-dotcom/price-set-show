@@ -1,85 +1,105 @@
 export type PricingCalcType =
-  | "flat_per_awb_area"
-  | "flat_per_awb_service_type"
-  | "tier_distance_weight"
-  | "km_accumulation_weight"
-  | "unique_address"
-  | "store_box_threshold";
+  | "flat_unit"
+  | "tier"
+  | "tier_daily"
+  | "threshold_multiple"
+  | "attendance";
+
+export type SchemeFor = "rider" | "client";
 
 export interface PricingTypeOption {
   key: PricingCalcType;
-  shortKey: "area" | "service" | "tier" | "km" | "addr" | "box";
   name: string;
   desc: string;
-  icon: string; // lucide icon name
+  icon: string; // lucide icon name (lihat ICONS di pricing-form)
   callout: string;
 }
 
 export const PRICING_TYPES: PricingTypeOption[] = [
   {
-    key: "flat_per_awb_area",
-    shortKey: "area",
-    name: "Per Paket · Area",
-    desc: "Tarif beda per wilayah",
+    key: "flat_unit",
+    name: "Flat per Unit",
+    desc: "Tarif per kiriman / alamat",
     icon: "MapPin",
     callout:
-      "Rider dibayar per paket yang diantar. Tarifnya bisa beda-beda tergantung area tujuan — misalnya Jakarta Pusat beda sama Bekasi.",
+      "Dibayar per satuan. Satuannya bisa per paket (AWB) atau per alamat unik (3 paket ke 1 alamat = 1). Tarifnya boleh flat, atau beda-beda per area.",
   },
   {
-    key: "flat_per_awb_service_type",
-    shortKey: "service",
-    name: "Per Paket · Layanan",
-    desc: "Tarif beda per tipe kiriman",
-    icon: "Truck",
-    callout:
-      "Rider dibayar per paket, tarifnya beda berdasarkan tipe layanan — misalnya tarif delivery beda sama return.",
-  },
-  {
-    key: "tier_distance_weight",
-    shortKey: "tier",
+    key: "tier",
     name: "Tier Jarak & Berat",
     desc: "Tarif naik per jarak/kg",
     icon: "Ruler",
     callout:
-      "Tarif dihitung berdasarkan jarak dan berat paket. Makin jauh atau makin berat, makin besar bayarannya. Ada juga bonus per stop.",
+      "Tarif berjenjang. Ada tarif dasar untuk jarak/berat awal, lebihnya nambah per step. Bisa pakai jarak, berat, atau dua-duanya.",
   },
   {
-    key: "km_accumulation_weight",
-    shortKey: "km",
-    name: "Akumulasi KM",
-    desc: "Total KM harian + berat",
+    key: "tier_daily",
+    name: "Akumulasi Harian",
+    desc: "Jarak/berat 1 hari dijumlah",
     icon: "Route",
     callout:
-      "Total KM yang ditempuh rider dalam satu hari dijumlah. Ada tarif dasar, dan kelebihan dari batas tertentu dibayar per km tambahan.",
+      "Sama seperti Tier, tapi semua kiriman 1 rider dalam 1 hari dijumlah dulu (jarak/berat), baru dihitung tarifnya.",
   },
   {
-    key: "unique_address",
-    shortKey: "addr",
-    name: "Per Alamat Unik",
-    desc: "Bayar per titik beda",
-    icon: "Home",
-    callout:
-      "Rider dibayar per alamat unik yang dikunjungi — bukan per paket. Antar 3 paket ke 1 alamat = tetap dihitung 1.",
-  },
-  {
-    key: "store_box_threshold",
-    shortKey: "box",
-    name: "Per Store · Box",
-    desc: "Threshold box per toko",
+    key: "threshold_multiple",
+    name: "Threshold Kelipatan",
+    desc: "Kelipatan berat per store",
     icon: "Package",
     callout:
-      "Setiap toko punya batas box. Jika box melebihi batas, dihitung kelipatan. Contoh: threshold 4, antar 5 box = dihitung 2×.",
+      "Dikelompokkan per area/store. Berat total (kg) dibagi threshold lalu dibulatkan ke atas × rate. Contoh: threshold 10, total 23 kg → dihitung 3×.",
+  },
+  {
+    key: "attendance",
+    name: "Daily / Attendance",
+    desc: "Base harian + komponen",
+    icon: "CalendarDays",
+    callout:
+      "Bukan berdasarkan kiriman. Ada base fee harian + komponen tambahan (dinamai sendiri), sebagian bisa conditional. Fase terpisah — kriteria conditional belum final.",
   },
 ];
+
+// -------------------- Bentuk "amplop" params (envelope) --------------------
+// Dipakai lintas tipe. Modifier nempel di luar `config` supaya bisa on/off
+// tanpa ganggu isi tiap tipe. `null` = modifier mati.
+export interface StepTier {
+  base_fee: number;
+  base_until: number;
+  tiers: { from: number; to: number | null; step: number; add_per_step: number }[];
+}
+
+export interface AddKg {
+  enabled: true;
+  tier: StepTier;
+}
+
+export interface MultiDrop {
+  fee_per_extra_shipment: number; // otomatis mulai kiriman ke-2 per rider per hari
+}
+
+export interface BillingAddons {
+  min_charge: number;
+  admin_fee_flat: number;
+  ppn_percent: number;
+}
+
+export interface PricingEnvelope {
+  version: number;
+  type: PricingCalcType;
+  config: Record<string, unknown>; // isi spesifik per tipe
+  add_kg: AddKg | null;
+  multi_drop: MultiDrop | null;
+  billing_addons: BillingAddons | null; // hanya untuk scheme_for = 'client'
+}
 
 export interface PricingScheme {
   id: string;
   name: string;
   client_id: string | null;
   client_name?: string | null;
+  scheme_for: SchemeFor;
   calc_type: PricingCalcType;
-  effective_from: string;
+  effective_from: string; // info saja, bukan logika kalkulasi
   effective_to: string | null;
-  config: Record<string, unknown>;
+  params: PricingEnvelope;
   created_at: string;
 }

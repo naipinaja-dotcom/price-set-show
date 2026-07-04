@@ -20,10 +20,12 @@ import { Route as RiderDashboardRouteImport } from './routes/rider.dashboard'
 import { Route as AdminUploadRouteImport } from './routes/admin.upload'
 import { Route as AdminRidersRouteImport } from './routes/admin.riders'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
+import { Route as AdminPnlRouteImport } from './routes/admin.pnl'
 import { Route as AdminPayrollRouteImport } from './routes/admin.payroll'
 import { Route as AdminDeductionsRouteImport } from './routes/admin.deductions'
 import { Route as AdminDashboardRouteImport } from './routes/admin.dashboard'
 import { Route as AdminClientsRouteImport } from './routes/admin.clients'
+import { Route as AdminCalculateRouteImport } from './routes/admin.calculate'
 import { Route as AdminAttendanceRouteImport } from './routes/admin.attendance'
 import { Route as AdminPricingIndexRouteImport } from './routes/admin.pricing.index'
 import { Route as AdminPricingNewRouteImport } from './routes/admin.pricing.new'
@@ -84,6 +86,11 @@ const AdminReportsRoute = AdminReportsRouteImport.update({
   path: '/reports',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminPnlRoute = AdminPnlRouteImport.update({
+  id: '/pnl',
+  path: '/pnl',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminPayrollRoute = AdminPayrollRouteImport.update({
   id: '/payroll',
   path: '/payroll',
@@ -102,6 +109,11 @@ const AdminDashboardRoute = AdminDashboardRouteImport.update({
 const AdminClientsRoute = AdminClientsRouteImport.update({
   id: '/clients',
   path: '/clients',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminCalculateRoute = AdminCalculateRouteImport.update({
+  id: '/calculate',
+  path: '/calculate',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminAttendanceRoute = AdminAttendanceRouteImport.update({
@@ -132,10 +144,12 @@ export interface FileRoutesByFullPath {
   '/rider': typeof RiderRouteWithChildren
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/admin/attendance': typeof AdminAttendanceRoute
+  '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/deductions': typeof AdminDeductionsRoute
   '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/pnl': typeof AdminPnlRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/riders': typeof AdminRidersRoute
   '/admin/upload': typeof AdminUploadRoute
@@ -153,10 +167,12 @@ export interface FileRoutesByTo {
   '/rider': typeof RiderRouteWithChildren
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/admin/attendance': typeof AdminAttendanceRoute
+  '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/deductions': typeof AdminDeductionsRoute
   '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/pnl': typeof AdminPnlRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/riders': typeof AdminRidersRoute
   '/admin/upload': typeof AdminUploadRoute
@@ -175,10 +191,12 @@ export interface FileRoutesById {
   '/rider': typeof RiderRouteWithChildren
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/admin/attendance': typeof AdminAttendanceRoute
+  '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/deductions': typeof AdminDeductionsRoute
   '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/pnl': typeof AdminPnlRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/riders': typeof AdminRidersRoute
   '/admin/upload': typeof AdminUploadRoute
@@ -198,10 +216,12 @@ export interface FileRouteTypes {
     | '/rider'
     | '/sitemap.xml'
     | '/admin/attendance'
+    | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
     | '/admin/deductions'
     | '/admin/payroll'
+    | '/admin/pnl'
     | '/admin/reports'
     | '/admin/riders'
     | '/admin/upload'
@@ -219,10 +239,12 @@ export interface FileRouteTypes {
     | '/rider'
     | '/sitemap.xml'
     | '/admin/attendance'
+    | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
     | '/admin/deductions'
     | '/admin/payroll'
+    | '/admin/pnl'
     | '/admin/reports'
     | '/admin/riders'
     | '/admin/upload'
@@ -240,10 +262,12 @@ export interface FileRouteTypes {
     | '/rider'
     | '/sitemap.xml'
     | '/admin/attendance'
+    | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
     | '/admin/deductions'
     | '/admin/payroll'
+    | '/admin/pnl'
     | '/admin/reports'
     | '/admin/riders'
     | '/admin/upload'
@@ -342,6 +366,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminReportsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/pnl': {
+      id: '/admin/pnl'
+      path: '/pnl'
+      fullPath: '/admin/pnl'
+      preLoaderRoute: typeof AdminPnlRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/payroll': {
       id: '/admin/payroll'
       path: '/payroll'
@@ -368,6 +399,13 @@ declare module '@tanstack/react-router' {
       path: '/clients'
       fullPath: '/admin/clients'
       preLoaderRoute: typeof AdminClientsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/calculate': {
+      id: '/admin/calculate'
+      path: '/calculate'
+      fullPath: '/admin/calculate'
+      preLoaderRoute: typeof AdminCalculateRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/attendance': {
@@ -403,10 +441,12 @@ declare module '@tanstack/react-router' {
 
 interface AdminRouteChildren {
   AdminAttendanceRoute: typeof AdminAttendanceRoute
+  AdminCalculateRoute: typeof AdminCalculateRoute
   AdminClientsRoute: typeof AdminClientsRoute
   AdminDashboardRoute: typeof AdminDashboardRoute
   AdminDeductionsRoute: typeof AdminDeductionsRoute
   AdminPayrollRoute: typeof AdminPayrollRoute
+  AdminPnlRoute: typeof AdminPnlRoute
   AdminReportsRoute: typeof AdminReportsRoute
   AdminRidersRoute: typeof AdminRidersRoute
   AdminUploadRoute: typeof AdminUploadRoute
@@ -417,10 +457,12 @@ interface AdminRouteChildren {
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminAttendanceRoute: AdminAttendanceRoute,
+  AdminCalculateRoute: AdminCalculateRoute,
   AdminClientsRoute: AdminClientsRoute,
   AdminDashboardRoute: AdminDashboardRoute,
   AdminDeductionsRoute: AdminDeductionsRoute,
   AdminPayrollRoute: AdminPayrollRoute,
+  AdminPnlRoute: AdminPnlRoute,
   AdminReportsRoute: AdminReportsRoute,
   AdminRidersRoute: AdminRidersRoute,
   AdminUploadRoute: AdminUploadRoute,
@@ -455,3 +497,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
