@@ -20,12 +20,10 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
-  const { user, loginAdmin, signUpAdmin, loading: authLoading } = useAuth();
+  const { user, loginAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   if (authLoading) return null;
@@ -35,18 +33,10 @@ function LoginPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      if (mode === "signup") {
-        if (!email || !password || !fullName) throw new Error("Semua field wajib diisi");
-        if (password.length < 6) throw new Error("Password minimal 6 karakter");
-        await signUpAdmin(email, password, fullName);
-        toast.success("Akun dibuat. Silakan login.");
-        setMode("login");
-      } else {
-        if (!email || !password) throw new Error("Email & password wajib diisi");
-        await loginAdmin(email, password);
-        toast.success("Berhasil masuk");
-        navigate({ to: "/admin/dashboard" });
-      }
+      if (!email || !password) throw new Error("Email & password wajib diisi");
+      await loginAdmin(email, password);
+      toast.success("Berhasil masuk");
+      navigate({ to: "/admin/dashboard" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Login gagal");
     } finally {
@@ -77,25 +67,12 @@ function LoginPage() {
 
       <div className="flex items-center justify-center p-6">
         <form onSubmit={submit} className="w-full max-w-sm">
-          <h1 className="text-xl font-semibold mb-1">{mode === "signup" ? "Daftar Admin" : "Masuk ke DASH"}</h1>
+          <h1 className="text-xl font-semibold mb-1">Masuk ke DASH</h1>
           <p className="text-sm text-muted-foreground mb-6">
-            {mode === "signup"
-              ? "Buat akun admin. User pertama otomatis menjadi admin."
-              : "Masuk dengan email & password admin Anda."}
+            Masuk dengan email &amp; password admin Anda. Akun baru hanya dapat dibuat oleh administrator.
           </p>
 
           <div className="space-y-3">
-            {mode === "signup" && (
-              <div>
-                <label className="text-sm font-medium">Nama Lengkap</label>
-                <input
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Nama lengkap"
-                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-            )}
             <div>
               <label className="text-sm font-medium">Email</label>
               <input
@@ -124,15 +101,7 @@ function LoginPage() {
             className="mt-5 w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-medium hover:opacity-90 disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-            {mode === "signup" ? "Daftar" : "Masuk"}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMode(mode === "signup" ? "login" : "signup")}
-            className="mt-4 w-full text-xs text-muted-foreground hover:text-foreground"
-          >
-            {mode === "signup" ? "Sudah punya akun? Masuk" : "Belum punya akun? Daftar admin"}
+            Masuk
           </button>
         </form>
       </div>
