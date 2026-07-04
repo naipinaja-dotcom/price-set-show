@@ -2,8 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
+import { parseCSV, toCSV, downloadCSV } from "@/lib/csv";
 import { toast } from "sonner";
-import { Plus, Pencil, Loader2, AlertCircle } from "lucide-react";
+import { Plus, Pencil, Loader2, AlertCircle, Upload, Download, X } from "lucide-react";
 
 export const Route = createFileRoute("/admin/riders")({ component: RidersPage });
 
@@ -22,6 +23,7 @@ function RidersPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Rider | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -59,10 +61,16 @@ function RidersPage() {
             </button>
           ))}
         </div>
-        <button onClick={() => { setEdit(null); setOpen(true); }}
-          className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm">
-          <Plus className="w-4 h-4" /> Tambah Rider
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setImportOpen(true)}
+            className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">
+            <Upload className="w-4 h-4" /> Import CSV
+          </button>
+          <button onClick={() => { setEdit(null); setOpen(true); }}
+            className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm">
+            <Plus className="w-4 h-4" /> Tambah Rider
+          </button>
+        </div>
       </div>
       <div className="rounded-lg border border-border overflow-hidden">
         <table className="w-full text-sm">
@@ -88,7 +96,154 @@ function RidersPage() {
         </table>
       </div>
       {open && <RiderModal initial={edit} clients={clients} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); load(); }} />}
+      {importOpen && <RiderImportModal clients={clients} onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />}
     </AdminLayout>
+  );
+}
+
+function RiderImportModal({ clients, onClose, onDone }:
+  { clients: Client[]; onClose: () => void; onDone: () => void }) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [rows, setRows] = useState<Record<string, string>[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<{ ok: number; warnings: string[] } | null>(null);
+
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const FIELD_ALIASES: Record<string, string[]> = {
+    employee_id: ["employeeid", "employee", "id", "nik", "idkaryawan", "kodekaryawan"],
+    full_name: ["fullname", "name", "nama", "namalengkap"],
+    phone: ["phone", "telepon", "telp", "hp", "nohp", "notelp"],
+    email: ["email"],
+    client: ["client", "klien"],
+    status: ["status"],
+    bank_name: ["bankname", "bank", "namabank"],
+    bank_account: ["bankaccount", "norekening", "rekening", "norek", "account"],
+    notes: ["notes", "catatan", "note"],
+  };
+
+  const onFile = async (file: File) => {
+    setResult(null);
+    const text = await file.text();
+    const parsed = parseCSV(text);
+    if (parsed.length < 2) return toast.error("CSV kosong atau cuma ada header");
+    const headers = parsed[0];
+    const colMap: Record<number, string> = {};
+    headers.forEach((h, i) => {
+      const nh = norm(h);
+      for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
+        if (nh === norm(field) || aliases.includes(nh)) { colMap[i] = field; break; }
+      }
+    });
+    const objs = parsed.slice(1)
+      .filter((r) => r.some((c) => c.trim()))
+      .map((r) => {
+        const o: Record<string, string> = {};
+        r.forEach((val, i) => { if (colMap[i]) o[colMap[i]] = val.trim(); });
+        return o;
+      });
+    setRows(objs);
+    setFileName(file.name);
+  };
+
+  const template = () => {
+    downloadCSV("template-rider.csv", toCSV([
+      ["employee_id", "full_name", "phone", "email", "client", "status", "bank_name", "bank_account", "notes"],
+      ["RD001", "Budi Santoso", "08123456789", "budi@mail.com", "Alfagift", "active", "BCA", "1234567890", ""],
+    ]));
+  };
+
+  const doImport = async () => {
+    if (rows.length === 0) return toast.error("Upload CSV dulu");
+    setImporting(true);
+    const warnings: string[] = [];
+    const clientByName = new Map(clients.map((c) => [c.name.trim().toLowerCase(), c.id]));
+    const validStatus = ["active", "inactive", "pending_review", "suspended"];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload: any[] = [];
+    rows.forEach((o, idx) => {
+      const line = idx + 2;
+      if (!o.employee_id || !o.full_name) { warnings.push(`Baris ${line}: employee_id / nama kosong — dilewat`); return; }
+      let client_id: string | null = null;
+      if (o.client) {
+        const hit = clientByName.get(o.client.trim().toLowerCase());
+        if (hit) client_id = hit;
+        else warnings.push(`Baris ${line}: client "${o.client}" tidak ditemukan — dikosongkan`);
+      }
+      let status = (o.status || "active").toLowerCase().replace(/\s+/g, "_");
+      if (!validStatus.includes(status)) { warnings.push(`Baris ${line}: status "${o.status}" tidak valid — pakai "active"`); status = "active"; }
+      payload.push({
+        employee_id: o.employee_id, full_name: o.full_name,
+        phone: o.phone || null, email: o.email || null, client_id, status,
+        bank_name: o.bank_name || null, bank_account: o.bank_account || null, notes: o.notes || null,
+      });
+    });
+    if (payload.length === 0) { setImporting(false); return toast.error("Tidak ada baris valid untuk diimpor"); }
+    let ok = 0;
+    for (let i = 0; i < payload.length; i += 200) {
+      const chunk = payload.slice(i, i + 200);
+      const { error } = await supabase.from("riders").upsert(chunk, { onConflict: "employee_id" });
+      if (error) { setImporting(false); return toast.error(`Gagal simpan: ${error.message}`); }
+      ok += chunk.length;
+    }
+    setImporting(false);
+    setResult({ ok, warnings });
+    toast.success(`${ok} rider tersimpan`);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4" onClick={onClose}>
+      <div className="bg-card rounded-lg w-full max-w-lg p-5 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-semibold">Import Rider dari CSV</h2>
+          <button onClick={onClose} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          Upload file CSV berisi daftar rider. Wajib ada kolom <b>employee_id</b> & <b>full_name</b>. Kolom lain opsional.
+          Employee ID yang sama akan di-update (bukan dobel).
+        </p>
+
+        <button onClick={template} className="inline-flex items-center gap-2 text-xs text-primary mb-3 hover:underline">
+          <Download className="w-3.5 h-3.5" /> Download template CSV
+        </button>
+
+        <label className="block border border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:bg-muted/40">
+          <input type="file" accept=".csv,text/csv" className="hidden"
+            onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+          <Upload className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+          <div className="text-sm">{fileName ? <b>{fileName}</b> : "Klik untuk pilih file CSV"}</div>
+          {rows.length > 0 && <div className="text-xs text-muted-foreground mt-1">{rows.length} baris terbaca</div>}
+        </label>
+
+        {result && (
+          <div className="mt-4 text-sm">
+            <div className="text-green-600 font-medium">✓ {result.ok} rider berhasil disimpan</div>
+            {result.warnings.length > 0 && (
+              <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 max-h-40 overflow-auto">
+                <div className="font-medium mb-1">{result.warnings.length} peringatan:</div>
+                {result.warnings.map((w, i) => <div key={i}>• {w}</div>)}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded border border-border">
+            {result ? "Tutup" : "Batal"}
+          </button>
+          {!result && (
+            <button onClick={doImport} disabled={importing || rows.length === 0}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50">
+              {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {importing ? "Mengimpor…" : `Import ${rows.length || ""} Rider`}
+            </button>
+          )}
+          {result && (
+            <button onClick={onDone} className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground">Selesai</button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
