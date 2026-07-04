@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { toast } from "sonner";
-import { Plus, Loader2, CheckCircle2, Send } from "lucide-react";
+import { Plus, Loader2, CheckCircle2, Send, X } from "lucide-react";
 
 export const Route = createFileRoute("/admin/payroll")({ component: PayrollPage });
 
@@ -21,6 +21,7 @@ function PayrollPage() {
   const [details, setDetails] = useState<Detail[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [newRunOpen, setNewRunOpen] = useState(false);
 
   const loadRuns = async () => {
     setLoading(true);
@@ -38,17 +39,14 @@ function PayrollPage() {
 
   useEffect(() => { if (activeRun) loadDetails(activeRun.id); }, [activeRun]);
 
-  const createRun = async () => {
-    const name = prompt("Nama payroll run (mis. Payroll Jan 2026)"); if (!name) return;
-    const period_type = (prompt("Period type (weekly/biweekly/monthly)", "monthly") ?? "monthly").toLowerCase();
-    const period_start = prompt("Tanggal mulai (YYYY-MM-DD)"); if (!period_start) return;
-    const period_end = prompt("Tanggal akhir (YYYY-MM-DD)"); if (!period_end) return;
+  const createRun = async (input: { name: string; period_type: string; period_start: string; period_end: string }) => {
     setCreating(true);
     const { data, error } = await supabase.from("payroll_runs")
-      .insert({ name, period_type: period_type as any, period_start, period_end }).select().single();
+      .insert({ name: input.name, period_type: input.period_type as any, period_start: input.period_start, period_end: input.period_end })
+      .select().single();
     setCreating(false);
-    if (error) return toast.error(error.message);
-    toast.success("Run dibuat"); setRuns([data, ...runs]); setActiveRun(data);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Run dibuat"); setRuns([data, ...runs]); setActiveRun(data); setNewRunOpen(false);
   };
 
   const generate = async () => {
@@ -169,7 +167,7 @@ function PayrollPage() {
     <AdminLayout title="Payroll">
       <div className="flex gap-6">
         <aside className="w-64 shrink-0">
-          <button onClick={createRun} disabled={creating}
+          <button onClick={() => setNewRunOpen(true)} disabled={creating}
             className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm mb-3 disabled:opacity-50">
             <Plus className="w-4 h-4" /> Buat Run Baru
           </button>
@@ -229,6 +227,74 @@ function PayrollPage() {
           )}
         </section>
       </div>
+      {newRunOpen && <NewRunModal creating={creating} onClose={() => setNewRunOpen(false)} onCreate={createRun} />}
     </AdminLayout>
+  );
+}
+
+function NewRunModal({ creating, onClose, onCreate }: {
+  creating: boolean;
+  onClose: () => void;
+  onCreate: (input: { name: string; period_type: string; period_start: string; period_end: string }) => void;
+}) {
+  const today = new Date();
+  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+  const lastOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
+  const [name, setName] = useState(`Payroll ${today.toLocaleString("id-ID", { month: "long", year: "numeric" })}`);
+  const [periodType, setPeriodType] = useState("monthly");
+  const [start, setStart] = useState(firstOfMonth);
+  const [end, setEnd] = useState(lastOfMonth);
+
+  const submit = () => {
+    if (!name.trim()) return toast.error("Nama run wajib diisi");
+    if (!start || !end) return toast.error("Tanggal periode wajib diisi");
+    if (start > end) return toast.error("Tanggal mulai tidak boleh setelah tanggal akhir");
+    onCreate({ name: name.trim(), period_type: periodType, period_start: start, period_end: end });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4" onClick={onClose}>
+      <div className="bg-card rounded-lg w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Payroll Run Baru</h2>
+          <button onClick={onClose} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="space-y-3 text-sm">
+          <div>
+            <label className="font-medium">Nama Run</label>
+            <input value={name} onChange={(e) => setName(e.target.value)}
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
+          </div>
+          <div>
+            <label className="font-medium">Tipe Periode</label>
+            <select value={periodType} onChange={(e) => setPeriodType(e.target.value)}
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
+              <option value="weekly">Mingguan</option>
+              <option value="biweekly">Dua Mingguan</option>
+              <option value="monthly">Bulanan</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="font-medium">Dari Tanggal</label>
+              <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
+            </div>
+            <div>
+              <label className="font-medium">Sampai Tanggal</label>
+              <input type="date" value={end} onChange={(e) => setEnd(e.target.value)}
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded border border-border">Batal</button>
+          <button onClick={submit} disabled={creating}
+            className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50">
+            {creating ? "Membuat…" : "Buat Run"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
