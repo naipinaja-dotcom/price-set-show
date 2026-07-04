@@ -89,6 +89,7 @@ function PricingListPage() {
               <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="px-4 py-2.5 font-medium">Nama Skema</th>
                 <th className="px-4 py-2.5 font-medium">Client</th>
+                <th className="px-4 py-2.5 font-medium">Untuk</th>
                 <th className="px-4 py-2.5 font-medium">Tipe</th>
                 <th className="px-4 py-2.5 font-medium">Berlaku</th>
                 <th className="px-4 py-2.5 font-medium w-24" />
@@ -101,6 +102,18 @@ function PricingListPage() {
                   <tr key={s.id} className="border-t border-border hover:bg-muted/30">
                     <td className="px-4 py-3 font-medium">{s.name}</td>
                     <td className="px-4 py-3 text-muted-foreground">{s.client_name ?? "Semua Client"}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={
+                          "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium " +
+                          (s.scheme_for === "client"
+                            ? "bg-violet-500/15 text-violet-600 dark:text-violet-300"
+                            : "bg-sky-500/15 text-sky-600 dark:text-sky-300")
+                        }
+                      >
+                        {s.scheme_for === "client" ? "Client" : "Rider"}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center rounded-md bg-primary-soft text-primary-soft-foreground px-2 py-0.5 text-[11px] font-medium">
                         {tm?.name ?? s.calc_type}

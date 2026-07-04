@@ -5,6 +5,9 @@ import {
   PRICING_TYPES,
   type PricingCalcType,
   type PricingScheme,
+  type PricingEnvelope,
+  type SchemeFor,
+  type StepTier,
 } from "@/lib/pricing-types";
 import {
   getPricingScheme,
@@ -22,270 +25,246 @@ import {
   Route as RouteIcon,
   Home,
   Package,
+  CalendarDays,
   Plus,
   Save,
   Trash2,
-  Lightbulb,
 } from "lucide-react";
 import { toast } from "sonner";
 
-const ICONS = { MapPin, Truck, Ruler, Route: RouteIcon, Home, Package } as const;
+const ICONS = { MapPin, Truck, Ruler, Route: RouteIcon, Home, Package, CalendarDays } as const;
 
-// -------------------- Param state shapes --------------------
-interface AreaRow {
-  districts: string;
-  rate: string;
+// -------------------- Bentuk state form (semua string, di-parse saat simpan) --------------------
+interface StepTierState {
+  base_fee: string;
+  base_until: string;
+  tiers: { from: string; to: string; step: string; add_per_step: string }[];
 }
-interface ServiceRow {
-  name: string;
-  rate: string;
+interface FlatUnitState {
+  unit: "awb" | "unique_address";
+  rate_by: "flat" | "column";
+  match_column: string;
+  flat_rate: string;
+  default_rate: string;
+  rates: { key: string; rate: string }[];
 }
-interface DistanceTier {
-  type: "flat" | "tier";
-  from: string;
-  to: string;
-  base: string;
-  step: string;
-  rate_per_step: string;
+interface TierState {
+  distanceOn: boolean;
+  distance: StepTierState;
+  weightOn: boolean;
+  weight: StepTierState;
 }
-interface WeightTier extends DistanceTier {}
-interface KmWeightRow {
-  from: string;
-  to: string;
-  surcharge: string;
+interface ThresholdState {
+  group_by: string;
+  default_threshold: string;
+  default_rate: string;
+  rules: { key: string; threshold: string; rate: string }[];
 }
-interface AddrRow {
-  district: string;
-  rate: string;
-}
-interface BoxRow {
-  store: string;
-  threshold: string;
-  rate: string;
+interface AttendanceState {
+  daily_base_fee: string;
+  components: { label: string; amount: string; condition: "always" | "conditional" }[];
 }
 
-interface ParamsState {
-  area: { rows: AreaRow[]; default_rate: string };
-  service: { rows: ServiceRow[] };
-  tier: {
-    distance: DistanceTier[];
-    weight: WeightTier[];
-    stop_flat: string;
-    stop_starts_from: string;
-  };
-  km: {
-    base_price: string;
-    threshold_km: string;
-    rate_over: string;
-    weight: KmWeightRow[];
-  };
-  addr: { default_rate: string; rows: AddrRow[] };
-  box: { rows: BoxRow[] };
+const emptyStepTier = (): StepTierState => ({ base_fee: "", base_until: "", tiers: [] });
+
+interface FormState {
+  flatUnit: FlatUnitState;
+  tier: TierState; // dipakai untuk "tier" dan "tier_daily"
+  threshold: ThresholdState;
+  attendance: AttendanceState;
+  // modifiers
+  addKgOn: boolean;
+  addKg: StepTierState;
+  multiDropOn: boolean;
+  multiDropFee: string;
+  billingOn: boolean;
+  billing: { min_charge: string; admin_fee_flat: string; ppn_percent: string };
 }
 
-function emptyParams(): ParamsState {
+function emptyForm(): FormState {
   return {
-    area: {
+    flatUnit: {
+      unit: "awb",
+      rate_by: "flat",
+      match_column: "Area",
+      flat_rate: "10000",
       default_rate: "10000",
-      rows: [
-        { districts: "Jakarta Pusat, Depok", rate: "10000" },
-        { districts: "Bekasi, Tangerang", rate: "12000" },
-      ],
-    },
-    service: {
-      rows: [
-        { name: "Delivery", rate: "25000" },
-        { name: "Return", rate: "10000" },
-      ],
+      rates: [{ key: "Jakarta Pusat", rate: "10000" }],
     },
     tier: {
-      distance: [
-        { type: "flat", from: "0", to: "5", base: "13000", step: "0", rate_per_step: "0" },
-        { type: "tier", from: "5", to: "15", base: "16000", step: "1", rate_per_step: "2000" },
-      ],
-      weight: [{ type: "flat", from: "0", to: "20", base: "0", step: "0", rate_per_step: "0" }],
-      stop_flat: "3500",
-      stop_starts_from: "3",
+      distanceOn: true,
+      distance: {
+        base_fee: "13000",
+        base_until: "5",
+        tiers: [{ from: "5", to: "15", step: "1", add_per_step: "2000" }],
+      },
+      weightOn: false,
+      weight: emptyStepTier(),
     },
-    km: {
-      base_price: "20000",
-      threshold_km: "10",
-      rate_over: "1500",
-      weight: [
-        { from: "0", to: "20", surcharge: "0" },
-        { from: "20", to: "999", surcharge: "2000" },
-      ],
+    threshold: {
+      group_by: "Area",
+      default_threshold: "10",
+      default_rate: "40000",
+      rules: [{ key: "Store A", threshold: "4", rate: "12000" }],
     },
-    addr: {
-      default_rate: "10000",
-      rows: [{ district: "Jakarta Pusat", rate: "12000" }],
+    attendance: {
+      daily_base_fee: "100000",
+      components: [{ label: "Uang Makan", amount: "20000", condition: "always" }],
     },
-    box: {
-      rows: [
-        { store: "Store A", threshold: "4", rate: "12000" },
-        { store: "Store B", threshold: "4", rate: "20000" },
-      ],
-    },
+    addKgOn: false,
+    addKg: emptyStepTier(),
+    multiDropOn: false,
+    multiDropFee: "3000",
+    billingOn: false,
+    billing: { min_charge: "", admin_fee_flat: "", ppn_percent: "11" },
   };
 }
 
-// -------------------- Config builders (to JSON per spec) --------------------
-function buildConfig(type: PricingCalcType, p: ParamsState): Record<string, unknown> {
+// -------------------- build state -> envelope (JSON tersimpan) --------------------
+function buildStepTier(s: StepTierState): StepTier {
+  return {
+    base_fee: parseRupiah(s.base_fee),
+    base_until: Number(s.base_until) || 0,
+    tiers: s.tiers.map((t) => ({
+      from: Number(t.from) || 0,
+      to: t.to.trim() === "" ? null : Number(t.to),
+      step: Number(t.step) || 1,
+      add_per_step: parseRupiah(t.add_per_step),
+    })),
+  };
+}
+
+function buildConfig(type: PricingCalcType, f: FormState): Record<string, unknown> {
   switch (type) {
-    case "flat_per_awb_area":
+    case "flat_unit":
       return {
-        default_rate: parseRupiah(p.area.default_rate),
-        area_rates: p.area.rows
-          .filter((r) => r.districts.trim())
-          .map((r) => ({
-            districts: r.districts
-              .split(",")
-              .map((d) => d.trim())
-              .filter(Boolean),
-            rate: parseRupiah(r.rate),
-          })),
+        unit: f.flatUnit.unit,
+        rate_by: f.flatUnit.rate_by,
+        match_column: f.flatUnit.match_column,
+        flat_rate: parseRupiah(f.flatUnit.flat_rate),
+        default_rate: parseRupiah(f.flatUnit.default_rate),
+        rates: f.flatUnit.rates
+          .filter((r) => r.key.trim())
+          .map((r) => ({ key: r.key.trim(), rate: parseRupiah(r.rate) })),
       };
-    case "flat_per_awb_service_type":
+    case "tier":
+    case "tier_daily":
       return {
-        service_rates: Object.fromEntries(
-          p.service.rows
-            .filter((r) => r.name.trim())
-            .map((r) => [r.name.trim().toLowerCase(), parseRupiah(r.rate)]),
-        ),
+        distance: f.tier.distanceOn ? buildStepTier(f.tier.distance) : null,
+        weight: f.tier.weightOn ? buildStepTier(f.tier.weight) : null,
+        combine: "sum",
       };
-    case "tier_distance_weight":
+    case "threshold_multiple":
       return {
-        distance_tiers: p.tier.distance.map((t) => ({
-          type: t.type,
-          from: Number(t.from) || 0,
-          to: Number(t.to) || 0,
-          base: parseRupiah(t.base),
-          step: Number(t.step) || 0,
-          rate_per_step: parseRupiah(t.rate_per_step),
-        })),
-        weight_tiers: p.tier.weight.map((t) => ({
-          type: t.type,
-          from: Number(t.from) || 0,
-          to: Number(t.to) || 0,
-          base: parseRupiah(t.base),
-          step: Number(t.step) || 0,
-          rate_per_step: parseRupiah(t.rate_per_step),
-        })),
-        stop_fee: {
-          flat_per_stop: parseRupiah(p.tier.stop_flat),
-          starts_from_stop: Number(p.tier.stop_starts_from) || 0,
-        },
+        qty_source: "weight_kg",
+        group_by: f.threshold.group_by,
+        default: { threshold: Number(f.threshold.default_threshold) || 0, rate: parseRupiah(f.threshold.default_rate) },
+        rules: f.threshold.rules
+          .filter((r) => r.key.trim())
+          .map((r) => ({ key: r.key.trim(), threshold: Number(r.threshold) || 0, rate: parseRupiah(r.rate) })),
       };
-    case "km_accumulation_weight":
+    case "attendance":
       return {
-        km_base_price: parseRupiah(p.km.base_price),
-        km_threshold: Number(p.km.threshold_km) || 0,
-        km_rate_over_threshold: parseRupiah(p.km.rate_over),
-        weight_tiers: p.km.weight.map((r) => ({
-          from: Number(r.from) || 0,
-          to: Number(r.to) || 0,
-          surcharge: parseRupiah(r.surcharge),
-        })),
-        aggregation: "daily",
-      };
-    case "unique_address":
-      return {
-        default_rate_per_address: parseRupiah(p.addr.default_rate),
-        district_rates: p.addr.rows
-          .filter((r) => r.district.trim())
-          .map((r) => ({ districts: [r.district.trim()], rate: parseRupiah(r.rate) })),
-      };
-    case "store_box_threshold":
-      return {
-        store_rules: p.box.rows
-          .filter((r) => r.store.trim())
-          .map((r) => ({
-            store: r.store.trim(),
-            threshold_box: Number(r.threshold) || 0,
-            rate_per_threshold: parseRupiah(r.rate),
-          })),
-        rounding: "ceil",
+        daily_base_fee: parseRupiah(f.attendance.daily_base_fee),
+        components: f.attendance.components
+          .filter((c) => c.label.trim())
+          .map((c) => ({ label: c.label.trim(), amount: parseRupiah(c.amount), condition: c.condition })),
       };
   }
 }
 
-// Reverse: load existing config back into form state (best-effort for editing demo schemes)
-function loadParams(scheme: PricingScheme | undefined, base: ParamsState): ParamsState {
-  if (!scheme) return base;
-  const c = scheme.config as any;
-  const p = { ...base };
-  switch (scheme.calc_type) {
-    case "flat_per_awb_area":
-      p.area = {
-        default_rate: String(c.default_rate ?? ""),
-        rows: (c.area_rates ?? []).map((r: any) => ({
-          districts: (r.districts ?? []).join(", "),
-          rate: String(r.rate ?? ""),
-        })),
-      };
-      break;
-    case "flat_per_awb_service_type":
-      p.service = {
-        rows: Object.entries(c.service_rates ?? {}).map(([name, rate]) => ({
-          name,
-          rate: String(rate),
-        })),
-      };
-      break;
-    case "tier_distance_weight":
-      p.tier = {
-        distance: (c.distance_tiers ?? []).map((t: any) => ({
-          type: t.type ?? "flat",
-          from: String(t.from ?? ""),
-          to: String(t.to ?? ""),
-          base: String(t.base ?? ""),
-          step: String(t.step ?? ""),
-          rate_per_step: String(t.rate_per_step ?? ""),
-        })),
-        weight: (c.weight_tiers ?? []).map((t: any) => ({
-          type: t.type ?? "flat",
-          from: String(t.from ?? ""),
-          to: String(t.to ?? ""),
-          base: String(t.base ?? ""),
-          step: String(t.step ?? ""),
-          rate_per_step: String(t.rate_per_step ?? ""),
-        })),
-        stop_flat: String(c.stop_fee?.flat_per_stop ?? ""),
-        stop_starts_from: String(c.stop_fee?.starts_from_stop ?? ""),
-      };
-      break;
-    case "km_accumulation_weight":
-      p.km = {
-        base_price: String(c.km_base_price ?? ""),
-        threshold_km: String(c.km_threshold ?? ""),
-        rate_over: String(c.km_rate_over_threshold ?? ""),
-        weight: (c.weight_tiers ?? []).map((r: any) => ({
-          from: String(r.from ?? ""),
-          to: String(r.to ?? ""),
-          surcharge: String(r.surcharge ?? ""),
-        })),
-      };
-      break;
-    case "unique_address":
-      p.addr = {
-        default_rate: String(c.default_rate_per_address ?? ""),
-        rows: (c.district_rates ?? []).map((r: any) => ({
-          district: (r.districts ?? [])[0] ?? "",
-          rate: String(r.rate ?? ""),
-        })),
-      };
-      break;
-    case "store_box_threshold":
-      p.box = {
-        rows: (c.store_rules ?? []).map((r: any) => ({
-          store: r.store ?? "",
-          threshold: String(r.threshold_box ?? ""),
-          rate: String(r.rate_per_threshold ?? ""),
-        })),
-      };
-      break;
+function buildEnvelope(type: PricingCalcType, schemeFor: SchemeFor, f: FormState): PricingEnvelope {
+  return {
+    version: 1,
+    type,
+    config: buildConfig(type, f),
+    add_kg: type !== "attendance" && f.addKgOn ? { enabled: true, tier: buildStepTier(f.addKg) } : null,
+    multi_drop: f.multiDropOn ? { fee_per_extra_shipment: parseRupiah(f.multiDropFee) } : null,
+    billing_addons:
+      schemeFor === "client" && f.billingOn
+        ? {
+            min_charge: parseRupiah(f.billing.min_charge),
+            admin_fee_flat: parseRupiah(f.billing.admin_fee_flat),
+            ppn_percent: Number(f.billing.ppn_percent) || 0,
+          }
+        : null,
+  };
+}
+
+// -------------------- load envelope -> state (best-effort saat edit) --------------------
+function stepTierToState(t: StepTier | null | undefined): StepTierState {
+  if (!t) return emptyStepTier();
+  return {
+    base_fee: String(t.base_fee ?? ""),
+    base_until: String(t.base_until ?? ""),
+    tiers: (t.tiers ?? []).map((x) => ({
+      from: String(x.from ?? ""),
+      to: x.to === null || x.to === undefined ? "" : String(x.to),
+      step: String(x.step ?? ""),
+      add_per_step: String(x.add_per_step ?? ""),
+    })),
+  };
+}
+
+function loadForm(scheme: PricingScheme | undefined): { form: FormState; calcType: PricingCalcType; schemeFor: SchemeFor } {
+  const form = emptyForm();
+  const validType = (t: unknown): t is PricingCalcType => PRICING_TYPES.some((o) => o.key === t);
+
+  if (!scheme || !scheme.params || scheme.params.version !== 1) {
+    return { form, calcType: validType(scheme?.calc_type) ? (scheme!.calc_type as PricingCalcType) : "flat_unit", schemeFor: scheme?.scheme_for ?? "rider" };
   }
-  return p;
+
+  const env = scheme.params;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const c = env.config as any;
+  const type: PricingCalcType = validType(env.type) ? env.type : "flat_unit";
+
+  if (type === "flat_unit") {
+    form.flatUnit = {
+      unit: c.unit ?? "awb",
+      rate_by: c.rate_by ?? "flat",
+      match_column: c.match_column ?? "Area",
+      flat_rate: String(c.flat_rate ?? ""),
+      default_rate: String(c.default_rate ?? ""),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rates: (c.rates ?? []).map((r: any) => ({ key: r.key ?? "", rate: String(r.rate ?? "") })),
+    };
+  } else if (type === "tier" || type === "tier_daily") {
+    form.tier = {
+      distanceOn: !!c.distance,
+      distance: stepTierToState(c.distance),
+      weightOn: !!c.weight,
+      weight: stepTierToState(c.weight),
+    };
+  } else if (type === "threshold_multiple") {
+    form.threshold = {
+      group_by: c.group_by ?? "Area",
+      default_threshold: String(c.default?.threshold ?? ""),
+      default_rate: String(c.default?.rate ?? ""),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rules: (c.rules ?? []).map((r: any) => ({ key: r.key ?? "", threshold: String(r.threshold ?? ""), rate: String(r.rate ?? "") })),
+    };
+  } else if (type === "attendance") {
+    form.attendance = {
+      daily_base_fee: String(c.daily_base_fee ?? ""),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      components: (c.components ?? []).map((x: any) => ({ label: x.label ?? "", amount: String(x.amount ?? ""), condition: x.condition === "conditional" ? "conditional" : "always" })),
+    };
+  }
+
+  // modifiers
+  if (env.add_kg) { form.addKgOn = true; form.addKg = stepTierToState(env.add_kg.tier); }
+  if (env.multi_drop) { form.multiDropOn = true; form.multiDropFee = String(env.multi_drop.fee_per_extra_shipment ?? ""); }
+  if (env.billing_addons) {
+    form.billingOn = true;
+    form.billing = {
+      min_charge: String(env.billing_addons.min_charge ?? ""),
+      admin_fee_flat: String(env.billing_addons.admin_fee_flat ?? ""),
+      ppn_percent: String(env.billing_addons.ppn_percent ?? ""),
+    };
+  }
+
+  return { form, calcType: type, schemeFor: scheme.scheme_for ?? "rider" };
 }
 
 // -------------------- Shared inputs --------------------
@@ -301,15 +280,7 @@ function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   );
 }
 
-function RupiahInput({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-}) {
+function RupiahInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   const display = value ? Number(parseRupiah(value)).toLocaleString("id-ID") : "";
   return (
     <TextInput
@@ -344,23 +315,78 @@ function TableShell({ children }: { children: React.ReactNode }) {
     </table>
   );
 }
-
 function Th({ children, className = "" }: { children?: React.ReactNode; className?: string }) {
   return <th className={"font-medium pb-2 pr-2 " + className}>{children}</th>;
 }
 function Td({ children, className = "" }: { children?: React.ReactNode; className?: string }) {
   return <td className={"py-1 pr-2 align-middle " + className}>{children}</td>;
 }
-
 function RowDeleteBtn({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-muted"
-    >
+    <button type="button" onClick={onClick} className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-muted">
       <Trash2 className="w-3.5 h-3.5" />
     </button>
+  );
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label className="text-xs text-muted-foreground">{children}</label>;
+}
+
+// StepTier editor (dipakai tier jarak/berat & Add-KG)
+function StepTierEditor({ value, onChange, unit }: { value: StepTierState; onChange: (v: StepTierState) => void; unit: "km" | "kg" }) {
+  const setTier = (i: number, patch: Partial<StepTierState["tiers"][number]>) =>
+    onChange({ ...value, tiers: value.tiers.map((t, idx) => (idx === i ? { ...t, ...patch } : t)) });
+  const addTier = () => onChange({ ...value, tiers: [...value.tiers, { from: value.base_until || "0", to: "", step: "1", add_per_step: "" }] });
+  const delTier = (i: number) => onChange({ ...value, tiers: value.tiers.filter((_, idx) => idx !== i) });
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div className="flex flex-col gap-1.5">
+          <FieldLabel>Base Fee (Rp)</FieldLabel>
+          <RupiahInput value={value.base_fee} onChange={(v) => onChange({ ...value, base_fee: v })} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <FieldLabel>Base sampai ({unit})</FieldLabel>
+          <TextInput value={value.base_until} inputMode="decimal" onChange={(e) => onChange({ ...value, base_until: e.target.value })} />
+        </div>
+      </div>
+      <TableShell>
+        <>
+          <Th>Dari ({unit})</Th>
+          <Th>Sampai ({unit})</Th>
+          <Th>Step</Th>
+          <Th>+Rp / step</Th>
+          <Th className="w-10" />
+        </>
+        {value.tiers.map((t, i) => (
+          <tr key={i} className="border-t border-border/60">
+            <Td><TextInput value={t.from} inputMode="decimal" onChange={(e) => setTier(i, { from: e.target.value })} /></Td>
+            <Td><TextInput value={t.to} placeholder="∞" inputMode="decimal" onChange={(e) => setTier(i, { to: e.target.value })} /></Td>
+            <Td><TextInput value={t.step} inputMode="decimal" onChange={(e) => setTier(i, { step: e.target.value })} /></Td>
+            <Td><RupiahInput value={t.add_per_step} onChange={(v) => setTier(i, { add_per_step: v })} /></Td>
+            <Td className="text-center"><RowDeleteBtn onClick={() => delTier(i)} /></Td>
+          </tr>
+        ))}
+      </TableShell>
+      <AddRowBtn onClick={addTier}>Tambah Jenjang</AddRowBtn>
+    </div>
+  );
+}
+
+function ToggleBlock({ label, hint, on, onToggle, children }: { label: string; hint?: string; on: boolean; onToggle: (on: boolean) => void; children?: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-border bg-card p-3.5">
+      <label className="flex items-start gap-2.5 cursor-pointer">
+        <input type="checkbox" checked={on} onChange={(e) => onToggle(e.target.checked)} className="mt-0.5" />
+        <span>
+          <span className="text-sm font-medium">{label}</span>
+          {hint && <span className="block text-[11px] text-muted-foreground leading-snug">{hint}</span>}
+        </span>
+      </label>
+      {on && <div className="mt-3">{children}</div>}
+    </div>
   );
 }
 
@@ -373,14 +399,16 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
     () => (mode === "edit" && schemeId ? getPricingScheme(schemeId) : undefined),
     [mode, schemeId],
   );
+  const loaded = useMemo(() => loadForm(existing), [existing]);
 
   const [name, setName] = useState(existing?.name ?? "");
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
+  const [schemeFor, setSchemeFor] = useState<SchemeFor>(loaded.schemeFor);
   const [effFrom, setEffFrom] = useState(existing?.effective_from ?? new Date().toISOString().slice(0, 10));
   const [effTo, setEffTo] = useState(existing?.effective_to ?? "");
-  const [calcType, setCalcType] = useState<PricingCalcType>(existing?.calc_type ?? "flat_per_awb_area");
-  const [params, setParams] = useState<ParamsState>(() => loadParams(existing, emptyParams()));
-  const [tierSubtab, setTierSubtab] = useState<"distance" | "weight" | "stop">("distance");
+  const [calcType, setCalcType] = useState<PricingCalcType>(loaded.calcType);
+  const [f, setF] = useState<FormState>(loaded.form);
+  const [tierSubtab, setTierSubtab] = useState<"distance" | "weight">("distance");
 
   useEffect(() => {
     listClients().then(setClients);
@@ -388,6 +416,8 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
 
   const activeType = PRICING_TYPES.find((t) => t.key === calcType)!;
   const ActiveIcon = ICONS[activeType.icon as keyof typeof ICONS] ?? MapPin;
+
+  const patch = (p: Partial<FormState>) => setF((prev) => ({ ...prev, ...p }));
 
   const handleSave = () => {
     if (!name.trim()) return toast.error("Nama skema wajib diisi");
@@ -398,10 +428,11 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
       name: name.trim(),
       client_id: clientId || null,
       client_name: client?.name ?? null,
+      scheme_for: schemeFor,
       calc_type: calcType,
       effective_from: effFrom,
       effective_to: effTo || null,
-      config: buildConfig(calcType, params),
+      params: buildEnvelope(calcType, schemeFor, f),
       created_at: existing?.created_at ?? new Date().toISOString(),
     };
     savePricingScheme(scheme);
@@ -409,120 +440,33 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
     navigate({ to: "/admin/pricing" });
   };
 
-  // ------- Param editors -------
-  const updateArea = (i: number, patch: Partial<AreaRow>) =>
-    setParams((p) => ({
-      ...p,
-      area: { ...p.area, rows: p.area.rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) },
-    }));
-  const addArea = () =>
-    setParams((p) => ({ ...p, area: { ...p.area, rows: [...p.area.rows, { districts: "", rate: "" }] } }));
-  const delArea = (i: number) =>
-    setParams((p) => ({ ...p, area: { ...p.area, rows: p.area.rows.filter((_, idx) => idx !== i) } }));
-
-  const updateService = (i: number, patch: Partial<ServiceRow>) =>
-    setParams((p) => ({
-      ...p,
-      service: { rows: p.service.rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) },
-    }));
-  const addService = () =>
-    setParams((p) => ({ ...p, service: { rows: [...p.service.rows, { name: "", rate: "" }] } }));
-  const delService = (i: number) =>
-    setParams((p) => ({ ...p, service: { rows: p.service.rows.filter((_, idx) => idx !== i) } }));
-
-  const updateTier = (which: "distance" | "weight", i: number, patch: Partial<DistanceTier>) =>
-    setParams((p) => ({
-      ...p,
-      tier: { ...p.tier, [which]: p.tier[which].map((r, idx) => (idx === i ? { ...r, ...patch } : r)) },
-    }));
-  const addTier = (which: "distance" | "weight", type: "flat" | "tier") =>
-    setParams((p) => ({
-      ...p,
-      tier: {
-        ...p.tier,
-        [which]: [...p.tier[which], { type, from: "", to: "", base: "", step: "", rate_per_step: "" }],
-      },
-    }));
-  const delTier = (which: "distance" | "weight", i: number) =>
-    setParams((p) => ({ ...p, tier: { ...p.tier, [which]: p.tier[which].filter((_, idx) => idx !== i) } }));
-
-  const updateKmWeight = (i: number, patch: Partial<KmWeightRow>) =>
-    setParams((p) => ({
-      ...p,
-      km: { ...p.km, weight: p.km.weight.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) },
-    }));
-  const addKmWeight = () =>
-    setParams((p) => ({ ...p, km: { ...p.km, weight: [...p.km.weight, { from: "", to: "", surcharge: "" }] } }));
-  const delKmWeight = (i: number) =>
-    setParams((p) => ({ ...p, km: { ...p.km, weight: p.km.weight.filter((_, idx) => idx !== i) } }));
-
-  const updateAddr = (i: number, patch: Partial<AddrRow>) =>
-    setParams((p) => ({
-      ...p,
-      addr: { ...p.addr, rows: p.addr.rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) },
-    }));
-  const addAddr = () =>
-    setParams((p) => ({ ...p, addr: { ...p.addr, rows: [...p.addr.rows, { district: "", rate: "" }] } }));
-  const delAddr = (i: number) =>
-    setParams((p) => ({ ...p, addr: { ...p.addr, rows: p.addr.rows.filter((_, idx) => idx !== i) } }));
-
-  const updateBox = (i: number, patch: Partial<BoxRow>) =>
-    setParams((p) => ({
-      ...p,
-      box: { rows: p.box.rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) },
-    }));
-  const addBox = () =>
-    setParams((p) => ({ ...p, box: { rows: [...p.box.rows, { store: "", threshold: "", rate: "" }] } }));
-  const delBox = (i: number) =>
-    setParams((p) => ({ ...p, box: { rows: p.box.rows.filter((_, idx) => idx !== i) } }));
-
-  // Preview estimasi (simple heuristic)
+  // preview estimasi sederhana
   const preview = useMemo(() => {
     switch (calcType) {
-      case "flat_per_awb_area": {
-        const first = parseRupiah(params.area.rows[0]?.rate ?? "0");
-        return { label: "Estimasi pendapatan per paket", hint: "misal 10 paket area pertama", value: first * 10 };
+      case "flat_unit": {
+        const r = f.flatUnit.rate_by === "flat" ? parseRupiah(f.flatUnit.flat_rate) : parseRupiah(f.flatUnit.default_rate);
+        return { label: "Estimasi per 10 unit", hint: "tarif × 10", value: r * 10 };
       }
-      case "flat_per_awb_service_type": {
-        const sum = params.service.rows.reduce((acc, r) => acc + parseRupiah(r.rate), 0);
-        return { label: "Estimasi per hari", hint: "1× setiap tipe layanan", value: sum };
+      case "tier":
+        return { label: "Estimasi per kiriman", hint: "base fee jarak", value: parseRupiah(f.tier.distance.base_fee) };
+      case "tier_daily":
+        return { label: "Estimasi per hari", hint: "base fee jarak", value: parseRupiah(f.tier.distance.base_fee) };
+      case "threshold_multiple": {
+        const r = f.threshold.rules[0];
+        const th = Number(r?.threshold) || 1;
+        return { label: "Estimasi 1 store (5 kg)", hint: r?.key ?? "store pertama", value: Math.ceil(5 / th) * parseRupiah(r?.rate ?? "0") };
       }
-      case "tier_distance_weight": {
-        const d = params.tier.distance[0];
-        const w = params.tier.weight[0];
-        return {
-          label: "Estimasi per pengiriman",
-          hint: "tier pertama distance + weight",
-          value: parseRupiah(d?.base ?? "0") + parseRupiah(w?.base ?? "0"),
-        };
-      }
-      case "km_accumulation_weight": {
-        const base = parseRupiah(params.km.base_price);
-        const over = Math.max(0, 15 - (Number(params.km.threshold_km) || 0)) * parseRupiah(params.km.rate_over);
-        return { label: "Estimasi per hari", hint: "misal total 15 km", value: base + over };
-      }
-      case "unique_address": {
-        return {
-          label: "Estimasi per hari",
-          hint: "10 alamat unik default",
-          value: parseRupiah(params.addr.default_rate) * 10,
-        };
-      }
-      case "store_box_threshold": {
-        const r = params.box.rows[0];
-        return {
-          label: "Estimasi 1 toko (5 box)",
-          hint: r?.store ?? "store pertama",
-          value: Math.ceil(5 / (Number(r?.threshold) || 1)) * parseRupiah(r?.rate ?? "0"),
-        };
+      case "attendance": {
+        const comp = f.attendance.components.filter((c) => c.condition === "always").reduce((a, c) => a + parseRupiah(c.amount), 0);
+        return { label: "Estimasi per hari", hint: "base + komponen 'selalu'", value: parseRupiah(f.attendance.daily_base_fee) + comp };
       }
     }
-  }, [calcType, params]);
+  }, [calcType, f]);
 
   return (
     <AdminLayout
       title={mode === "create" ? "Tambah Skema Pricing" : "Edit Skema Pricing"}
-      subtitle="Atur cara kalkulasi pendapatan rider untuk client tertentu."
+      subtitle="Atur cara kalkulasi harga — sisi rider (cost) atau client (revenue)."
     >
       <button
         type="button"
@@ -536,15 +480,11 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
       <div className="rounded-lg border border-border bg-card p-5 mb-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Nama Skema</label>
-            <TextInput
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="cth: JNE Jabodetabek 2026"
-            />
+            <FieldLabel>Nama Skema</FieldLabel>
+            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="cth: Bro Shoes - Bayar Rider" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Client</label>
+            <FieldLabel>Client</FieldLabel>
             <select
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
@@ -552,32 +492,47 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
             >
               <option value="">Semua Client</option>
               {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
+                <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Berlaku Dari</label>
+            <FieldLabel>Berlaku Dari</FieldLabel>
             <TextInput type="date" value={effFrom} onChange={(e) => setEffFrom(e.target.value)} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              Berlaku Sampai <span className="font-normal">(opsional)</span>
-            </label>
+            <FieldLabel>Berlaku Sampai <span className="font-normal">(opsional)</span></FieldLabel>
             <TextInput type="date" value={effTo} onChange={(e) => setEffTo(e.target.value)} />
+          </div>
+        </div>
+
+        {/* Scheme for */}
+        <div className="mt-3">
+          <p className="text-xs font-medium text-muted-foreground mb-1.5">Skema untuk</p>
+          <div className="grid grid-cols-2 gap-2">
+            {(["rider", "client"] as SchemeFor[]).map((sf) => (
+              <button
+                key={sf}
+                type="button"
+                onClick={() => setSchemeFor(sf)}
+                className={
+                  "text-left rounded-md px-3 py-2.5 border transition-colors " +
+                  (schemeFor === sf ? "border-2 border-primary bg-primary-soft" : "border-border hover:border-primary-border hover:bg-primary-soft/40")
+                }
+              >
+                <span className="text-xs font-medium block">{sf === "rider" ? "Rider (Cost)" : "Client (Revenue)"}</span>
+                <span className="text-[11px] text-muted-foreground">{sf === "rider" ? "Fee yang dibayar ke rider" : "Harga yang ditagih ke client"}</span>
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
       {/* Type chooser + dynamic params */}
       <div className="rounded-lg border border-border bg-card p-5 mb-4">
-        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-3">
-          Pilih tipe kalkulasi
-        </p>
+        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-3">Pilih tipe kalkulasi</p>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
           {PRICING_TYPES.map((t) => {
             const Icon = ICONS[t.icon as keyof typeof ICONS] ?? MapPin;
@@ -589,9 +544,7 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
                 onClick={() => setCalcType(t.key)}
                 className={
                   "text-left rounded-md px-3 py-2.5 flex flex-col gap-0.5 transition-colors border " +
-                  (active
-                    ? "border-2 border-primary bg-primary-soft"
-                    : "border-border hover:border-primary-border hover:bg-primary-soft/40")
+                  (active ? "border-2 border-primary bg-primary-soft" : "border-border hover:border-primary-border hover:bg-primary-soft/40")
                 }
               >
                 <Icon className="w-4 h-4 text-primary" />
@@ -608,103 +561,93 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
           <p className="text-xs text-primary-soft-foreground leading-relaxed">{activeType.callout}</p>
         </div>
 
-        {/* Params dinamis */}
         <p className="text-sm font-medium pb-2 mb-3 border-b border-border flex items-center gap-2">
           <ActiveIcon className="w-4 h-4 text-primary" />
           Parameter: {activeType.name.toLowerCase()}
         </p>
 
-        {/* ===== AREA ===== */}
-        {calcType === "flat_per_awb_area" && (
-          <div>
-            <TableShell>
-              <>
-                <Th>Area / District</Th>
-                <Th className="w-44">Tarif per Paket (Rp)</Th>
-                <Th className="w-10" />
-              </>
-              {params.area.rows.map((r, i) => (
-                <tr key={i} className="border-t border-border/60">
-                  <Td>
-                    <TextInput
-                      value={r.districts}
-                      placeholder="Jakarta Pusat, Depok"
-                      onChange={(e) => updateArea(i, { districts: e.target.value })}
-                    />
-                  </Td>
-                  <Td>
-                    <RupiahInput value={r.rate} onChange={(v) => updateArea(i, { rate: v })} />
-                  </Td>
-                  <Td className="text-center">
-                    <RowDeleteBtn onClick={() => delArea(i)} />
-                  </Td>
-                </tr>
-              ))}
-            </TableShell>
-            <AddRowBtn onClick={addArea}>Tambah Area</AddRowBtn>
-            <div className="mt-3">
-              <label className="text-xs text-muted-foreground">Default Rate (jika tidak ada area yang match)</label>
-              <div className="mt-1 max-w-xs">
-                <RupiahInput
-                  value={params.area.default_rate}
-                  onChange={(v) => setParams((p) => ({ ...p, area: { ...p.area, default_rate: v } }))}
-                />
+        {/* ===== FLAT UNIT ===== */}
+        {calcType === "flat_unit" && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Unit yang dihitung</FieldLabel>
+                <select
+                  value={f.flatUnit.unit}
+                  onChange={(e) => patch({ flatUnit: { ...f.flatUnit, unit: e.target.value as FlatUnitState["unit"] } })}
+                  className="w-full text-sm rounded-md border border-border bg-card px-2.5 py-1.5"
+                >
+                  <option value="awb">Per kiriman (AWB)</option>
+                  <option value="unique_address">Per alamat unik</option>
+                </select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Cara tentukan tarif</FieldLabel>
+                <select
+                  value={f.flatUnit.rate_by}
+                  onChange={(e) => patch({ flatUnit: { ...f.flatUnit, rate_by: e.target.value as FlatUnitState["rate_by"] } })}
+                  className="w-full text-sm rounded-md border border-border bg-card px-2.5 py-1.5"
+                >
+                  <option value="flat">Flat (1 tarif untuk semua)</option>
+                  <option value="column">Beda per kolom (mis. Area)</option>
+                </select>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* ===== SERVICE ===== */}
-        {calcType === "flat_per_awb_service_type" && (
-          <div>
-            <TableShell>
+            {f.flatUnit.rate_by === "flat" ? (
+              <div className="flex flex-col gap-1.5 max-w-xs">
+                <FieldLabel>Flat Rate (Rp)</FieldLabel>
+                <RupiahInput value={f.flatUnit.flat_rate} onChange={(v) => patch({ flatUnit: { ...f.flatUnit, flat_rate: v } })} />
+              </div>
+            ) : (
               <>
-                <Th>Tipe Layanan</Th>
-                <Th className="w-44">Tarif (Rp)</Th>
-                <Th className="w-10" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <FieldLabel>Kolom acuan</FieldLabel>
+                    <TextInput value={f.flatUnit.match_column} onChange={(e) => patch({ flatUnit: { ...f.flatUnit, match_column: e.target.value } })} placeholder="Area" />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <FieldLabel>Default Rate (fallback, Rp)</FieldLabel>
+                    <RupiahInput value={f.flatUnit.default_rate} onChange={(v) => patch({ flatUnit: { ...f.flatUnit, default_rate: v } })} />
+                  </div>
+                </div>
+                <TableShell>
+                  <>
+                    <Th>Nilai Kolom (cth: Jakarta Pusat)</Th>
+                    <Th className="w-44">Tarif (Rp)</Th>
+                    <Th className="w-10" />
+                  </>
+                  {f.flatUnit.rates.map((r, i) => (
+                    <tr key={i} className="border-t border-border/60">
+                      <Td><TextInput value={r.key} onChange={(e) => patch({ flatUnit: { ...f.flatUnit, rates: f.flatUnit.rates.map((x, idx) => (idx === i ? { ...x, key: e.target.value } : x)) } })} /></Td>
+                      <Td><RupiahInput value={r.rate} onChange={(v) => patch({ flatUnit: { ...f.flatUnit, rates: f.flatUnit.rates.map((x, idx) => (idx === i ? { ...x, rate: v } : x)) } })} /></Td>
+                      <Td className="text-center"><RowDeleteBtn onClick={() => patch({ flatUnit: { ...f.flatUnit, rates: f.flatUnit.rates.filter((_, idx) => idx !== i) } })} /></Td>
+                    </tr>
+                  ))}
+                </TableShell>
+                <AddRowBtn onClick={() => patch({ flatUnit: { ...f.flatUnit, rates: [...f.flatUnit.rates, { key: "", rate: "" }] } })}>Tambah Baris</AddRowBtn>
               </>
-              {params.service.rows.map((r, i) => (
-                <tr key={i} className="border-t border-border/60">
-                  <Td>
-                    <TextInput
-                      value={r.name}
-                      placeholder="delivery"
-                      onChange={(e) => updateService(i, { name: e.target.value })}
-                    />
-                  </Td>
-                  <Td>
-                    <RupiahInput value={r.rate} onChange={(v) => updateService(i, { rate: v })} />
-                  </Td>
-                  <Td className="text-center">
-                    <RowDeleteBtn onClick={() => delService(i)} />
-                  </Td>
-                </tr>
-              ))}
-            </TableShell>
-            <AddRowBtn onClick={addService}>Tambah Tipe Layanan</AddRowBtn>
+            )}
           </div>
         )}
 
-        {/* ===== TIER ===== */}
-        {calcType === "tier_distance_weight" && (
-          <div>
-            <div className="flex gap-1.5 mb-3">
-              {(
-                [
-                  { k: "distance", l: "Tier Jarak" },
-                  { k: "weight", l: "Tier Berat" },
-                  { k: "stop", l: "Stop Fee" },
-                ] as const
-              ).map((t) => (
+        {/* ===== TIER / TIER_DAILY ===== */}
+        {(calcType === "tier" || calcType === "tier_daily") && (
+          <div className="space-y-3">
+            {calcType === "tier_daily" && (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-700 dark:text-amber-300">
+                Akumulasi harian: jarak/berat semua kiriman 1 rider dalam 1 hari dijumlah dulu, baru dihitung.
+              </div>
+            )}
+            <div className="flex gap-1.5 mb-1">
+              {([{ k: "distance", l: "Jarak (km)" }, { k: "weight", l: "Berat (kg)" }] as const).map((t) => (
                 <button
                   key={t.k}
                   type="button"
                   onClick={() => setTierSubtab(t.k)}
                   className={
                     "text-xs px-3 py-1.5 rounded-md border transition-colors " +
-                    (tierSubtab === t.k
-                      ? "bg-primary-soft text-primary-soft-foreground border-primary-border font-medium"
-                      : "bg-card border-border text-muted-foreground hover:bg-muted")
+                    (tierSubtab === t.k ? "bg-primary-soft text-primary-soft-foreground border-primary-border font-medium" : "bg-card border-border text-muted-foreground hover:bg-muted")
                   }
                 >
                   {t.l}
@@ -712,235 +655,97 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
               ))}
             </div>
 
-            {tierSubtab !== "stop" && (
-              <>
-                <TableShell>
-                  <>
-                    <Th className="w-24">Tipe</Th>
-                    <Th>Dari ({tierSubtab === "distance" ? "km" : "kg"})</Th>
-                    <Th>Sampai ({tierSubtab === "distance" ? "km" : "kg"})</Th>
-                    <Th>Base (Rp)</Th>
-                    <Th>Step</Th>
-                    <Th>+Rp/Step</Th>
-                    <Th className="w-10" />
-                  </>
-                  {params.tier[tierSubtab].map((r, i) => (
-                    <tr key={i} className="border-t border-border/60">
-                      <Td>
-                        <select
-                          value={r.type}
-                          onChange={(e) => updateTier(tierSubtab, i, { type: e.target.value as "flat" | "tier" })}
-                          className="w-full text-sm rounded-md border border-border bg-card px-2 py-1.5"
-                        >
-                          <option value="flat">Flat</option>
-                          <option value="tier">Tier</option>
-                        </select>
-                      </Td>
-                      <Td>
-                        <TextInput
-                          value={r.from}
-                          inputMode="decimal"
-                          onChange={(e) => updateTier(tierSubtab, i, { from: e.target.value })}
-                        />
-                      </Td>
-                      <Td>
-                        <TextInput
-                          value={r.to}
-                          inputMode="decimal"
-                          onChange={(e) => updateTier(tierSubtab, i, { to: e.target.value })}
-                        />
-                      </Td>
-                      <Td>
-                        <RupiahInput value={r.base} onChange={(v) => updateTier(tierSubtab, i, { base: v })} />
-                      </Td>
-                      <Td>
-                        <TextInput
-                          value={r.step}
-                          inputMode="decimal"
-                          onChange={(e) => updateTier(tierSubtab, i, { step: e.target.value })}
-                        />
-                      </Td>
-                      <Td>
-                        <RupiahInput
-                          value={r.rate_per_step}
-                          onChange={(v) => updateTier(tierSubtab, i, { rate_per_step: v })}
-                        />
-                      </Td>
-                      <Td className="text-center">
-                        <RowDeleteBtn onClick={() => delTier(tierSubtab, i)} />
-                      </Td>
-                    </tr>
-                  ))}
-                </TableShell>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <AddRowBtn onClick={() => addTier(tierSubtab, "flat")}>Tambah Flat</AddRowBtn>
-                  <AddRowBtn onClick={() => addTier(tierSubtab, "tier")}>Tambah Tier</AddRowBtn>
-                </div>
-              </>
+            {tierSubtab === "distance" && (
+              <ToggleBlock label="Pakai Jarak (km)" on={f.tier.distanceOn} onToggle={(on) => patch({ tier: { ...f.tier, distanceOn: on } })}>
+                <StepTierEditor unit="km" value={f.tier.distance} onChange={(v) => patch({ tier: { ...f.tier, distance: v } })} />
+              </ToggleBlock>
             )}
-
-            {tierSubtab === "stop" && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs text-muted-foreground">Harga per Stop (Rp)</label>
-                  <RupiahInput
-                    value={params.tier.stop_flat}
-                    onChange={(v) => setParams((p) => ({ ...p, tier: { ...p.tier, stop_flat: v } }))}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs text-muted-foreground">Berlaku mulai stop ke-</label>
-                  <TextInput
-                    value={params.tier.stop_starts_from}
-                    inputMode="numeric"
-                    onChange={(e) => setParams((p) => ({ ...p, tier: { ...p.tier, stop_starts_from: e.target.value } }))}
-                  />
-                </div>
-              </div>
+            {tierSubtab === "weight" && (
+              <ToggleBlock label="Pakai Berat (kg)" on={f.tier.weightOn} onToggle={(on) => patch({ tier: { ...f.tier, weightOn: on } })}>
+                <StepTierEditor unit="kg" value={f.tier.weight} onChange={(v) => patch({ tier: { ...f.tier, weight: v } })} />
+              </ToggleBlock>
+            )}
+            {f.tier.distanceOn && f.tier.weightOn && (
+              <p className="text-[11px] text-muted-foreground">Jarak & berat dua-duanya aktif → hasilnya dijumlah.</p>
             )}
           </div>
         )}
 
-        {/* ===== KM ===== */}
-        {calcType === "km_accumulation_weight" && (
-          <div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        {/* ===== THRESHOLD MULTIPLE ===== */}
+        {calcType === "threshold_multiple" && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Qty dibaca dari berat aktual (kg). Fee per grup = ceil(total kg / threshold) × rate.</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs text-muted-foreground">Base Price (Rp)</label>
-                <RupiahInput
-                  value={params.km.base_price}
-                  onChange={(v) => setParams((p) => ({ ...p, km: { ...p.km, base_price: v } }))}
-                />
+                <FieldLabel>Kolom pengelompokan</FieldLabel>
+                <TextInput value={f.threshold.group_by} onChange={(e) => patch({ threshold: { ...f.threshold, group_by: e.target.value } })} placeholder="Area" />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs text-muted-foreground">Threshold KM</label>
-                <TextInput
-                  value={params.km.threshold_km}
-                  inputMode="numeric"
-                  onChange={(e) => setParams((p) => ({ ...p, km: { ...p.km, threshold_km: e.target.value } }))}
-                />
+                <FieldLabel>Default Threshold (kg)</FieldLabel>
+                <TextInput value={f.threshold.default_threshold} inputMode="decimal" onChange={(e) => patch({ threshold: { ...f.threshold, default_threshold: e.target.value } })} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Default Rate (Rp)</FieldLabel>
+                <RupiahInput value={f.threshold.default_rate} onChange={(v) => patch({ threshold: { ...f.threshold, default_rate: v } })} />
               </div>
             </div>
-            <div className="flex flex-col gap-1.5 mb-3">
-              <label className="text-xs text-muted-foreground">Rate per KM Lebih (Rp/km)</label>
-              <RupiahInput
-                value={params.km.rate_over}
-                onChange={(v) => setParams((p) => ({ ...p, km: { ...p.km, rate_over: v } }))}
-              />
-            </div>
-            <p className="text-xs font-medium text-muted-foreground mb-2">Surcharge Berat</p>
             <TableShell>
               <>
-                <Th>Dari (kg)</Th>
-                <Th>Sampai (kg)</Th>
-                <Th>Surcharge (Rp)</Th>
-                <Th className="w-10" />
-              </>
-              {params.km.weight.map((r, i) => (
-                <tr key={i} className="border-t border-border/60">
-                  <Td>
-                    <TextInput
-                      value={r.from}
-                      inputMode="decimal"
-                      onChange={(e) => updateKmWeight(i, { from: e.target.value })}
-                    />
-                  </Td>
-                  <Td>
-                    <TextInput
-                      value={r.to}
-                      inputMode="decimal"
-                      onChange={(e) => updateKmWeight(i, { to: e.target.value })}
-                    />
-                  </Td>
-                  <Td>
-                    <RupiahInput value={r.surcharge} onChange={(v) => updateKmWeight(i, { surcharge: v })} />
-                  </Td>
-                  <Td className="text-center">
-                    <RowDeleteBtn onClick={() => delKmWeight(i)} />
-                  </Td>
-                </tr>
-              ))}
-            </TableShell>
-            <AddRowBtn onClick={addKmWeight}>Tambah Baris Berat</AddRowBtn>
-          </div>
-        )}
-
-        {/* ===== ADDR ===== */}
-        {calcType === "unique_address" && (
-          <div>
-            <div className="flex flex-col gap-1.5 mb-3 max-w-xs">
-              <label className="text-xs text-muted-foreground">Default Rate per Alamat (Rp)</label>
-              <RupiahInput
-                value={params.addr.default_rate}
-                onChange={(v) => setParams((p) => ({ ...p, addr: { ...p.addr, default_rate: v } }))}
-              />
-            </div>
-            <p className="text-xs font-medium text-muted-foreground mb-2">Rate Khusus per District</p>
-            <TableShell>
-              <>
-                <Th>District</Th>
+                <Th>Area / Store</Th>
+                <Th className="w-32">Threshold (kg)</Th>
                 <Th className="w-44">Rate (Rp)</Th>
                 <Th className="w-10" />
               </>
-              {params.addr.rows.map((r, i) => (
+              {f.threshold.rules.map((r, i) => (
                 <tr key={i} className="border-t border-border/60">
-                  <Td>
-                    <TextInput
-                      value={r.district}
-                      onChange={(e) => updateAddr(i, { district: e.target.value })}
-                    />
-                  </Td>
-                  <Td>
-                    <RupiahInput value={r.rate} onChange={(v) => updateAddr(i, { rate: v })} />
-                  </Td>
-                  <Td className="text-center">
-                    <RowDeleteBtn onClick={() => delAddr(i)} />
-                  </Td>
+                  <Td><TextInput value={r.key} onChange={(e) => patch({ threshold: { ...f.threshold, rules: f.threshold.rules.map((x, idx) => (idx === i ? { ...x, key: e.target.value } : x)) } })} /></Td>
+                  <Td><TextInput value={r.threshold} inputMode="decimal" onChange={(e) => patch({ threshold: { ...f.threshold, rules: f.threshold.rules.map((x, idx) => (idx === i ? { ...x, threshold: e.target.value } : x)) } })} /></Td>
+                  <Td><RupiahInput value={r.rate} onChange={(v) => patch({ threshold: { ...f.threshold, rules: f.threshold.rules.map((x, idx) => (idx === i ? { ...x, rate: v } : x)) } })} /></Td>
+                  <Td className="text-center"><RowDeleteBtn onClick={() => patch({ threshold: { ...f.threshold, rules: f.threshold.rules.filter((_, idx) => idx !== i) } })} /></Td>
                 </tr>
               ))}
             </TableShell>
-            <AddRowBtn onClick={addAddr}>Tambah District</AddRowBtn>
+            <AddRowBtn onClick={() => patch({ threshold: { ...f.threshold, rules: [...f.threshold.rules, { key: "", threshold: "", rate: "" }] } })}>Tambah Store</AddRowBtn>
           </div>
         )}
 
-        {/* ===== BOX ===== */}
-        {calcType === "store_box_threshold" && (
-          <div>
+        {/* ===== ATTENDANCE ===== */}
+        {calcType === "attendance" && (
+          <div className="space-y-3">
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-700 dark:text-amber-300">
+              Type ini fase terpisah — kriteria "conditional" belum ditentukan.
+            </div>
+            <div className="flex flex-col gap-1.5 max-w-xs">
+              <FieldLabel>Daily Base Fee (Rp)</FieldLabel>
+              <RupiahInput value={f.attendance.daily_base_fee} onChange={(v) => patch({ attendance: { ...f.attendance, daily_base_fee: v } })} />
+            </div>
+            <p className="text-xs font-medium text-muted-foreground">Komponen Tambahan</p>
             <TableShell>
               <>
-                <Th>Nama Store</Th>
-                <Th className="w-32">Threshold Box</Th>
-                <Th className="w-44">Rate per Threshold (Rp)</Th>
+                <Th>Nama Komponen</Th>
+                <Th className="w-36">Jumlah (Rp)</Th>
+                <Th className="w-40">Sifat</Th>
                 <Th className="w-10" />
               </>
-              {params.box.rows.map((r, i) => (
+              {f.attendance.components.map((c, i) => (
                 <tr key={i} className="border-t border-border/60">
+                  <Td><TextInput value={c.label} placeholder="cth: Uang Makan" onChange={(e) => patch({ attendance: { ...f.attendance, components: f.attendance.components.map((x, idx) => (idx === i ? { ...x, label: e.target.value } : x)) } })} /></Td>
+                  <Td><RupiahInput value={c.amount} onChange={(v) => patch({ attendance: { ...f.attendance, components: f.attendance.components.map((x, idx) => (idx === i ? { ...x, amount: v } : x)) } })} /></Td>
                   <Td>
-                    <TextInput value={r.store} onChange={(e) => updateBox(i, { store: e.target.value })} />
+                    <select
+                      value={c.condition}
+                      onChange={(e) => patch({ attendance: { ...f.attendance, components: f.attendance.components.map((x, idx) => (idx === i ? { ...x, condition: e.target.value as "always" | "conditional" } : x)) } })}
+                      className="w-full text-sm rounded-md border border-border bg-card px-2 py-1.5"
+                    >
+                      <option value="always">Selalu dibayar</option>
+                      <option value="conditional">Conditional</option>
+                    </select>
                   </Td>
-                  <Td>
-                    <TextInput
-                      value={r.threshold}
-                      inputMode="numeric"
-                      onChange={(e) => updateBox(i, { threshold: e.target.value })}
-                    />
-                  </Td>
-                  <Td>
-                    <RupiahInput value={r.rate} onChange={(v) => updateBox(i, { rate: v })} />
-                  </Td>
-                  <Td className="text-center">
-                    <RowDeleteBtn onClick={() => delBox(i)} />
-                  </Td>
+                  <Td className="text-center"><RowDeleteBtn onClick={() => patch({ attendance: { ...f.attendance, components: f.attendance.components.filter((_, idx) => idx !== i) } })} /></Td>
                 </tr>
               ))}
             </TableShell>
-            <AddRowBtn onClick={addBox}>Tambah Store</AddRowBtn>
-            <div className="mt-3 rounded-md border border-primary-border bg-primary-soft px-3.5 py-2.5 flex items-start gap-2.5">
-              <Lightbulb className="w-4 h-4 text-primary mt-0.5" />
-              <p className="text-xs text-primary-soft-foreground">
-                Contoh: Store A threshold 4 box, rider antar 5 box → dihitung 2× = Rp 24.000
-              </p>
-            </div>
+            <AddRowBtn onClick={() => patch({ attendance: { ...f.attendance, components: [...f.attendance.components, { label: "", amount: "", condition: "always" }] } })}>Tambah Komponen</AddRowBtn>
           </div>
         )}
 
@@ -953,6 +758,58 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
             </div>
             <div className="text-lg font-semibold text-primary-soft-foreground">{formatRupiah(preview.value)}</div>
           </div>
+        )}
+      </div>
+
+      {/* ===== MODIFIERS ===== */}
+      <div className="rounded-lg border border-border bg-card p-5 mb-4 space-y-3">
+        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Modifier (opsional)</p>
+
+        {calcType !== "attendance" && (
+          <ToggleBlock
+            label="Add-KG (surcharge berat)"
+            hint="Biaya tambahan berdasarkan berat, bertingkat. Ditulis sekali, berlaku di tipe ini."
+            on={f.addKgOn}
+            onToggle={(on) => patch({ addKgOn: on })}
+          >
+            <StepTierEditor unit="kg" value={f.addKg} onChange={(v) => patch({ addKg: v })} />
+          </ToggleBlock>
+        )}
+
+        <ToggleBlock
+          label="Multi-drop (kiriman ke-2 dst)"
+          hint="Otomatis mulai kiriman ke-2 dalam hari yang sama, per rider."
+          on={f.multiDropOn}
+          onToggle={(on) => patch({ multiDropOn: on })}
+        >
+          <div className="flex flex-col gap-1.5 max-w-xs">
+            <FieldLabel>Fee per kiriman ekstra (Rp)</FieldLabel>
+            <RupiahInput value={f.multiDropFee} onChange={(v) => patch({ multiDropFee: v })} />
+          </div>
+        </ToggleBlock>
+
+        {schemeFor === "client" && (
+          <ToggleBlock
+            label="Billing Add-ons (khusus client)"
+            hint="Urutan hitung: min charge (lantai) → + admin fee → × (1 + PPN%). PPN paling akhir."
+            on={f.billingOn}
+            onToggle={(on) => patch({ billingOn: on })}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Min Charge (Rp)</FieldLabel>
+                <RupiahInput value={f.billing.min_charge} onChange={(v) => patch({ billing: { ...f.billing, min_charge: v } })} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Admin Fee (Rp)</FieldLabel>
+                <RupiahInput value={f.billing.admin_fee_flat} onChange={(v) => patch({ billing: { ...f.billing, admin_fee_flat: v } })} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>PPN (%)</FieldLabel>
+                <TextInput value={f.billing.ppn_percent} inputMode="decimal" onChange={(e) => patch({ billing: { ...f.billing, ppn_percent: e.target.value } })} />
+              </div>
+            </div>
+          </ToggleBlock>
         )}
       </div>
 
