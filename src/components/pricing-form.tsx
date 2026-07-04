@@ -391,14 +391,38 @@ function ToggleBlock({ label, hint, on, onToggle, children }: { label: string; h
 }
 
 // -------------------- Main form --------------------
+// Wrapper: ambil scheme yang mau di-edit dulu (async, dari Supabase) SEBELUM
+// form-nya di-mount. Ini penting karena field di bawah pakai useState(initial)
+// yang cuma jalan sekali pas mount — kalau datanya nyusul belakangan, field
+// bakal tetep kosong. Jadi tunggu dulu, baru render form-nya.
 export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schemeId?: string }) {
+  const [existing, setExisting] = useState<PricingScheme | null>(null);
+  const [ready, setReady] = useState(mode === "create");
+
+  useEffect(() => {
+    if (mode === "edit" && schemeId) {
+      getPricingScheme(schemeId).then((s) => {
+        setExisting(s ?? null);
+        setReady(true);
+      });
+    }
+  }, [mode, schemeId]);
+
+  if (!ready) {
+    return (
+      <AdminLayout title="Edit Skema Pricing">
+        <div className="p-10 text-center text-muted-foreground text-sm">Memuat skema…</div>
+      </AdminLayout>
+    );
+  }
+
+  return <PricingFormInner key={existing?.id ?? "new"} mode={mode} existing={existing ?? undefined} />;
+}
+
+function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existing?: PricingScheme }) {
   const navigate = useNavigate();
   const [clients, setClients] = useState<MockClient[]>([]);
 
-  const existing = useMemo(
-    () => (mode === "edit" && schemeId ? getPricingScheme(schemeId) : undefined),
-    [mode, schemeId],
-  );
   const loaded = useMemo(() => loadForm(existing), [existing]);
 
   const [name, setName] = useState(existing?.name ?? "");
@@ -419,25 +443,29 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
 
   const patch = (p: Partial<FormState>) => setF((prev) => ({ ...prev, ...p }));
 
-  const handleSave = () => {
+  const [saving, setSaving] = useState(false);
+  const handleSave = async () => {
     if (!name.trim()) return toast.error("Nama skema wajib diisi");
     if (!effFrom) return toast.error("Tanggal berlaku dari wajib diisi");
-    const client = clients.find((c) => c.id === clientId);
-    const scheme: PricingScheme = {
-      id: existing?.id ?? "ps_" + Math.random().toString(36).slice(2, 10),
-      name: name.trim(),
-      client_id: clientId || null,
-      client_name: client?.name ?? null,
-      scheme_for: schemeFor,
-      calc_type: calcType,
-      effective_from: effFrom,
-      effective_to: effTo || null,
-      params: buildEnvelope(calcType, schemeFor, f),
-      created_at: existing?.created_at ?? new Date().toISOString(),
-    };
-    savePricingScheme(scheme);
-    toast.success(mode === "create" ? "Skema berhasil dibuat" : "Skema berhasil diperbarui");
-    navigate({ to: "/admin/pricing" });
+    setSaving(true);
+    try {
+      await savePricingScheme({
+        id: existing?.id,
+        name: name.trim(),
+        client_id: clientId || null,
+        scheme_for: schemeFor,
+        calc_type: calcType,
+        effective_from: effFrom,
+        effective_to: effTo || null,
+        params: buildEnvelope(calcType, schemeFor, f),
+      });
+      toast.success(mode === "create" ? "Skema berhasil dibuat" : "Skema berhasil diperbarui");
+      navigate({ to: "/admin/pricing" });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // preview estimasi sederhana
@@ -825,10 +853,11 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
         <button
           type="button"
           onClick={handleSave}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90"
+          disabled={saving}
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
         >
           <Save className="w-4 h-4" />
-          Simpan Skema
+          {saving ? "Menyimpan…" : "Simpan Skema"}
         </button>
       </div>
     </AdminLayout>

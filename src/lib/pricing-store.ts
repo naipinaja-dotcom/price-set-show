@@ -1,8 +1,11 @@
-// In-memory store sebagai placeholder sebelum Supabase di-connect.
+import { supabase } from "@/integrations/supabase/client";
 import type { PricingScheme } from "./pricing-types";
 
-const KEY = "dash_mock_pricing_schemes";
-const CLIENTS_KEY = "dash_mock_clients";
+// pricing_schemes dibuat manual lewat SQL Editor, belum ikut proses
+// auto-generate types Supabase — pakai `sb` (untyped) khusus buat tabel ini,
+// biar file types.ts (yang auto-generated) ga perlu diubah manual.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const sb = supabase as any;
 
 export interface MockClient {
   id: string;
@@ -10,23 +13,23 @@ export interface MockClient {
   code: string;
 }
 
-function read<T>(k: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = window.localStorage.getItem(k);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
+const SELECT_COLS = "id, name, client_id, scheme_for, calc_type, effective_from, effective_to, params, created_at, clients(name)";
 
-function write<T>(k: string, v: T) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(k, JSON.stringify(v));
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalize(r: any): PricingScheme {
+  return {
+    id: r.id,
+    name: r.name,
+    client_id: r.client_id,
+    client_name: r.clients?.name ?? null,
+    scheme_for: (r.scheme_for as PricingScheme["scheme_for"]) ?? "rider",
+    calc_type: r.calc_type,
+    effective_from: r.effective_from,
+    effective_to: r.effective_to,
+    params: r.params,
+    created_at: r.created_at ?? "",
+  };
 }
-
-import { supabase } from "@/integrations/supabase/client";
 
 export async function listClients(): Promise<MockClient[]> {
   const { data, error } = await supabase
@@ -41,25 +44,48 @@ export async function listClients(): Promise<MockClient[]> {
   return (data ?? []) as MockClient[];
 }
 
-export function listPricingSchemes(): PricingScheme[] {
-  return read<PricingScheme[]>(KEY, []);
+export async function listPricingSchemes(): Promise<PricingScheme[]> {
+  const { data, error } = await sb
+    .from("pricing_schemes")
+    .select(SELECT_COLS)
+    .order("effective_from", { ascending: false });
+  if (error) {
+    console.error("[listPricingSchemes]", error);
+    return [];
+  }
+  return (data ?? []).map(normalize);
 }
 
-export function savePricingScheme(s: PricingScheme) {
-  const all = listPricingSchemes();
-  const idx = all.findIndex((x) => x.id === s.id);
-  if (idx >= 0) all[idx] = s;
-  else all.unshift(s);
-  write(KEY, all);
+export async function getPricingScheme(id: string): Promise<PricingScheme | undefined> {
+  const { data, error } = await sb.from("pricing_schemes").select(SELECT_COLS).eq("id", id).maybeSingle();
+  if (error) {
+    console.error("[getPricingScheme]", error);
+    return undefined;
+  }
+  return data ? normalize(data) : undefined;
 }
 
-export function deletePricingScheme(id: string) {
-  write(
-    KEY,
-    listPricingSchemes().filter((s) => s.id !== id),
-  );
+export type SavePricingSchemeInput = Omit<PricingScheme, "id" | "created_at" | "client_name"> & { id?: string };
+
+export async function savePricingScheme(s: SavePricingSchemeInput): Promise<PricingScheme> {
+  const payload = {
+    name: s.name,
+    client_id: s.client_id,
+    scheme_for: s.scheme_for,
+    calc_type: s.calc_type,
+    effective_from: s.effective_from,
+    effective_to: s.effective_to || null,
+    params: s.params,
+  };
+  const query = s.id
+    ? sb.from("pricing_schemes").update(payload).eq("id", s.id)
+    : sb.from("pricing_schemes").insert(payload);
+  const { data, error } = await query.select(SELECT_COLS).single();
+  if (error) throw error;
+  return normalize(data);
 }
 
-export function getPricingScheme(id: string): PricingScheme | undefined {
-  return listPricingSchemes().find((s) => s.id === id);
+export async function deletePricingScheme(id: string): Promise<void> {
+  const { error } = await sb.from("pricing_schemes").delete().eq("id", id);
+  if (error) throw error;
 }

@@ -35,7 +35,7 @@ function PnlPage() {
 
   useEffect(() => {
     supabase.from("clients").select("id, name").order("name").then(({ data }) => setClients(data ?? []));
-    setSchemes(listPricingSchemes());
+    listPricingSchemes().then(setSchemes);
   }, []);
 
   // pilih skema aktif: yang khusus client itu diutamakan, lalu yang "semua client"

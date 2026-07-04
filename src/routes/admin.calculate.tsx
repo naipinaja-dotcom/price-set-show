@@ -37,7 +37,7 @@ function CalculatePage() {
 
   useEffect(() => {
     supabase.from("clients").select("id, name").order("name").then(({ data }) => setClients(data ?? []));
-    setSchemes(listPricingSchemes());
+    listPricingSchemes().then(setSchemes);
   }, []);
 
   // skema yang cocok untuk client terpilih (khusus client itu + yang "semua client")

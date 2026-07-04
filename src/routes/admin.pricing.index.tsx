@@ -30,7 +30,7 @@ function PricingListPage() {
   const [toDelete, setToDelete] = useState<PricingScheme | null>(null);
 
   const refresh = () => {
-    setSchemes(listPricingSchemes());
+    listPricingSchemes().then(setSchemes);
     listClients().then(setClients);
   };
   useEffect(refresh, []);
@@ -161,11 +161,15 @@ function PricingListPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Batal</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
+              onClick={async () => {
                 if (toDelete) {
-                  deletePricingScheme(toDelete.id);
-                  toast.success("Skema dihapus");
-                  refresh();
+                  try {
+                    await deletePricingScheme(toDelete.id);
+                    toast.success("Skema dihapus");
+                    refresh();
+                  } catch (e) {
+                    toast.error((e as Error).message);
+                  }
                   setToDelete(null);
                 }
               }}
