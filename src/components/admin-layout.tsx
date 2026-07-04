@@ -11,6 +11,7 @@ import {
   Calculator,
   Coins,
   TrendingUp,
+  ShieldCheck,
   LogOut,
   Menu,
   X,
@@ -30,6 +31,7 @@ const NAV = [
   { to: "/admin/payroll", label: "Payroll Run", icon: Calculator },
   { to: "/admin/pnl", label: "PnL / Margin", icon: TrendingUp },
   { to: "/admin/reports", label: "Reports", icon: FileBarChart2 },
+  { to: "/admin/users", label: "User Management", icon: ShieldCheck },
 ] as const;
 
 export function AdminLayout({ children, title, subtitle }: { children: ReactNode; title: string; subtitle?: string }) {
