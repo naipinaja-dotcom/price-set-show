@@ -199,8 +199,11 @@ function RiderImportModal({ clients, onClose, onDone }:
           <button onClick={onClose} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
         </div>
         <p className="text-xs text-muted-foreground mb-4">
-          Upload file CSV berisi daftar rider. Wajib ada kolom <b>employee_id</b> & <b>full_name</b>. Kolom lain opsional.
+          Upload file CSV berisi daftar rider. Wajib ada kolom <b>employee_id</b> (kode MTR) & <b>full_name</b>. Kolom lain — termasuk <b>client</b> — opsional.
           Employee ID yang sama akan di-update (bukan dobel).
+        </p>
+        <p className="text-xs text-muted-foreground mb-4 -mt-2">
+          Catatan: rider TIDAK terikat 1 client — dia bisa jalan untuk banyak client. Client-nya nempel di tiap data pengiriman/absensi, bukan di rider. Import ini cuma buat lengkapi data profil (nama, bank, dll); rider baru juga otomatis kebuat sendiri saat kamu upload data pengiriman/absensi pakai kode MTR yang belum terdaftar.
         </p>
 
         <button onClick={template} className="inline-flex items-center gap-2 text-xs text-primary mb-3 hover:underline">

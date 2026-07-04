@@ -3,13 +3,13 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { parseCSV } from "@/lib/csv";
+import { resolveOrCreateRiders } from "@/lib/rider-lookup";
 import { toast } from "sonner";
 import { Upload, FileText, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/admin/upload")({ component: UploadPage });
 
 type Client = { id: string; name: string };
-type Rider = { id: string; employee_id: string; client_id: string | null };
 
 function UploadPage() {
   const [tab, setTab] = useState<"delivery" | "attendance">("delivery");
@@ -28,11 +28,10 @@ function UploadPage() {
   );
 }
 
-const DELIVERY_FIELDS = ["driver_code","delivery_date","awb","district","distance_km","weight_kg","destination_address","receiver_name","service_type"];
+const DELIVERY_FIELDS = ["driver_code","driver_name","delivery_date","awb","district","distance_km","weight_kg","destination_address","receiver_name","service_type"];
 
 function DeliveryUpload() {
   const [clients, setClients] = useState<Client[]>([]);
-  const [riders, setRiders] = useState<Rider[]>([]);
   const [clientId, setClientId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -42,7 +41,6 @@ function DeliveryUpload() {
 
   useEffect(() => {
     supabase.from("clients").select("id, name").then(({ data }) => setClients(data ?? []));
-    supabase.from("riders").select("id, employee_id, client_id").then(({ data }) => setRiders(data ?? []));
   }, []);
 
   const onFile = async (f: File) => {
@@ -68,23 +66,41 @@ function DeliveryUpload() {
       .select().single();
     if (bErr) { setBusy(false); return toast.error(bErr.message); }
 
+    const get = (r: string[], f: string) => {
+      const idx = headers.indexOf(mapping[f]);
+      return idx >= 0 ? r[idx] : null;
+    };
+
+    // Rider berdiri sendiri dari kode MTR — kode yang belum terdaftar
+    // otomatis dibikinkan rider baru (tanpa client_id, lihat rider-lookup.ts).
+    const codes = rows.map((r) => get(r, "driver_code"));
+    const namesByCode: Record<string, string> = {};
+    rows.forEach((r) => {
+      const code = get(r, "driver_code");
+      const name = get(r, "driver_name");
+      if (code && name) namesByCode[code] = name;
+    });
+    let riderMap: Map<string, string>;
+    let createdCodes: string[];
+    try {
+      ({ map: riderMap, createdCodes } = await resolveOrCreateRiders(codes, namesByCode));
+    } catch (e) {
+      setBusy(false);
+      return toast.error(`Gagal lookup rider: ${(e as Error).message}`);
+    }
+
     const records = rows.map((r) => {
-      const get = (f: string) => {
-        const idx = headers.indexOf(mapping[f]);
-        return idx >= 0 ? r[idx] : null;
-      };
-      const driverCode = get("driver_code");
-      const rider = riders.find((x) => x.employee_id === driverCode);
+      const driverCode = get(r, "driver_code");
       return {
-        batch_id: batch.id, client_id: clientId, rider_id: rider?.id ?? null,
+        batch_id: batch.id, client_id: clientId, rider_id: driverCode ? riderMap.get(driverCode) ?? null : null,
         driver_code: driverCode,
-        delivery_date: get("delivery_date") || new Date().toISOString().slice(0, 10),
-        awb: get("awb"), district: get("district"),
-        distance_km: parseFloat(get("distance_km") || "0") || null,
-        weight_kg: parseFloat(get("weight_kg") || "0") || null,
-        destination_address: get("destination_address"),
-        receiver_name: get("receiver_name"),
-        service_type: get("service_type"),
+        delivery_date: get(r, "delivery_date") || new Date().toISOString().slice(0, 10),
+        awb: get(r, "awb"), district: get(r, "district"),
+        distance_km: parseFloat(get(r, "distance_km") || "0") || null,
+        weight_kg: parseFloat(get(r, "weight_kg") || "0") || null,
+        destination_address: get(r, "destination_address"),
+        receiver_name: get(r, "receiver_name"),
+        service_type: get(r, "service_type"),
       };
     });
 
@@ -97,7 +113,7 @@ function DeliveryUpload() {
       inserted += chunk.length;
     }
     setBusy(false);
-    toast.success(`Berhasil upload ${inserted} record`);
+    toast.success(`Berhasil upload ${inserted} record` + (createdCodes.length ? ` · ${createdCodes.length} rider baru otomatis terdaftar` : ""));
     setFile(null); setHeaders([]); setRows([]); setMapping({});
   };
 
@@ -144,15 +160,10 @@ function DeliveryUpload() {
 }
 
 function AttendanceUpload() {
-  const [riders, setRiders] = useState<Rider[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<string[][]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    supabase.from("riders").select("id, employee_id, client_id").then(({ data }) => setRiders(data ?? []));
-  }, []);
 
   const onFile = async (f: File) => {
     setFile(f);
@@ -177,14 +188,27 @@ function AttendanceUpload() {
     if (bErr) { setBusy(false); return toast.error(bErr.message); }
 
     const idx = (name: string) => headers.findIndex((h) => h.toLowerCase().includes(name.toLowerCase()));
-    const iCode = idx("kode"), iClient = idx("client"), iDate = idx("date"), iIn = idx("clock-in"), iOut = idx("clock-out"), iDur = idx("duration");
+    const iCode = idx("kode"), iName = idx("name"), iClient = idx("client"), iDate = idx("date"), iIn = idx("clock-in"), iOut = idx("clock-out"), iDur = idx("duration");
+
+    // Rider berdiri sendiri dari kode MTR — sama seperti upload delivery,
+    // kode yang belum terdaftar otomatis dibikinkan rider baru.
+    const codes = rows.map((r) => r[iCode]);
+    const namesByCode: Record<string, string> = {};
+    if (iName >= 0) rows.forEach((r) => { if (r[iCode] && r[iName]) namesByCode[r[iCode]] = r[iName]; });
+    let riderMap: Map<string, string>;
+    let createdCodes: string[];
+    try {
+      ({ map: riderMap, createdCodes } = await resolveOrCreateRiders(codes, namesByCode));
+    } catch (e) {
+      setBusy(false);
+      return toast.error(`Gagal lookup rider: ${(e as Error).message}`);
+    }
 
     const logs = rows.map((r) => {
       const code = r[iCode];
-      const rider = riders.find((x) => x.employee_id === code);
       const duration = parseDur(r[iDur] ?? "");
       return {
-        batch_id: batch.id, rider_id: rider?.id ?? null, driver_code: code,
+        batch_id: batch.id, rider_id: code ? riderMap.get(code) ?? null : null, driver_code: code,
         client_name: r[iClient] ?? null,
         log_date: r[iDate] || new Date().toISOString().slice(0, 10),
         clock_in: r[iIn] || null, clock_out: r[iOut] || null,
@@ -201,7 +225,7 @@ function AttendanceUpload() {
       inserted += chunk.length;
     }
     setBusy(false);
-    toast.success(`Berhasil upload ${inserted} log absensi`);
+    toast.success(`Berhasil upload ${inserted} log absensi` + (createdCodes.length ? ` · ${createdCodes.length} rider baru otomatis terdaftar` : ""));
     setFile(null); setHeaders([]); setRows([]);
   };
 
