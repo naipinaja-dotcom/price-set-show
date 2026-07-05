@@ -106,6 +106,10 @@ function DeliveryUpload() {
         else if (field === "distance_km") found = parsed[0].find((h) => /distance/i.test(h));
         else if (field === "weight_kg") found = parsed[0].find((h) => /weight/i.test(h));
         else if (field === "destination_address") found = parsed[0].find((h) => /destination/i.test(h) && !/lat|long/i.test(h));
+        // Tanggal patokan fee = tanggal barang DIKIRIM. Nama kolomnya beda-beda di data mentah.
+        else if (field === "delivery_date") found = parsed[0].find((h) => /tanggal\s*delivery|tgl\s*kirim|tanggal\s*kirim/i.test(h))
+          ?? parsed[0].find((h) => /tanggal\s*pickup/i.test(h))
+          ?? parsed[0].find((h) => /tanggal\s*status/i.test(h));
       }
       if (found) m[field] = found;
     });
@@ -125,6 +129,22 @@ function DeliveryUpload() {
     const get = (r: string[], f: string) => {
       const idx = headers.indexOf(mapping[f]);
       return idx >= 0 ? r[idx] : null;
+    };
+
+    // Tanggal patokan fee (delivery_date): pakai kolom yang di-map; kalau baris
+    // itu kosong (mis. order belum dikirim), mundur ke pickup → status → pembuatan.
+    // Ambil BAGIAN TANGGAL-nya aja (buang jam). Kalau ga ada sama sekali → hari ini.
+    const dateColIdx = (re: RegExp) => headers.findIndex((h) => re.test(h));
+    const idxMapped = mapping["delivery_date"] ? headers.indexOf(mapping["delivery_date"]) : -1;
+    const idxPickup = dateColIdx(/tanggal\s*pickup/i);
+    const idxStatus = dateColIdx(/tanggal\s*status/i);
+    const idxCreate = dateColIdx(/tanggal\s*(pembuatan|order|buat)/i);
+    const pickDeliveryDate = (r: string[]) => {
+      for (const idx of [idxMapped, idxPickup, idxStatus, idxCreate]) {
+        const v = idx >= 0 ? r[idx] : null;
+        if (v && v.trim()) return v.trim().slice(0, 10);
+      }
+      return new Date().toISOString().slice(0, 10);
     };
 
     const codes = rows.map((r) => get(r, "driver_code"));
@@ -167,7 +187,7 @@ function DeliveryUpload() {
         status: get(r, "status"),
         dash_delivery_id: get(r, "dash_delivery_id"),
         provider_order_id: get(r, "provider_order_id"),
-        delivery_date: get(r, "delivery_date") || new Date().toISOString().slice(0, 10),
+        delivery_date: pickDeliveryDate(r),
         awb: get(r, "awb"), district: get(r, "district"),
         distance_km: parseFloat(get(r, "distance_km") || "0") || null,
         weight_kg: parseFloat(get(r, "weight_kg") || "0") || null,
