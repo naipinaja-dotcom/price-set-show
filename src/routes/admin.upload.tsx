@@ -44,10 +44,13 @@ function UploadPage() {
 const DELIVERY_FIELDS = ["driver_code","driver_name","client_name","status","dash_delivery_id","provider_order_id","delivery_date","awb","district","distance_km","weight_kg","destination_address","sender_name","receiver_name","service_type"];
 
 interface DeliveryPreview {
-  records: Record<string, unknown>[]; // sudah dikurangi duplikat, siap insert
+  records: Record<string, unknown>[]; // baru + yang mau ditimpa, siap insert
   totalRows: number;
-  duplicateCount: number;
-  duplicateSamples: { dash: string; provider: string; source: "file" | "database" }[];
+  newCount: number; // belum ada di DB
+  overwriteCount: number; // udah ada di DB → ditimpa (data lama dihapus, diganti yg baru)
+  overwriteDashIds: string[]; // dash id lama yang dihapus dulu sebelum insert
+  overwriteSamples: { dash: string; provider: string }[];
+  fileRepeatCount: number; // baris yang persis dobel DI DALAM file itu sendiri → di-skip
   anomalyCount: number;
   anomalySamples: { dash: string; provider: string }[];
   unmatchedClients: string[];
@@ -178,9 +181,11 @@ function DeliveryUpload() {
     // Deteksi duplikat: kunci = dash_delivery_id DAN provider_order_id
     // dua-duanya harus sama baru dianggap duplikat. Kalau cuma salah satu
     // yang sama -> anomali, tetap diupload tapi diflag (jangan auto-skip).
-    let duplicateSamples: DeliveryPreview["duplicateSamples"] = [];
     let anomalySamples: DeliveryPreview["anomalySamples"] = [];
     let finalRecords = records;
+    let overwriteDashIds: string[] = [];
+    let overwriteSamples: DeliveryPreview["overwriteSamples"] = [];
+    let fileRepeatCount = 0;
 
     if (hasDedupKeys) {
       const dashIds = records.map((r) => r.dash_delivery_id).filter((v): v is string => !!v);
@@ -197,31 +202,34 @@ function DeliveryUpload() {
       });
 
       const seenInFile = new Map<string, number>(); // key -> index kemunculan pertama
-      const isDuplicate: boolean[] = new Array(records.length).fill(false);
-      const duplicates: DeliveryPreview["duplicateSamples"] = [];
+      const isFileRepeat: boolean[] = new Array(records.length).fill(false); // dobel PERSIS di dalam file → skip
+      const isDbDup: boolean[] = new Array(records.length).fill(false);      // udah ada di DB → ditimpa
       const anomalies: DeliveryPreview["anomalySamples"] = [];
 
       records.forEach((rec, i) => {
         const dash = rec.dash_delivery_id as string | null;
         const provider = rec.provider_order_id as string | null;
-        if (!dash || !provider) return; // ga bisa dicek tanpa dua-duanya
+        if (!dash || !provider) return; // ga bisa dicek tanpa dua-duanya → dianggap baru
         const key = dash + "|" + provider;
         if (seenInFile.has(key)) {
-          isDuplicate[i] = true;
-          duplicates.push({ dash, provider, source: "file" });
+          isFileRepeat[i] = true; // baris kembar di file yang sama, ga usah di-insert 2×
           return;
         }
         seenInFile.set(key, i);
         if (dbByDash.get(dash)?.has(provider)) {
-          isDuplicate[i] = true;
-          duplicates.push({ dash, provider, source: "database" });
+          isDbDup[i] = true; // udah ada di DB → nanti data lama dihapus, diganti yang ini (TIMPA)
         } else if (dbByDash.has(dash) || dbByProvider.has(provider)) {
           anomalies.push({ dash, provider });
         }
       });
 
-      finalRecords = records.filter((_, i) => !isDuplicate[i]);
-      duplicateSamples = duplicates;
+      finalRecords = records.filter((_, i) => !isFileRepeat[i]); // baru + yang ditimpa
+      overwriteDashIds = records.filter((_, i) => isDbDup[i]).map((r) => r.dash_delivery_id as string);
+      overwriteSamples = records
+        .filter((_, i) => isDbDup[i])
+        .slice(0, 50)
+        .map((r) => ({ dash: r.dash_delivery_id as string, provider: r.provider_order_id as string }));
+      fileRepeatCount = isFileRepeat.filter(Boolean).length;
       anomalySamples = anomalies;
     }
 
@@ -229,8 +237,11 @@ function DeliveryUpload() {
     setPreview({
       records: finalRecords,
       totalRows: records.length,
-      duplicateCount: duplicateSamples.length,
-      duplicateSamples: duplicateSamples.slice(0, 50),
+      newCount: finalRecords.length - overwriteDashIds.length,
+      overwriteCount: overwriteDashIds.length,
+      overwriteDashIds,
+      overwriteSamples,
+      fileRepeatCount,
       anomalyCount: anomalySamples.length,
       anomalySamples: anomalySamples.slice(0, 50),
       unmatchedClients: Array.from(unmatchedClients),
@@ -248,6 +259,17 @@ function DeliveryUpload() {
     if (bErr) { setBusy(false); return toast.error(bErr.message); }
 
     const records = preview.records.map((r) => ({ ...r, batch_id: batch.id }));
+
+    // TIMPA: hapus dulu versi lama di DB (berdasar Dash ID) buat baris yang udah ada,
+    // biar diganti sama data baru — bukan dobel, dan status/data ke-refresh.
+    if (preview.overwriteDashIds.length) {
+      for (let i = 0; i < preview.overwriteDashIds.length; i += 200) {
+        const chunk = preview.overwriteDashIds.slice(i, i + 200);
+        const { error: delErr } = await (supabase as any).from("delivery_records").delete().in("dash_delivery_id", chunk);
+        if (delErr) { setBusy(false); return toast.error(`Gagal hapus data lama: ${delErr.message}`); }
+      }
+    }
+
     let inserted = 0;
     for (let i = 0; i < records.length; i += 500) {
       const chunk = records.slice(i, i + 500);
@@ -271,7 +293,8 @@ function DeliveryUpload() {
     setBusy(false);
     toast.success(
       `Berhasil upload ${inserted} record` +
-      (preview.duplicateCount ? ` · ${preview.duplicateCount} duplikat di-skip` : "") +
+      (preview.overwriteCount ? ` · ${preview.overwriteCount} data lama ditimpa (diperbarui)` : "") +
+      (preview.fileRepeatCount ? ` · ${preview.fileRepeatCount} baris dobel di file di-skip` : "") +
       (preview.createdRiderCodes.length ? ` · ${preview.createdRiderCodes.length} rider baru otomatis terdaftar` : "")
     );
     if (preview.unmatchedClients.length > 0) {
@@ -365,25 +388,29 @@ function DeliveryPreviewModal({ preview, busy, onCancel, onConfirm }: {
           <button onClick={onCancel} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 text-sm mb-4">
+        <div className="grid grid-cols-2 gap-2 text-sm mb-3">
           <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Total baris di file</div><div className="font-semibold">{preview.totalRows}</div></div>
-          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Siap diupload</div><div className="font-semibold text-success">{preview.records.length}</div></div>
-          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Duplikat (di-skip)</div><div className="font-semibold text-warning">{preview.duplicateCount}</div></div>
+          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Baru (belum ada)</div><div className="font-semibold text-success">{preview.newCount}</div></div>
+          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Ditimpa (data lama diperbarui)</div><div className="font-semibold text-primary">{preview.overwriteCount}</div></div>
           <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Anomali (cek manual)</div><div className="font-semibold text-warning">{preview.anomalyCount}</div></div>
         </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          Order yang Dash ID + Provider ID-nya sudah ada bakal <b className="text-primary">diperbarui</b> (data lama diganti yang baru), bukan digandakan.
+          {preview.fileRepeatCount > 0 && ` ${preview.fileRepeatCount} baris kembar di dalam file ini di-skip.`}
+        </p>
 
-        {preview.duplicateSamples.length > 0 && (
+        {preview.overwriteSamples.length > 0 && (
           <div className="mb-3">
-            <p className="text-xs font-medium mb-1">Contoh duplikat (Dash ID + Provider ID sama-sama cocok):</p>
+            <p className="text-xs font-medium mb-1">Contoh yang bakal diperbarui (data lama ditimpa):</p>
             <div className="rounded-md border border-border max-h-32 overflow-y-auto text-xs font-mono">
-              {preview.duplicateSamples.map((d, i) => (
+              {preview.overwriteSamples.map((d, i) => (
                 <div key={i} className="px-2 py-1 border-t border-border first:border-t-0 flex justify-between gap-2">
                   <span className="truncate">{d.dash} / {d.provider}</span>
-                  <span className="text-muted-foreground flex-shrink-0">{d.source === "file" ? "dobel di file" : "sudah ada di DB"}</span>
+                  <span className="text-primary flex-shrink-0">→ diperbarui</span>
                 </div>
               ))}
-              {preview.duplicateCount > preview.duplicateSamples.length && (
-                <div className="px-2 py-1 border-t border-border text-muted-foreground">+{preview.duplicateCount - preview.duplicateSamples.length} lainnya</div>
+              {preview.overwriteCount > preview.overwriteSamples.length && (
+                <div className="px-2 py-1 border-t border-border text-muted-foreground">+{preview.overwriteCount - preview.overwriteSamples.length} lainnya</div>
               )}
             </div>
           </div>
