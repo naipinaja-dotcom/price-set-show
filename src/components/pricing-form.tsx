@@ -763,9 +763,17 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">
-                    <FieldLabel>Kolom acuan</FieldLabel>
-                    <TextInput value={f.flatUnit.match_column} onChange={(e) => patch({ flatUnit: { ...f.flatUnit, match_column: e.target.value } })} placeholder="Area" />
-                    <p className="text-[11px] text-muted-foreground">Ketik "Area", "Service", atau "Delivery Type" (buat bedain tarif Delivery vs Return — dideteksi otomatis dari data).</p>
+                    <FieldLabel>Tarif dibedakan berdasarkan</FieldLabel>
+                    <select
+                      value={/service|layanan/i.test(f.flatUnit.match_column) ? "Service Type" : /delivery type|return|tipe kirim/i.test(f.flatUnit.match_column) ? "Delivery Type" : "Area"}
+                      onChange={(e) => patch({ flatUnit: { ...f.flatUnit, match_column: e.target.value } })}
+                      className="w-full text-sm rounded-md border border-border bg-card px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="Area">Area / Wilayah</option>
+                      <option value="Service Type">Jenis Layanan (Service)</option>
+                      <option value="Delivery Type">Antar / Kembali (Delivery vs Return)</option>
+                    </select>
+                    <p className="text-[11px] text-muted-foreground">"Antar/Kembali" dideteksi otomatis oleh sistem — ga perlu ada kolomnya di file CSV.</p>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <FieldLabel>Default Rate (fallback, Rp)</FieldLabel>
@@ -774,7 +782,7 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
                 </div>
                 <TableShell>
                   <>
-                    <Th>Nilai Kolom (cth: Jakarta Pusat)</Th>
+                    <Th>{/delivery type|return|tipe kirim/i.test(f.flatUnit.match_column) ? "Nilai (DELIVERY / RETURN)" : /service|layanan/i.test(f.flatUnit.match_column) ? "Nilai (cth: INSTANT)" : "Nilai Kolom (cth: Jakarta Pusat)"}</Th>
                     <Th className="w-44">Tarif (Rp)</Th>
                     <Th className="w-10" />
                   </>
