@@ -160,10 +160,15 @@ function DeliveryUpload() {
 }
 
 function AttendanceUpload() {
+  const [clients, setClients] = useState<Client[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<string[][]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    supabase.from("clients").select("id, name").then(({ data }) => setClients(data ?? []));
+  }, []);
 
   const onFile = async (f: File) => {
     setFile(f);
@@ -204,12 +209,25 @@ function AttendanceUpload() {
       return toast.error(`Gagal lookup rider: ${(e as Error).message}`);
     }
 
+    // Cocokkan nama client di CSV ke client yang beneran ada di sistem —
+    // dipakai Payroll Run buat milih aturan absensi (attendance_rules) yang
+    // tepat per client, bukan nebak dari client_id tetap di rider.
+    const clientByName = new Map(clients.map((c) => [c.name.trim().toLowerCase(), c.id]));
+    const unmatchedClients = new Set<string>();
+
     const logs = rows.map((r) => {
       const code = r[iCode];
       const duration = parseDur(r[iDur] ?? "");
+      const clientNameRaw = r[iClient] ?? null;
+      let client_id: string | null = null;
+      if (clientNameRaw) {
+        const hit = clientByName.get(clientNameRaw.trim().toLowerCase());
+        if (hit) client_id = hit;
+        else unmatchedClients.add(clientNameRaw);
+      }
       return {
         batch_id: batch.id, rider_id: code ? riderMap.get(code) ?? null : null, driver_code: code,
-        client_name: r[iClient] ?? null,
+        client_name: clientNameRaw, client_id,
         log_date: r[iDate] || new Date().toISOString().slice(0, 10),
         clock_in: r[iIn] || null, clock_out: r[iOut] || null,
         duration_minutes: duration,
@@ -220,12 +238,15 @@ function AttendanceUpload() {
     let inserted = 0;
     for (let i = 0; i < logs.length; i += 500) {
       const chunk = logs.slice(i, i + 500);
-      const { error } = await supabase.from("attendance_logs").insert(chunk);
+      const { error } = await (supabase as any).from("attendance_logs").insert(chunk);
       if (error) { setBusy(false); return toast.error(error.message); }
       inserted += chunk.length;
     }
     setBusy(false);
     toast.success(`Berhasil upload ${inserted} log absensi` + (createdCodes.length ? ` · ${createdCodes.length} rider baru otomatis terdaftar` : ""));
+    if (unmatchedClients.size > 0) {
+      toast.warning(`Nama client tidak dikenal (aturan absensi mungkin salah pilih): ${Array.from(unmatchedClients).join(", ")}`);
+    }
     setFile(null); setHeaders([]); setRows([]);
   };
 

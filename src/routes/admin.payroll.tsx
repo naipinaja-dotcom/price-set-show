@@ -61,7 +61,7 @@ function PayrollPage() {
       supabase.from("riders").select("id, client_id, employee_id, full_name").eq("status", "active"),
       supabase.from("delivery_records").select("rider_id, client_id, fee")
         .gte("delivery_date", activeRun.period_start).lte("delivery_date", activeRun.period_end),
-      supabase.from("attendance_logs").select("rider_id, is_late, is_absent")
+      (supabase as any).from("attendance_logs").select("rider_id, client_id, is_late, is_absent")
         .gte("log_date", activeRun.period_start).lte("log_date", activeRun.period_end),
       supabase.from("attendance_rules").select("*").eq("active", true),
       supabase.from("attendance_incentives").select("*"),
@@ -74,18 +74,32 @@ function PayrollPage() {
 
     for (const rider of riders ?? []) {
       const rDelivs = (deliveries ?? []).filter((d) => d.rider_id === rider.id);
-      const rAttend = (attendance ?? []).filter((a) => a.rider_id === rider.id);
-      const presentDays = rAttend.filter((a) => !a.is_absent).length;
-      const lateDays = rAttend.filter((a) => a.is_late).length;
-      const absentDays = rAttend.filter((a) => a.is_absent).length;
+      const rAttend = (attendance ?? []).filter((a: any) => a.rider_id === rider.id);
 
-      const rule = (rules ?? []).find((x: any) => x.client_id === rider.client_id) ?? (rules ?? [])[0];
-      const baseFee = rule ? Number(rule.daily_base_fee) * presentDays : 0;
-      const latePen = rule ? Number(rule.late_penalty) * lateDays : 0;
-      const absPen = rule ? Number(rule.absent_penalty) * absentDays : 0;
+      // Rider bisa jalan di banyak client dengan aturan absensi (attendance_rules)
+      // yang beda — jadi dikelompokkan per client dulu, BUKAN pakai client_id
+      // tetap di rider (rider bisa aja ga punya "client tetap").
+      const byClient = new Map<string, typeof rAttend>();
+      rAttend.forEach((a: any) => {
+        const key = a.client_id ?? "(none)";
+        const g = byClient.get(key);
+        if (g) g.push(a); else byClient.set(key, [a]);
+      });
 
-      const ruleInc = rule ? (incentives ?? []).filter((i: any) => i.rule_id === rule.id) : [];
-      const incentiveTotal = ruleInc.reduce((s: number, i: any) => s + (presentDays > 0 ? Number(i.amount) : 0), 0);
+      let baseFee = 0, latePen = 0, absPen = 0, incentiveTotal = 0;
+      for (const [clientKey, logs] of byClient) {
+        const clientId = clientKey === "(none)" ? null : clientKey;
+        const rule = (rules ?? []).find((x: any) => x.client_id === clientId) ?? (rules ?? []).find((x: any) => !x.client_id);
+        if (!rule) continue;
+        const presentDays = logs.filter((a: any) => !a.is_absent).length;
+        const lateDays = logs.filter((a: any) => a.is_late).length;
+        const absentDays = logs.filter((a: any) => a.is_absent).length;
+        baseFee += Number(rule.daily_base_fee) * presentDays;
+        latePen += Number(rule.late_penalty) * lateDays;
+        absPen += Number(rule.absent_penalty) * absentDays;
+        const ruleInc = (incentives ?? []).filter((i: any) => i.rule_id === rule.id);
+        incentiveTotal += ruleInc.reduce((s: number, i: any) => s + (presentDays > 0 ? Number(i.amount) : 0), 0);
+      }
 
       const deliveryFee = rDelivs.reduce((s, d) => s + Number(d.fee || 0), 0);
       const deliveryCount = rDelivs.length;
