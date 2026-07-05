@@ -161,10 +161,18 @@ function DeliveryUpload() {
     const idxPickup = dateColIdx(/tanggal\s*pickup/i);
     const idxStatus = dateColIdx(/tanggal\s*status/i);
     const idxCreate = dateColIdx(/tanggal\s*(pembuatan|order|buat)/i);
+    // Buang nilai bukan-tanggal (mis. "-", kosong) — biar ga bikin insert gagal
+    // (delivery_date bertipe date NOT NULL). Kalau format ISO, ambil bagian
+    // tanggalnya; format lain dibiarin utuh biar Postgres yang parse.
+    const cleanDate = (v: string | null | undefined): string | null => {
+      const t = (v ?? "").trim();
+      if (!t || !/\d/.test(t)) return null; // "-", kosong, atau ga ada angka → lewati
+      return /^\d{4}-\d{2}-\d{2}/.test(t) ? t.slice(0, 10) : t;
+    };
     const pickDeliveryDate = (r: string[]) => {
       for (const idx of [idxMapped, idxPickup, idxStatus, idxCreate]) {
-        const v = idx >= 0 ? r[idx] : null;
-        if (v && v.trim()) return v.trim().slice(0, 10);
+        const c = idx >= 0 ? cleanDate(r[idx]) : null;
+        if (c) return c;
       }
       return new Date().toISOString().slice(0, 10);
     };
