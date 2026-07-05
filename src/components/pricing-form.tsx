@@ -456,13 +456,19 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
 
   const [saving, setSaving] = useState(false);
   const handleSave = async () => {
-    if (!name.trim()) return toast.error("Nama skema wajib diisi");
     if (!effFrom) return toast.error("Tanggal berlaku dari wajib diisi");
+    // Nama opsional — kalau dikosongin, dibikinin otomatis dari client + sisi + tipe.
+    const autoName = [
+      clients.find((c) => c.id === clientId)?.name ?? "Semua Client",
+      schemeFor === "client" ? "Client" : "Rider",
+      PRICING_TYPES.find((t) => t.key === calcType)?.name ?? calcType,
+    ].join(" · ");
+    const finalName = name.trim() || autoName;
     setSaving(true);
     try {
       await savePricingScheme({
         id: existing?.id,
-        name: name.trim(),
+        name: finalName,
         client_id: clientId || null,
         scheme_for: schemeFor,
         calc_type: calcType,
@@ -519,8 +525,8 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
       <div className="rounded-lg border border-border bg-card p-5 mb-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div className="flex flex-col gap-1.5">
-            <FieldLabel>Nama Skema</FieldLabel>
-            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="cth: Bro Shoes - Bayar Rider" />
+            <FieldLabel>Nama Skema <span className="font-normal text-muted-foreground">(opsional)</span></FieldLabel>
+            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Kosongin = otomatis dari client + sisi + tipe" />
           </div>
           <div className="flex flex-col gap-1.5">
             <FieldLabel>Client</FieldLabel>
