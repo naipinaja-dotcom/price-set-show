@@ -42,6 +42,14 @@ export interface RiderLine {
   total: number;
 }
 
+export interface RowAnomaly {
+  rider: string;
+  date: string;
+  awb?: string | null;
+  kind: "zero_distance_paid" | "missing_weight" | "zero_fee";
+  detail: string;
+}
+
 export interface CalcResult {
   perRow: RowFee[]; // 1 entri per baris COMPLETED (buat commit ke DB)
   perRider: RiderLine[];
@@ -51,6 +59,7 @@ export interface CalcResult {
   completedRows: number;
   skippedRows: number;
   warnings: string[];
+  anomalies: RowAnomaly[]; // ga bikin gagal komputasi, cuma diflag buat dicek manual
 }
 
 // ---------------- helpers ----------------
@@ -204,6 +213,23 @@ export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResul
     fee: baseByRow[i] + addByRow[i] + mdByRow[i],
   }));
 
+  // ---- deteksi anomali sederhana — jangan gagalin komputasi, cuma diflag ----
+  const dependsOnWeight = !!env.add_kg || (["tier", "tier_daily"].includes(env.type) && !!cfg?.weight);
+  const anomalies: RowAnomaly[] = [];
+  completed.forEach((r, i) => {
+    const fee = perRow[i].fee;
+    const dist = Number(r.distance_km) || 0;
+    if ((!r.distance_km || dist === 0) && fee > 0) {
+      anomalies.push({ rider: riderKey(r), date: r.delivery_date, awb: r.awb, kind: "zero_distance_paid", detail: `Jarak 0/kosong tapi kena fee ${fee.toLocaleString("id-ID")}` });
+    }
+    if (dependsOnWeight && (r.weight_kg === null || r.weight_kg === undefined)) {
+      anomalies.push({ rider: riderKey(r), date: r.delivery_date, awb: r.awb, kind: "missing_weight", detail: "Berat kosong padahal skema butuh berat" });
+    }
+    if (fee === 0) {
+      anomalies.push({ rider: riderKey(r), date: r.delivery_date, awb: r.awb, kind: "zero_fee", detail: "Fee 0 padahal status COMPLETED — cek apakah ada tarif yang cocok" });
+    }
+  });
+
   const riderMap = new Map<string, RiderLine>();
   perRow.forEach((rf) => {
     const line = riderMap.get(rf.rider) ?? { rider: rf.rider, units: 0, base: 0, add_kg: 0, multi_drop: 0, total: 0 };
@@ -235,5 +261,5 @@ export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResul
 
   if (skipped > 0) warnings.push(`${skipped} baris di-skip (status bukan COMPLETED).`);
 
-  return { perRow, perRider, subtotal, billing, grandTotal, completedRows: completed.length, skippedRows: skipped, warnings };
+  return { perRow, perRider, subtotal, billing, grandTotal, completedRows: completed.length, skippedRows: skipped, warnings, anomalies };
 }

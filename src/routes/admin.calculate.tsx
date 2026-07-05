@@ -179,6 +179,23 @@ function CalculatePage() {
             </div>
           )}
 
+          {/* Anomali */}
+          {result.anomalies.length > 0 && (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 mb-4 text-xs text-amber-700 dark:text-amber-300">
+              <div className="flex items-center gap-2 font-medium mb-1.5">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" /> {result.anomalies.length} baris anomali terdeteksi — cek manual, tidak otomatis di-skip
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-0.5">
+                {result.anomalies.slice(0, 50).map((a, i) => (
+                  <div key={i} className="font-mono">
+                    {riderNames[a.rider] ?? a.rider} · {a.date}{a.awb ? ` · ${a.awb}` : ""} — {a.detail}
+                  </div>
+                ))}
+                {result.anomalies.length > 50 && <div>+{result.anomalies.length - 50} lainnya</div>}
+              </div>
+            </div>
+          )}
+
           {/* Rincian per rider */}
           <div className="rounded-lg border border-border overflow-hidden mb-4">
             <table className="w-full text-sm">

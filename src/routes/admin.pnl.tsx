@@ -135,24 +135,26 @@ function PnlPage() {
                   {rows.length === 0 ? (
                     <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">Tidak ada data.</td></tr>
                   ) : rows.map((r) => {
-                    const thin = r.marginPct !== null && r.marginPct < 15;
+                    const loss = r.marginPct !== null && r.marginPct < 0;
+                    const thin = r.marginPct !== null && r.marginPct >= 0 && r.marginPct < 15;
                     const noRev = r.revenue === null;
+                    const color = loss ? "text-red-500" : thin ? "text-amber-500" : "text-emerald-500";
                     return (
-                      <tr key={r.clientId} className={"border-t border-border " + (thin && !noRev ? "bg-amber-500/5" : "")}>
-                        <td className="p-3 font-medium">{r.client}{thin && !noRev ? " ⚠️" : ""}</td>
+                      <tr key={r.clientId} className={"border-t border-border " + (noRev ? "" : loss ? "bg-red-500/5" : thin ? "bg-amber-500/5" : "")}>
+                        <td className="p-3 font-medium">{r.client}{!noRev && loss ? " 🔴 RUGI" : !noRev && thin ? " ⚠️" : ""}</td>
                         <td className="p-3 text-right">{noRev ? <span className="text-muted-foreground">— belum ada skema client</span> : formatRupiah(r.revenue!)}</td>
                         <td className="p-3 text-right text-muted-foreground">{formatRupiah(r.cost)}</td>
-                        <td className={"p-3 text-right font-medium " + (noRev ? "" : thin ? "text-amber-500" : "text-emerald-500")}>
+                        <td className={"p-3 text-right font-medium " + (noRev ? "" : color)}>
                           {noRev ? "—" : formatRupiah(r.margin!)}
                         </td>
                         <td className="p-3">
                           {noRev ? "—" : (
                             <div className="flex items-center gap-2">
                               <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-                                <div className={"h-full " + (thin ? "bg-amber-500" : "bg-emerald-500")}
+                                <div className={"h-full " + (loss ? "bg-red-500" : thin ? "bg-amber-500" : "bg-emerald-500")}
                                   style={{ width: Math.max(3, Math.min(100, (Math.abs(r.margin ?? 0) / maxMargin) * 100)) + "%" }} />
                               </div>
-                              <span className={"text-xs " + (thin ? "text-amber-500" : "")}>{r.marginPct!.toFixed(1)}%</span>
+                              <span className={"text-xs " + color}>{r.marginPct!.toFixed(1)}%</span>
                             </div>
                           )}
                         </td>
@@ -177,7 +179,7 @@ function PnlPage() {
 
           <div className="flex items-start gap-2 mt-3 text-xs text-muted-foreground">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-500" />
-            <span>Baris kuning = margin tipis (&lt;15%). "Belum ada skema client" = revenue-nya belum bisa dihitung karena client itu belum punya skema pricing sisi client. Angka Revenue/Cost dihitung live dari skema + data pengiriman (belum termasuk PPN).</span>
+            <span>Baris kuning = margin tipis (0–15%). Baris merah = 🔴 RUGI (cost lebih besar dari revenue). "Belum ada skema client" = revenue-nya belum bisa dihitung karena client itu belum punya skema pricing sisi client. Angka Revenue/Cost dihitung live dari skema + data pengiriman (belum termasuk PPN).</span>
           </div>
         </>
       )}
