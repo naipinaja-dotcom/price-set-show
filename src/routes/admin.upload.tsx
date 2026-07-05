@@ -320,12 +320,32 @@ function DeliveryUpload() {
       }
     }
 
+    // Insert per gelombang 500 baris. Kalau 1 gelombang gagal, JANGAN berhenti
+    // total (gelombang sebelumnya udah kepalang masuk & ga bisa ditarik lagi,
+    // menghentikan proses cuma bikin sisa data ilang tanpa laporan jelas).
+    // Sebagai gantinya: coba insert satu-satu di gelombang yang gagal, biar
+    // 1 baris jelek ga ngorbanin ratusan baris baik lainnya di gelombang itu.
     let inserted = 0;
+    const failedRows: { dash: string | null; error: string }[] = [];
     for (let i = 0; i < records.length; i += 500) {
       const chunk = records.slice(i, i + 500);
       const { error } = await (supabase as any).from("delivery_records").insert(chunk);
-      if (error) { setBusy(false); return toast.error(error.message); }
-      inserted += chunk.length;
+      if (!error) { inserted += chunk.length; continue; }
+
+      // gelombang ini gagal → retry satu-satu buat isolasi baris yang bermasalah
+      for (const row of chunk) {
+        const { error: rowErr } = await (supabase as any).from("delivery_records").insert([row]);
+        if (rowErr) failedRows.push({ dash: (row as { dash_delivery_id?: string | null }).dash_delivery_id ?? null, error: rowErr.message });
+        else inserted++;
+      }
+    }
+
+    if (failedRows.length > 0) {
+      toast.error(
+        `${inserted} baris berhasil masuk, TAPI ${failedRows.length} baris gagal (dilewati): ` +
+        failedRows.slice(0, 5).map((f) => `${f.dash ?? "(tanpa dash id)"} — ${f.error}`).join(" | ") +
+        (failedRows.length > 5 ? ` · +${failedRows.length - 5} lainnya` : "")
+      );
     }
 
     // Klasifikasi Delivery/Return otomatis buat tiap client yang kena upload ini
