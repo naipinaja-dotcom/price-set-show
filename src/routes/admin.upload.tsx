@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { parseCSV } from "@/lib/csv";
 import { resolveOrCreateRiders } from "@/lib/rider-lookup";
+import { classifyAllClients } from "@/lib/delivery-classification";
 import { toast } from "sonner";
-import { Upload, FileText, Loader2, AlertTriangle, X } from "lucide-react";
+import { Upload, FileText, Loader2, AlertTriangle, X, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/admin/upload")({ component: UploadPage });
 
@@ -39,7 +40,7 @@ function UploadPage() {
   );
 }
 
-const DELIVERY_FIELDS = ["driver_code","driver_name","client_name","status","dash_delivery_id","provider_order_id","delivery_date","awb","district","distance_km","weight_kg","destination_address","receiver_name","service_type"];
+const DELIVERY_FIELDS = ["driver_code","driver_name","client_name","status","dash_delivery_id","provider_order_id","delivery_date","awb","district","distance_km","weight_kg","destination_address","sender_name","receiver_name","service_type"];
 
 interface DeliveryPreview {
   records: Record<string, unknown>[]; // sudah dikurangi duplikat, siap insert
@@ -62,10 +63,28 @@ function DeliveryUpload() {
   const [busy, setBusy] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [preview, setPreview] = useState<DeliveryPreview | null>(null);
+  const [reclassifying, setReclassifying] = useState(false);
 
   useEffect(() => {
     supabase.from("clients").select("id, name").then(({ data }) => setClients(data ?? []));
   }, []);
+
+  // Buat data lama yang udah keupload SEBELUM fitur klasifikasi Delivery/Return
+  // ini ada — hitung ulang semua client, bukan cuma yang baru diupload.
+  const reclassifyAll = async () => {
+    if (!confirm(`Hitung ulang Delivery/Return buat semua ${clients.length} client? Ini bisa makan waktu kalau datanya banyak.`)) return;
+    setReclassifying(true);
+    try {
+      const results = await classifyAllClients(clients.map((c) => c.id));
+      const totalUnclassified = results.reduce((s, r) => s + r.unclassifiedCount, 0);
+      toast.success(`Klasifikasi ulang selesai buat ${results.length} client.`);
+      if (totalUnclassified > 0) toast.warning(`${totalUnclassified} baris ga bisa ditandain (kemungkinan outlet-ke-outlet) — cek data Sender/Receiver Name.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setReclassifying(false);
+    }
+  };
 
   const onFile = async (f: File) => {
     setFile(f);
@@ -149,6 +168,7 @@ function DeliveryUpload() {
         distance_km: parseFloat(get(r, "distance_km") || "0") || null,
         weight_kg: parseFloat(get(r, "weight_kg") || "0") || null,
         destination_address: get(r, "destination_address"),
+        sender_name: get(r, "sender_name"),
         receiver_name: get(r, "receiver_name"),
         service_type: get(r, "service_type"),
       };
@@ -234,6 +254,19 @@ function DeliveryUpload() {
       if (error) { setBusy(false); return toast.error(error.message); }
       inserted += chunk.length;
     }
+
+    // Klasifikasi Delivery/Return otomatis buat tiap client yang kena upload ini
+    const affectedClientIds = Array.from(new Set(records.map((r) => (r as { client_id?: string | null }).client_id).filter((v): v is string => !!v)));
+    let unclassifiedTotal = 0;
+    if (affectedClientIds.length > 0) {
+      try {
+        const results = await classifyAllClients(affectedClientIds);
+        unclassifiedTotal = results.reduce((s, r) => s + r.unclassifiedCount, 0);
+      } catch (e) {
+        toast.warning(`Klasifikasi Delivery/Return gagal jalan: ${(e as Error).message}`);
+      }
+    }
+
     setBusy(false);
     toast.success(
       `Berhasil upload ${inserted} record` +
@@ -246,11 +279,21 @@ function DeliveryUpload() {
     if (preview.anomalyCount > 0) {
       toast.warning(`${preview.anomalyCount} baris anomali (cuma salah satu ID cocok) — tetap terupload, tapi cek manual.`);
     }
+    if (unclassifiedTotal > 0) {
+      toast.warning(`${unclassifiedTotal} baris ga bisa ditandain Delivery/Return (sender & receiver dua-duanya bukan titik pusat — kemungkinan kiriman outlet-ke-outlet). Cek & lengkapi data Sender/Receiver Name kalau ini seharusnya bukan kasus itu.`);
+    }
     setFile(null); setHeaders([]); setRows([]); setMapping({}); setPreview(null);
   };
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={reclassifyAll} disabled={reclassifying || clients.length === 0}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">
+          {reclassifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          Hitung Ulang Delivery/Return (semua data lama)
+        </button>
+      </div>
       <div>
         <label className="text-sm font-medium">Client {hasClientColumn && <span className="font-normal text-muted-foreground">(diabaikan — file sudah punya kolom client sendiri, per baris auto-detect)</span>}</label>
         <select value={clientId} onChange={(e) => setClientId(e.target.value)} disabled={hasClientColumn}

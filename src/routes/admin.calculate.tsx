@@ -60,7 +60,7 @@ function CalculatePage() {
     try {
       let q = supabase
         .from("delivery_records")
-        .select("id, rider_id, driver_code, delivery_date, awb, district, distance_km, weight_kg, destination_address, service_type, status, riders(full_name, employee_id)")
+        .select("id, rider_id, driver_code, delivery_date, awb, district, distance_km, weight_kg, destination_address, service_type, status, delivery_type, riders(full_name, employee_id)")
         .gte("delivery_date", from)
         .lte("delivery_date", to);
       if (clientId) q = q.eq("client_id", clientId);

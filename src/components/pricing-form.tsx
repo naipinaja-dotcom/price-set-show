@@ -633,6 +633,7 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
                   <div className="flex flex-col gap-1.5">
                     <FieldLabel>Kolom acuan</FieldLabel>
                     <TextInput value={f.flatUnit.match_column} onChange={(e) => patch({ flatUnit: { ...f.flatUnit, match_column: e.target.value } })} placeholder="Area" />
+                    <p className="text-[11px] text-muted-foreground">Ketik "Area", "Service", atau "Delivery Type" (buat bedain tarif Delivery vs Return — dideteksi otomatis dari data).</p>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <FieldLabel>Default Rate (fallback, Rp)</FieldLabel>

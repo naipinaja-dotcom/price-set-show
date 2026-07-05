@@ -51,7 +51,7 @@ function PnlPage() {
     try {
       const { data, error } = await supabase
         .from("delivery_records")
-        .select("client_id, rider_id, driver_code, delivery_date, district, distance_km, weight_kg, destination_address, service_type, status")
+        .select("client_id, rider_id, driver_code, delivery_date, district, distance_km, weight_kg, destination_address, service_type, status, delivery_type")
         .gte("delivery_date", from).lte("delivery_date", to);
       if (error) throw error;
 

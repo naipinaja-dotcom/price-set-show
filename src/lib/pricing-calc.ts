@@ -20,6 +20,7 @@ export interface DeliveryRow {
   destination_address?: string | null;
   service_type?: string | null;
   status?: string | null;
+  delivery_type?: string | null; // "DELIVERY" | "RETURN" | null (belum ke-klasifikasi)
 }
 
 export interface RowFee {
@@ -60,6 +61,7 @@ const isCompleted = (r: DeliveryRow) => norm(r.status) === "completed";
 function resolveField(row: DeliveryRow, columnName: string): string {
   const c = norm(columnName);
   if (c.includes("service") || c.includes("layanan")) return String(row.service_type ?? "");
+  if (c.includes("return") || c.includes("delivery type") || c.includes("tipe kirim")) return String(row.delivery_type ?? "");
   return String(row.district ?? "");
 }
 
