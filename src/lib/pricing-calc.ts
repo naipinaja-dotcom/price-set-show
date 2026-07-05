@@ -64,7 +64,7 @@ export interface CalcResult {
 
 // ---------------- helpers ----------------
 const norm = (s: unknown) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-const riderKey = (r: DeliveryRow) => r.rider_id || r.driver_code || "(tanpa rider)";
+const riderKey = (r: { rider_id?: string | null; driver_code?: string | null }) => r.rider_id || r.driver_code || "(tanpa rider)";
 const isCompleted = (r: DeliveryRow) => norm(r.status) === "completed";
 
 function resolveField(row: DeliveryRow, columnName: string): string {
@@ -262,4 +262,102 @@ export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResul
   if (skipped > 0) warnings.push(`${skipped} baris di-skip (status bukan COMPLETED).`);
 
   return { perRow, perRider, subtotal, billing, grandTotal, completedRows: completed.length, skippedRows: skipped, warnings, anomalies };
+}
+
+// =========================================================
+// Type E (Attendance) — data absensi harian, BEDA bentuk dari
+// DeliveryRow, jadi engine-nya kepisah sendiri.
+// Rumus: (fee_penuh × proporsi_jam_kerja) [+ lembur] + insentif
+// (nominal insentif ditentuin di skema; data cuma dipakai cek syarat,
+// mis. OTP=ONTIME buat insentif "ontime_only", biner: penuh/nol).
+// =========================================================
+export interface AttendanceLogRow {
+  id?: string | null;
+  rider_id?: string | null;
+  driver_code?: string | null;
+  log_date: string;
+  duration_minutes?: number | null;
+  is_late?: boolean | null;
+  is_absent?: boolean | null;
+}
+
+export interface AttendanceRowFee {
+  id?: string | null;
+  rider: string;
+  date: string;
+  base: number;
+  overtime: number;
+  incentive: number;
+  fee: number; // base + overtime + incentive
+}
+
+export interface AttendanceRiderLine {
+  rider: string;
+  daysWorked: number;
+  base: number;
+  overtime: number;
+  incentive: number;
+  total: number;
+}
+
+export interface AttendanceCalcResult {
+  perRow: AttendanceRowFee[];
+  perRider: AttendanceRiderLine[];
+  subtotal: number;
+  totalRows: number;
+  absentRows: number;
+  warnings: string[];
+}
+
+export function calcAttendanceScheme(env: PricingEnvelope, logs: AttendanceLogRow[]): AttendanceCalcResult {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cfg = env.config as any;
+  const fullFee = Number(cfg.full_fee) || 0;
+  const standardMin = Number(cfg.standard_minutes) || 0;
+  const overtimeOn = !!cfg.overtime?.enabled;
+  const overtimeRatePerHour = Number(cfg.overtime?.rate_per_hour) || 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const incentives: any[] = cfg.incentives ?? [];
+
+  const warnings: string[] = [];
+  if (standardMin <= 0) warnings.push("Jam standar shift belum diisi di skema — proporsi jam kerja tidak bisa dihitung dengan benar.");
+
+  let absentRows = 0;
+  const perRow: AttendanceRowFee[] = logs.map((r) => {
+    if (r.is_absent) {
+      absentRows++;
+      return { id: r.id ?? null, rider: riderKey(r), date: r.log_date, base: 0, overtime: 0, incentive: 0, fee: 0 };
+    }
+    const actualMin = Number(r.duration_minutes) || 0;
+    const proportion = standardMin > 0 ? Math.min(1, actualMin / standardMin) : (actualMin > 0 ? 1 : 0);
+    const base = Math.round(fullFee * proportion);
+
+    let overtime = 0;
+    if (overtimeOn && standardMin > 0 && actualMin > standardMin) {
+      overtime = Math.round(((actualMin - standardMin) / 60) * overtimeRatePerHour);
+    }
+
+    let incentiveTotal = 0;
+    for (const inc of incentives) {
+      const amount = Number(inc.amount) || 0;
+      if (inc.condition === "always") incentiveTotal += amount;
+      else if (inc.condition === "ontime_only" && !r.is_late) incentiveTotal += amount;
+    }
+
+    return { id: r.id ?? null, rider: riderKey(r), date: r.log_date, base, overtime, incentive: incentiveTotal, fee: base + overtime + incentiveTotal };
+  });
+
+  const riderMap = new Map<string, AttendanceRiderLine>();
+  perRow.forEach((rf, i) => {
+    const line = riderMap.get(rf.rider) ?? { rider: rf.rider, daysWorked: 0, base: 0, overtime: 0, incentive: 0, total: 0 };
+    if (!logs[i].is_absent) line.daysWorked += 1;
+    line.base += rf.base; line.overtime += rf.overtime; line.incentive += rf.incentive; line.total += rf.fee;
+    riderMap.set(rf.rider, line);
+  });
+  const perRider = [...riderMap.values()].sort((a, b) => b.total - a.total);
+
+  const subtotal = perRow.reduce((s, r) => s + r.fee, 0);
+  if (absentRows > 0) warnings.push(`${absentRows} baris absen (fee 0).`);
+
+  return { perRow, perRider, subtotal, totalRows: logs.length, absentRows, warnings };
 }

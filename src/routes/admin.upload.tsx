@@ -457,7 +457,7 @@ function AttendanceUpload() {
     if (bErr) { setBusy(false); return toast.error(bErr.message); }
 
     const idx = (name: string) => headers.findIndex((h) => h.toLowerCase().includes(name.toLowerCase()));
-    const iCode = idx("kode"), iName = idx("name"), iClient = idx("client"), iDate = idx("date"), iIn = idx("clock-in"), iOut = idx("clock-out"), iDur = idx("duration");
+    const iCode = idx("kode"), iName = idx("name"), iClient = idx("client"), iDate = idx("date"), iIn = idx("clock-in"), iOut = idx("clock-out"), iDur = idx("duration"), iOtp = idx("otp");
 
     // Rider berdiri sendiri dari kode MTR — sama seperti upload delivery,
     // kode yang belum terdaftar otomatis dibikinkan rider baru.
@@ -489,6 +489,7 @@ function AttendanceUpload() {
         if (hit) client_id = hit;
         else unmatchedClients.add(clientNameRaw);
       }
+      const otpRaw = iOtp >= 0 ? (r[iOtp] ?? "").trim().toLowerCase() : "";
       return {
         batch_id: batch.id, rider_id: code ? riderMap.get(code) ?? null : null, driver_code: code,
         client_name: clientNameRaw, client_id,
@@ -496,6 +497,7 @@ function AttendanceUpload() {
         clock_in: r[iIn] || null, clock_out: r[iOut] || null,
         duration_minutes: duration,
         is_absent: !r[iIn],
+        is_late: otpRaw === "late",
       };
     });
 
@@ -517,7 +519,7 @@ function AttendanceUpload() {
   return (
     <div className="space-y-4">
       <div className="text-xs text-muted-foreground">
-        Format kolom: <code>Kode Mitra, Client Name, Date, Clock-in, Clock-out, Duration</code>
+        Format kolom: <code>Kode Mitra, Client Name, Date, Clock-in, Clock-out, Duration, OTP</code> (OTP: ONTIME/LATE — dipakai buat insentif ontime di Type E)
       </div>
       <label className="block">
         <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} className="hidden" />

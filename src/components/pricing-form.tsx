@@ -61,8 +61,11 @@ interface ThresholdState {
   rules: { key: string; threshold: string; rate: string }[];
 }
 interface AttendanceState {
-  daily_base_fee: string;
-  components: { label: string; amount: string; condition: "always" | "conditional" }[];
+  full_fee: string;
+  standard_hours: string; // ditampilkan dalam jam, disimpan sebagai menit di config
+  overtimeOn: boolean;
+  overtime_rate_per_hour: string;
+  incentives: { label: string; amount: string; condition: "always" | "ontime_only" }[];
 }
 
 const emptyStepTier = (): StepTierState => ({ base_fee: "", base_until: "", tiers: [] });
@@ -108,8 +111,11 @@ function emptyForm(): FormState {
       rules: [{ key: "Store A", threshold: "4", rate: "12000" }],
     },
     attendance: {
-      daily_base_fee: "100000",
-      components: [{ label: "Uang Makan", amount: "20000", condition: "always" }],
+      full_fee: "100000",
+      standard_hours: "8",
+      overtimeOn: false,
+      overtime_rate_per_hour: "0",
+      incentives: [{ label: "Insentif Ontime", amount: "40000", condition: "ontime_only" }],
     },
     addKgOn: false,
     addKg: emptyStepTier(),
@@ -165,8 +171,10 @@ function buildConfig(type: PricingCalcType, f: FormState): Record<string, unknow
       };
     case "attendance":
       return {
-        daily_base_fee: parseRupiah(f.attendance.daily_base_fee),
-        components: f.attendance.components
+        full_fee: parseRupiah(f.attendance.full_fee),
+        standard_minutes: (Number(f.attendance.standard_hours) || 0) * 60,
+        overtime: f.attendance.overtimeOn ? { enabled: true, rate_per_hour: parseRupiah(f.attendance.overtime_rate_per_hour) } : null,
+        incentives: f.attendance.incentives
           .filter((c) => c.label.trim())
           .map((c) => ({ label: c.label.trim(), amount: parseRupiah(c.amount), condition: c.condition })),
       };
@@ -246,9 +254,12 @@ function loadForm(scheme: PricingScheme | undefined): { form: FormState; calcTyp
     };
   } else if (type === "attendance") {
     form.attendance = {
-      daily_base_fee: String(c.daily_base_fee ?? ""),
+      full_fee: String(c.full_fee ?? ""),
+      standard_hours: String((Number(c.standard_minutes) || 0) / 60 || ""),
+      overtimeOn: !!c.overtime?.enabled,
+      overtime_rate_per_hour: String(c.overtime?.rate_per_hour ?? "0"),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      components: (c.components ?? []).map((x: any) => ({ label: x.label ?? "", amount: String(x.amount ?? ""), condition: x.condition === "conditional" ? "conditional" : "always" })),
+      incentives: (c.incentives ?? []).map((x: any) => ({ label: x.label ?? "", amount: String(x.amount ?? ""), condition: x.condition === "ontime_only" ? "ontime_only" : "always" })),
     };
   }
 
@@ -485,8 +496,8 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
         return { label: "Estimasi 1 store (5 kg)", hint: r?.key ?? "store pertama", value: Math.ceil(5 / th) * parseRupiah(r?.rate ?? "0") };
       }
       case "attendance": {
-        const comp = f.attendance.components.filter((c) => c.condition === "always").reduce((a, c) => a + parseRupiah(c.amount), 0);
-        return { label: "Estimasi per hari", hint: "base + komponen 'selalu'", value: parseRupiah(f.attendance.daily_base_fee) + comp };
+        const always = f.attendance.incentives.filter((c) => c.condition === "always").reduce((a, c) => a + parseRupiah(c.amount), 0);
+        return { label: "Estimasi kerja penuh + selalu", hint: "belum termasuk insentif ontime (butuh cek OTP)", value: parseRupiah(f.attendance.full_fee) + always };
       }
     }
   }, [calcType, f]);
@@ -740,41 +751,64 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
 
         {/* ===== ATTENDANCE ===== */}
         {calcType === "attendance" && (
-          <div className="space-y-3">
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-700 dark:text-amber-300">
-              Type ini fase terpisah — kriteria "conditional" belum ditentukan.
+          <div className="space-y-4">
+            <div className="rounded-md border border-primary-border bg-primary-soft px-3.5 py-2.5 text-xs text-primary-soft-foreground">
+              Rumus: (fee penuh × proporsi jam kerja) {f.attendance.overtimeOn ? "+ lembur " : ""}+ insentif (nominal ditentuin di sini, data absensi cuma dipakai cek syarat — mis. OTP=ONTIME).
             </div>
-            <div className="flex flex-col gap-1.5 max-w-xs">
-              <FieldLabel>Daily Base Fee (Rp)</FieldLabel>
-              <RupiahInput value={f.attendance.daily_base_fee} onChange={(v) => patch({ attendance: { ...f.attendance, daily_base_fee: v } })} />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Fee Penuh per Shift (Rp)</FieldLabel>
+                <RupiahInput value={f.attendance.full_fee} onChange={(v) => patch({ attendance: { ...f.attendance, full_fee: v } })} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Jam Standar per Shift</FieldLabel>
+                <TextInput type="number" value={f.attendance.standard_hours} onChange={(e) => patch({ attendance: { ...f.attendance, standard_hours: e.target.value } })} placeholder="8" />
+              </div>
             </div>
-            <p className="text-xs font-medium text-muted-foreground">Komponen Tambahan</p>
-            <TableShell>
-              <>
-                <Th>Nama Komponen</Th>
-                <Th className="w-36">Jumlah (Rp)</Th>
-                <Th className="w-40">Sifat</Th>
-                <Th className="w-10" />
-              </>
-              {f.attendance.components.map((c, i) => (
-                <tr key={i} className="border-t border-border/60">
-                  <Td><TextInput value={c.label} placeholder="cth: Uang Makan" onChange={(e) => patch({ attendance: { ...f.attendance, components: f.attendance.components.map((x, idx) => (idx === i ? { ...x, label: e.target.value } : x)) } })} /></Td>
-                  <Td><RupiahInput value={c.amount} onChange={(v) => patch({ attendance: { ...f.attendance, components: f.attendance.components.map((x, idx) => (idx === i ? { ...x, amount: v } : x)) } })} /></Td>
-                  <Td>
-                    <select
-                      value={c.condition}
-                      onChange={(e) => patch({ attendance: { ...f.attendance, components: f.attendance.components.map((x, idx) => (idx === i ? { ...x, condition: e.target.value as "always" | "conditional" } : x)) } })}
-                      className="w-full text-sm rounded-md border border-border bg-card px-2 py-1.5"
-                    >
-                      <option value="always">Selalu dibayar</option>
-                      <option value="conditional">Conditional</option>
-                    </select>
-                  </Td>
-                  <Td className="text-center"><RowDeleteBtn onClick={() => patch({ attendance: { ...f.attendance, components: f.attendance.components.filter((_, idx) => idx !== i) } })} /></Td>
-                </tr>
-              ))}
-            </TableShell>
-            <AddRowBtn onClick={() => patch({ attendance: { ...f.attendance, components: [...f.attendance.components, { label: "", amount: "", condition: "always" }] } })}>Tambah Komponen</AddRowBtn>
+            <p className="text-[11px] text-muted-foreground -mt-2">Kerja kurang dari jam standar dibayar proporsional. Kerja pas/lebih = fee penuh (kecuali lembur dinyalain di bawah).</p>
+
+            <ToggleBlock
+              label="Lembur (bayar kelebihan jam kerja)"
+              hint="Kalau mati, kerja lebih dari jam standar tetap mentok di fee penuh (tidak ada tambahan)."
+              on={f.attendance.overtimeOn}
+              onToggle={(on) => patch({ attendance: { ...f.attendance, overtimeOn: on } })}
+            >
+              <div className="max-w-xs">
+                <FieldLabel>Tarif Lembur per Jam (Rp)</FieldLabel>
+                <RupiahInput value={f.attendance.overtime_rate_per_hour} onChange={(v) => patch({ attendance: { ...f.attendance, overtime_rate_per_hour: v } })} />
+              </div>
+            </ToggleBlock>
+
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2">Insentif</p>
+              <TableShell>
+                <>
+                  <Th>Nama Insentif</Th>
+                  <Th className="w-36">Jumlah (Rp)</Th>
+                  <Th className="w-44">Syarat Cair</Th>
+                  <Th className="w-10" />
+                </>
+                {f.attendance.incentives.map((c, i) => (
+                  <tr key={i} className="border-t border-border/60">
+                    <Td><TextInput value={c.label} placeholder="cth: Insentif Ontime" onChange={(e) => patch({ attendance: { ...f.attendance, incentives: f.attendance.incentives.map((x, idx) => (idx === i ? { ...x, label: e.target.value } : x)) } })} /></Td>
+                    <Td><RupiahInput value={c.amount} onChange={(v) => patch({ attendance: { ...f.attendance, incentives: f.attendance.incentives.map((x, idx) => (idx === i ? { ...x, amount: v } : x)) } })} /></Td>
+                    <Td>
+                      <select
+                        value={c.condition}
+                        onChange={(e) => patch({ attendance: { ...f.attendance, incentives: f.attendance.incentives.map((x, idx) => (idx === i ? { ...x, condition: e.target.value as "always" | "ontime_only" } : x)) } })}
+                        className="w-full text-sm rounded-md border border-border bg-card px-2 py-1.5"
+                      >
+                        <option value="always">Selalu (hari kerja)</option>
+                        <option value="ontime_only">Cuma kalau ONTIME</option>
+                      </select>
+                    </Td>
+                    <Td className="text-center"><RowDeleteBtn onClick={() => patch({ attendance: { ...f.attendance, incentives: f.attendance.incentives.filter((_, idx) => idx !== i) } })} /></Td>
+                  </tr>
+                ))}
+              </TableShell>
+              <AddRowBtn onClick={() => patch({ attendance: { ...f.attendance, incentives: [...f.attendance.incentives, { label: "", amount: "", condition: "always" }] } })}>Tambah Insentif</AddRowBtn>
+              <p className="text-[11px] text-muted-foreground mt-1.5">"Cuma kalau ONTIME" itu biner — hari LATE dapet Rp0 buat insentif ini, ga ada setengah-setengah.</p>
+            </div>
           </div>
         )}
 

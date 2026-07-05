@@ -56,15 +56,17 @@ function PayrollPage() {
     // delete existing details for this run
     await supabase.from("payroll_details").delete().eq("run_id", activeRun.id);
 
-    // fetch riders + their deliveries + attendance in period
-    const [{ data: riders }, { data: deliveries }, { data: attendance }, { data: rules }, { data: incentives }, { data: installments }] = await Promise.all([
+    // fetch riders + their deliveries + attendance in period.
+    // Attendance fee sekarang dipungut dari attendance_logs.fee — udah
+    // dihitung & di-Commit lewat Hitung Fee (skema Type E), sama persis
+    // pola delivery_records.fee. Jalur lama (attendance_rules/attendance_incentives,
+    // hitung ulang di sini) DIBUANG biar cuma ada SATU sumber kebenaran.
+    const [{ data: riders }, { data: deliveries }, { data: attendance }, { data: installments }] = await Promise.all([
       supabase.from("riders").select("id, client_id, employee_id, full_name").eq("status", "active"),
       supabase.from("delivery_records").select("rider_id, client_id, fee")
         .gte("delivery_date", activeRun.period_start).lte("delivery_date", activeRun.period_end),
-      (supabase as any).from("attendance_logs").select("rider_id, client_id, is_late, is_absent")
+      (supabase as any).from("attendance_logs").select("rider_id, fee")
         .gte("log_date", activeRun.period_start).lte("log_date", activeRun.period_end),
-      supabase.from("attendance_rules").select("*").eq("active", true),
-      supabase.from("attendance_incentives").select("*"),
       supabase.from("rider_installments").select("*").eq("active", true)
         .lte("next_deduction_date", activeRun.period_end),
     ]);
@@ -76,35 +78,14 @@ function PayrollPage() {
       const rDelivs = (deliveries ?? []).filter((d) => d.rider_id === rider.id);
       const rAttend = (attendance ?? []).filter((a: any) => a.rider_id === rider.id);
 
-      // Rider bisa jalan di banyak client dengan aturan absensi (attendance_rules)
-      // yang beda — jadi dikelompokkan per client dulu, BUKAN pakai client_id
-      // tetap di rider (rider bisa aja ga punya "client tetap").
-      const byClient = new Map<string, typeof rAttend>();
-      rAttend.forEach((a: any) => {
-        const key = a.client_id ?? "(none)";
-        const g = byClient.get(key);
-        if (g) g.push(a); else byClient.set(key, [a]);
-      });
-
-      let baseFee = 0, latePen = 0, absPen = 0, incentiveTotal = 0;
-      for (const [clientKey, logs] of byClient) {
-        const clientId = clientKey === "(none)" ? null : clientKey;
-        const rule = (rules ?? []).find((x: any) => x.client_id === clientId) ?? (rules ?? []).find((x: any) => !x.client_id);
-        if (!rule) continue;
-        const presentDays = logs.filter((a: any) => !a.is_absent).length;
-        const lateDays = logs.filter((a: any) => a.is_late).length;
-        const absentDays = logs.filter((a: any) => a.is_absent).length;
-        baseFee += Number(rule.daily_base_fee) * presentDays;
-        latePen += Number(rule.late_penalty) * lateDays;
-        absPen += Number(rule.absent_penalty) * absentDays;
-        const ruleInc = (incentives ?? []).filter((i: any) => i.rule_id === rule.id);
-        incentiveTotal += ruleInc.reduce((s: number, i: any) => s + (presentDays > 0 ? Number(i.amount) : 0), 0);
-      }
-
       const deliveryFee = rDelivs.reduce((s, d) => s + Number(d.fee || 0), 0);
       const deliveryCount = rDelivs.length;
-      const penalty = latePen + absPen;
-      const gross = deliveryFee + baseFee + incentiveTotal - penalty;
+      const attendanceFee = rAttend.reduce((s: number, a: any) => s + Number(a.fee || 0), 0);
+      // Insentif & penalty udah dianyam ke dalam attendance_fee sama Type E
+      // engine (bukan line-item terpisah lagi kayak jalur lama).
+      const incentiveTotal = 0;
+      const penalty = 0;
+      const gross = deliveryFee + attendanceFee + incentiveTotal - penalty;
 
       const rInstall = (installments ?? []).filter((i: any) => i.rider_id === rider.id);
       const totalDed = rInstall.reduce((s: number, i: any) => s + Number(i.per_period_amount), 0);
@@ -114,7 +95,7 @@ function PayrollPage() {
       detailsToInsert.push({
         id: detailId, run_id: activeRun.id, rider_id: rider.id, client_id: rider.client_id,
         delivery_count: deliveryCount, delivery_fee: deliveryFee,
-        attendance_fee: baseFee, incentive: incentiveTotal, penalty,
+        attendance_fee: attendanceFee, incentive: incentiveTotal, penalty,
         gross_earning: gross, total_deduction: totalDed, net_pay: net,
       });
       for (const ins of rInstall) {
