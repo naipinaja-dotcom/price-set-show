@@ -23,6 +23,8 @@ function PayrollPage() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newRunOpen, setNewRunOpen] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const [publishing, setPublishing] = useState(false);
 
   const loadRuns = async () => {
     setLoading(true);
@@ -141,7 +143,9 @@ function PayrollPage() {
 
   const finalize = async () => {
     if (!activeRun) return;
+    setFinalizing(true);
     const { error } = await supabase.from("payroll_runs").update({ status: "finalized", finalized_at: new Date().toISOString() }).eq("id", activeRun.id);
+    setFinalizing(false);
     if (error) return toast.error(error.message);
     toast.success("Payroll difinalisasi");
     loadRuns();
@@ -149,6 +153,8 @@ function PayrollPage() {
 
   const publish = async () => {
     if (!activeRun) return;
+    setPublishing(true);
+    try {
     // create payslips
     const { data: dets } = await supabase.from("payroll_details").select("*").eq("run_id", activeRun.id);
     if (!dets?.length) return toast.error("Belum ada detail");
@@ -158,8 +164,6 @@ function PayrollPage() {
     const { error: e1 } = await supabase.from("payslips").upsert(slips, { onConflict: "detail_id" });
     if (e1) return toast.error(e1.message);
     // advance installments
-    const { data: pdeds } = await supabase.from("payroll_deductions").select("installment_id").eq("description", "x");
-    void pdeds;
     const { data: deds } = await supabase.from("payroll_deductions")
       .select("installment_id, amount, payroll_details!inner(run_id)").eq("payroll_details.run_id", activeRun.id);
     for (const d of (deds ?? [])) {
@@ -176,6 +180,9 @@ function PayrollPage() {
     if (e2) return toast.error(e2.message);
     toast.success(`Publish ${slips.length} slip gaji`);
     loadRuns();
+    } finally {
+      setPublishing(false);
+    }
   };
 
   return (
@@ -206,12 +213,14 @@ function PayrollPage() {
                   <p className="text-xs text-muted-foreground">{activeRun.period_start} → {activeRun.period_end} · status: <b>{activeRun.status}</b></p>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={generate} className="rounded-md border border-border px-3 py-1.5 text-sm">Generate Detail</button>
-                  <button onClick={finalize} disabled={activeRun.status !== "draft"} className="rounded-md bg-amber-500 text-white px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1">
-                    <CheckCircle2 className="w-4 h-4" /> Finalize
+                  <button onClick={generate} disabled={loading} className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1">
+                    {loading && <Loader2 className="w-4 h-4 animate-spin" />} Generate Detail
                   </button>
-                  <button onClick={publish} disabled={activeRun.status === "published"} className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1">
-                    <Send className="w-4 h-4" /> Publish
+                  <button onClick={finalize} disabled={activeRun.status !== "draft" || finalizing} className="rounded-md bg-warning text-warning-foreground px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1">
+                    {finalizing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Finalize
+                  </button>
+                  <button onClick={publish} disabled={activeRun.status === "published" || publishing} className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1">
+                    {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Publish
                   </button>
                 </div>
               </div>
@@ -229,9 +238,9 @@ function PayrollPage() {
                           <td>Rp{Number(d.delivery_fee).toLocaleString("id-ID")}</td>
                           <td>Rp{Number(d.attendance_fee).toLocaleString("id-ID")}</td>
                           <td>Rp{Number(d.incentive).toLocaleString("id-ID")}</td>
-                          <td className="text-red-600">Rp{Number(d.penalty).toLocaleString("id-ID")}</td>
+                          <td className="text-destructive">Rp{Number(d.penalty).toLocaleString("id-ID")}</td>
                           <td>Rp{Number(d.gross_earning).toLocaleString("id-ID")}</td>
-                          <td className="text-red-600">Rp{Number(d.total_deduction).toLocaleString("id-ID")}</td>
+                          <td className="text-destructive">Rp{Number(d.total_deduction).toLocaleString("id-ID")}</td>
                           <td className="font-semibold">Rp{Number(d.net_pay).toLocaleString("id-ID")}</td>
                         </tr>
                       ))}

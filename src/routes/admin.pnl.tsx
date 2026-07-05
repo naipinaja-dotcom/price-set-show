@@ -114,8 +114,8 @@ function PnlPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Kpi label="Revenue" value={jt(totRevenue)} />
             <Kpi label="Cost" value={jt(totCost)} />
-            <Kpi label="Gross Margin" value={jt(totMargin)} accent="emerald" />
-            <Kpi label="Margin %" value={totPct.toFixed(1) + "%"} accent="emerald" />
+            <Kpi label="Gross Margin" value={jt(totMargin)} accent="success" />
+            <Kpi label="Margin %" value={totPct.toFixed(1) + "%"} accent="success" />
           </div>
 
           {/* Tabel per client */}
@@ -138,9 +138,9 @@ function PnlPage() {
                     const loss = r.marginPct !== null && r.marginPct < 0;
                     const thin = r.marginPct !== null && r.marginPct >= 0 && r.marginPct < 15;
                     const noRev = r.revenue === null;
-                    const color = loss ? "text-red-500" : thin ? "text-amber-500" : "text-emerald-500";
+                    const color = loss ? "text-destructive" : thin ? "text-warning" : "text-success";
                     return (
-                      <tr key={r.clientId} className={"border-t border-border " + (noRev ? "" : loss ? "bg-red-500/5" : thin ? "bg-amber-500/5" : "")}>
+                      <tr key={r.clientId} className={"border-t border-border " + (noRev ? "" : loss ? "bg-destructive/5" : thin ? "bg-warning/5" : "")}>
                         <td className="p-3 font-medium">{r.client}{!noRev && loss ? " 🔴 RUGI" : !noRev && thin ? " ⚠️" : ""}</td>
                         <td className="p-3 text-right">{noRev ? <span className="text-muted-foreground">— belum ada skema client</span> : formatRupiah(r.revenue!)}</td>
                         <td className="p-3 text-right text-muted-foreground">{formatRupiah(r.cost)}</td>
@@ -151,7 +151,7 @@ function PnlPage() {
                           {noRev ? "—" : (
                             <div className="flex items-center gap-2">
                               <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-                                <div className={"h-full " + (loss ? "bg-red-500" : thin ? "bg-amber-500" : "bg-emerald-500")}
+                                <div className={"h-full " + (loss ? "bg-destructive" : thin ? "bg-warning" : "bg-success")}
                                   style={{ width: Math.max(3, Math.min(100, (Math.abs(r.margin ?? 0) / maxMargin) * 100)) + "%" }} />
                               </div>
                               <span className={"text-xs " + color}>{r.marginPct!.toFixed(1)}%</span>
@@ -168,7 +168,7 @@ function PnlPage() {
                       <td className="p-3">TOTAL</td>
                       <td className="p-3 text-right">{formatRupiah(totRevenue)}</td>
                       <td className="p-3 text-right">{formatRupiah(totCost)}</td>
-                      <td className="p-3 text-right text-emerald-500">{formatRupiah(totMargin)}</td>
+                      <td className="p-3 text-right text-success">{formatRupiah(totMargin)}</td>
                       <td className="p-3">{totPct.toFixed(1)}%</td>
                     </tr>
                   </tfoot>
@@ -178,7 +178,7 @@ function PnlPage() {
           </div>
 
           <div className="flex items-start gap-2 mt-3 text-xs text-muted-foreground">
-            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-500" />
+            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-warning" />
             <span>Baris kuning = margin tipis (0–15%). Baris merah = 🔴 RUGI (cost lebih besar dari revenue). "Belum ada skema client" = revenue-nya belum bisa dihitung karena client itu belum punya skema pricing sisi client. Angka Revenue/Cost dihitung live dari skema + data pengiriman (belum termasuk PPN).</span>
           </div>
         </>
@@ -194,11 +194,11 @@ function PnlPage() {
   );
 }
 
-function Kpi({ label, value, accent }: { label: string; value: string; accent?: "emerald" }) {
+function Kpi({ label, value, accent }: { label: string; value: string; accent?: "success" }) {
   return (
-    <div className={"rounded-xl border p-4 " + (accent === "emerald" ? "border-emerald-500/30 bg-emerald-500/5" : "border-border bg-card")}>
+    <div className={"rounded-xl border p-4 " + (accent === "success" ? "border-success/30 bg-success/5" : "border-border bg-card")}>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={"text-lg font-semibold mt-1 " + (accent === "emerald" ? "text-emerald-500" : "")}>{value}</div>
+      <div className={"text-lg font-semibold mt-1 " + (accent === "success" ? "text-success" : "")}>{value}</div>
     </div>
   );
 }

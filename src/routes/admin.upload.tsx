@@ -333,7 +333,7 @@ function DeliveryUpload() {
         </div>
       )}
       {!hasDedupKeys && rows.length > 0 && (
-        <p className="text-xs text-amber-500">Kolom Dash Delivery ID / Provider Order ID ga ke-map — deteksi duplikat ga bisa jalan buat upload ini.</p>
+        <p className="text-xs text-warning">Kolom Dash Delivery ID / Provider Order ID ga ke-map — deteksi duplikat ga bisa jalan buat upload ini.</p>
       )}
       <button onClick={analyze} disabled={analyzing || rows.length === 0 || (!clientId && !hasClientColumn)}
         className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm disabled:opacity-50">
@@ -367,9 +367,9 @@ function DeliveryPreviewModal({ preview, busy, onCancel, onConfirm }: {
 
         <div className="grid grid-cols-2 gap-2 text-sm mb-4">
           <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Total baris di file</div><div className="font-semibold">{preview.totalRows}</div></div>
-          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Siap diupload</div><div className="font-semibold text-emerald-500">{preview.records.length}</div></div>
-          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Duplikat (di-skip)</div><div className="font-semibold text-amber-500">{preview.duplicateCount}</div></div>
-          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Anomali (cek manual)</div><div className="font-semibold text-amber-500">{preview.anomalyCount}</div></div>
+          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Siap diupload</div><div className="font-semibold text-success">{preview.records.length}</div></div>
+          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Duplikat (di-skip)</div><div className="font-semibold text-warning">{preview.duplicateCount}</div></div>
+          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Anomali (cek manual)</div><div className="font-semibold text-warning">{preview.anomalyCount}</div></div>
         </div>
 
         {preview.duplicateSamples.length > 0 && (
@@ -391,7 +391,7 @@ function DeliveryPreviewModal({ preview, busy, onCancel, onConfirm }: {
 
         {preview.anomalySamples.length > 0 && (
           <div className="mb-3">
-            <div className="flex items-center gap-1.5 text-amber-500 text-xs font-medium mb-1"><AlertTriangle className="w-3.5 h-3.5" /> Cuma SALAH SATU ID yang cocok — bukan duplikat pasti, tetap terupload:</div>
+            <div className="flex items-center gap-1.5 text-warning text-xs font-medium mb-1"><AlertTriangle className="w-3.5 h-3.5" /> Cuma SALAH SATU ID yang cocok — bukan duplikat pasti, tetap terupload:</div>
             <div className="rounded-md border border-border max-h-32 overflow-y-auto text-xs font-mono">
               {preview.anomalySamples.map((d, i) => (
                 <div key={i} className="px-2 py-1 border-t border-border first:border-t-0">{d.dash} / {d.provider}</div>
@@ -404,7 +404,7 @@ function DeliveryPreviewModal({ preview, busy, onCancel, onConfirm }: {
         )}
 
         {preview.unmatchedClients.length > 0 && (
-          <div className="mb-3 text-xs text-amber-500">
+          <div className="mb-3 text-xs text-warning">
             Nama client tidak dikenal (baris ini ga dihitung): {preview.unmatchedClients.join(", ")}
           </div>
         )}

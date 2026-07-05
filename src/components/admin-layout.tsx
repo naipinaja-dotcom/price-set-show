@@ -114,7 +114,7 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
             <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
               {NAV.map((it) => {
                 const Icon = it.icon;
-                const active = pathname === it.to;
+                const active = pathname === it.to || pathname.startsWith(it.to + "/");
                 return (
                   <Link
                     key={it.to}

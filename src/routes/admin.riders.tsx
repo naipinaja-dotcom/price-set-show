@@ -40,10 +40,10 @@ function RidersPage() {
   const filtered = filter === "all" ? rows : rows.filter((r) => r.status === filter);
   const statusBadge = (s: RiderStatus) => {
     const map: Record<RiderStatus, string> = {
-      active: "bg-green-100 text-green-700",
+      active: "bg-success/10 text-success",
       inactive: "bg-muted text-muted-foreground",
-      pending_review: "bg-amber-100 text-amber-700",
-      suspended: "bg-red-100 text-red-700",
+      pending_review: "bg-warning/10 text-warning",
+      suspended: "bg-destructive/10 text-destructive",
     };
     return <span className={`px-2 py-0.5 rounded-full text-xs inline-flex items-center gap-1 ${map[s]}`}>
       {s === "pending_review" && <AlertCircle className="w-3 h-3" />}{s.replace("_", " ")}
@@ -220,9 +220,9 @@ function RiderImportModal({ clients, onClose, onDone }:
 
         {result && (
           <div className="mt-4 text-sm">
-            <div className="text-green-600 font-medium">✓ {result.ok} rider berhasil disimpan</div>
+            <div className="text-success font-medium">✓ {result.ok} rider berhasil disimpan</div>
             {result.warnings.length > 0 && (
-              <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 max-h-40 overflow-auto">
+              <div className="mt-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-xs text-warning max-h-40 overflow-auto">
                 <div className="font-medium mb-1">{result.warnings.length} peringatan:</div>
                 {result.warnings.map((w, i) => <div key={i}>• {w}</div>)}
               </div>

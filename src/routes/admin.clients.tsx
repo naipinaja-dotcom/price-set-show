@@ -59,10 +59,10 @@ function ClientsPage() {
                 <td>{c.name}</td>
                 <td>{c.contact_person ?? "—"}</td>
                 <td>{c.phone ?? "—"}</td>
-                <td><span className={`px-2 py-0.5 rounded-full text-xs ${c.active ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>{c.active ? "Aktif" : "Nonaktif"}</span></td>
+                <td><span className={`px-2 py-0.5 rounded-full text-xs ${c.active ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"}`}>{c.active ? "Aktif" : "Nonaktif"}</span></td>
                 <td className="text-right pr-3">
                   <button onClick={() => { setEdit(c); setOpen(true); }} className="p-1.5 hover:bg-muted rounded"><Pencil className="w-4 h-4" /></button>
-                  <button onClick={() => remove(c.id)} className="p-1.5 hover:bg-muted rounded text-red-600"><Trash2 className="w-4 h-4" /></button>
+                  <button onClick={() => remove(c.id)} className="p-1.5 hover:bg-muted rounded text-destructive"><Trash2 className="w-4 h-4" /></button>
                 </td>
               </tr>
             ))}

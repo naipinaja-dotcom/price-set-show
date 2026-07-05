@@ -203,7 +203,7 @@ function CalculatePage() {
 
           {/* Warning */}
           {result.warnings.length > 0 && (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 mb-4 flex items-start gap-2.5 text-xs text-amber-700 dark:text-amber-300">
+            <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 mb-4 flex items-start gap-2.5 text-xs text-warning">
               <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <div>{result.warnings.map((w, i) => <div key={i}>{w}</div>)}</div>
             </div>
@@ -211,7 +211,7 @@ function CalculatePage() {
 
           {/* Anomali */}
           {result.anomalies.length > 0 && (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 mb-4 text-xs text-amber-700 dark:text-amber-300">
+            <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 mb-4 text-xs text-warning">
               <div className="flex items-center gap-2 font-medium mb-1.5">
                 <AlertTriangle className="w-4 h-4 flex-shrink-0" /> {result.anomalies.length} baris anomali terdeteksi — cek manual, tidak otomatis di-skip
               </div>
@@ -305,7 +305,7 @@ function CalculatePage() {
           </div>
 
           {attResult.warnings.length > 0 && (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 mb-4 flex items-start gap-2.5 text-xs text-amber-700 dark:text-amber-300">
+            <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 mb-4 flex items-start gap-2.5 text-xs text-warning">
               <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <div>{attResult.warnings.map((w, i) => <div key={i}>{w}</div>)}</div>
             </div>

@@ -84,7 +84,7 @@ function AttendancePage() {
                 </button>
                 <div className="flex gap-1">
                   <button onClick={() => { setEdit(r); setOpen(true); }} className="p-1.5 hover:bg-muted rounded"><Pencil className="w-4 h-4" /></button>
-                  <button onClick={() => removeRule(r.id)} className="p-1.5 hover:bg-muted rounded text-red-600"><Trash2 className="w-4 h-4" /></button>
+                  <button onClick={() => removeRule(r.id)} className="p-1.5 hover:bg-muted rounded text-destructive"><Trash2 className="w-4 h-4" /></button>
                 </div>
               </div>
               {isOpen && (
@@ -102,7 +102,7 @@ function AttendancePage() {
                             <span className="text-muted-foreground"> — Rp{Number(inc.amount).toLocaleString("id-ID")}</span>
                             {inc.condition && <span className="text-xs text-muted-foreground"> · {inc.condition}</span>}
                           </div>
-                          <button onClick={() => removeIncentive(inc.id)} className="text-red-600 hover:bg-muted p-1 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => removeIncentive(inc.id)} className="text-destructive hover:bg-muted p-1 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
                         </li>
                       ))}
                     </ul>}

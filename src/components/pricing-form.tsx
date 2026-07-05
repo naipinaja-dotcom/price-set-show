@@ -796,7 +796,7 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
         {(calcType === "tier" || calcType === "tier_daily") && (
           <div className="space-y-3">
             {calcType === "tier_daily" && (
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-700 dark:text-amber-300">
+              <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 text-xs text-warning">
                 Akumulasi harian: jarak/berat semua kiriman 1 rider dalam 1 hari dijumlah dulu, baru dihitung.
               </div>
             )}

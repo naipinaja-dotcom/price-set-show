@@ -170,11 +170,11 @@ function DTypesTab() {
                 <td>{r.auto_recurring ? <span className="text-primary font-medium">Ya · Rp{Number(r.recurring_amount).toLocaleString("id-ID")}</span> : "Tidak"}</td>
                 <td>
                   <button onClick={() => toggleActive(r)} title="Klik untuk aktif/nonaktif"
-                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${r.active ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20" : "border-border text-muted-foreground bg-muted hover:bg-muted/70"}`}>
+                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${r.active ? "border-success/40 text-success bg-success/10 hover:bg-success/20" : "border-border text-muted-foreground bg-muted hover:bg-muted/70"}`}>
                     {r.active ? "Aktif" : "Nonaktif"}
                   </button>
                 </td>
-                <td className="text-right pr-3"><button onClick={() => remove(r)} className="p-1.5 hover:bg-muted rounded text-red-600" title="Hapus"><Trash2 className="w-4 h-4" /></button></td>
+                <td className="text-right pr-3"><button onClick={() => remove(r)} className="p-1.5 hover:bg-muted rounded text-destructive" title="Hapus"><Trash2 className="w-4 h-4" /></button></td>
               </tr>
             ))}
           </tbody>
@@ -335,7 +335,7 @@ function ActiveTab() {
               <td>{r.next_deduction_date ?? "—"}</td>
               <td className="text-right pr-3">
                 <button onClick={() => remove(r)} disabled={deletingId === r.id}
-                  className="p-1.5 hover:bg-muted rounded text-red-600 disabled:opacity-50" title="Hapus cicilan">
+                  className="p-1.5 hover:bg-muted rounded text-destructive disabled:opacity-50" title="Hapus cicilan">
                   {deletingId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                 </button>
               </td>

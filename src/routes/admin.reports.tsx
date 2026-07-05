@@ -106,9 +106,9 @@ function ReportsPage() {
                     <td>Rp{r.delivery_fee.toLocaleString("id-ID")}</td>
                     <td>Rp{r.attendance_fee.toLocaleString("id-ID")}</td>
                     <td>Rp{r.incentive.toLocaleString("id-ID")}</td>
-                    <td className="text-red-600">Rp{r.penalty.toLocaleString("id-ID")}</td>
+                    <td className="text-destructive">Rp{r.penalty.toLocaleString("id-ID")}</td>
                     <td>Rp{r.gross.toLocaleString("id-ID")}</td>
-                    <td className="text-red-600">Rp{r.deduction.toLocaleString("id-ID")}</td>
+                    <td className="text-destructive">Rp{r.deduction.toLocaleString("id-ID")}</td>
                     <td className="font-semibold">Rp{r.net.toLocaleString("id-ID")}</td>
                   </tr>
                 ))}
