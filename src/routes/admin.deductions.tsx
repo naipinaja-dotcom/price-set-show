@@ -68,10 +68,29 @@ function DTypesTab() {
     setAdding(false);
     load();
   };
-  const remove = async (id: string) => {
-    if (!confirm("Hapus jenis potongan?")) return;
-    const { error } = await supabase.from("deduction_types").delete().eq("id", id);
-    if (error) return toast.error(error.message); load();
+  const remove = async (r: DType) => {
+    if (!confirm(`Hapus jenis potongan "${r.name}"?`)) return;
+    const { error } = await (supabase as any).from("deduction_types").delete().eq("id", r.id);
+    if (!error) { toast.success("Jenis potongan dihapus"); return load(); }
+    // Kalau masih dipakai cicilan/potongan tercatat → FK error. Tawarin nonaktifin.
+    const inUse = (error as any).code === "23503" || /foreign key/i.test(error.message);
+    if (inUse) {
+      if (confirm(`"${r.name}" masih dipakai potongan/cicilan yang sudah tercatat, jadi tidak bisa dihapus total.\n\nNonaktifkan saja? (tidak muncul lagi saat bikin potongan baru, tapi data lama tetap aman)`)) {
+        const { error: e2 } = await (supabase as any).from("deduction_types").update({ active: false }).eq("id", r.id);
+        if (e2) return toast.error(e2.message);
+        toast.success("Jenis potongan dinonaktifkan");
+        load();
+      }
+      return;
+    }
+    toast.error(error.message);
+  };
+
+  const toggleActive = async (r: DType) => {
+    const { error } = await (supabase as any).from("deduction_types").update({ active: !r.active }).eq("id", r.id);
+    if (error) return toast.error(error.message);
+    toast.success(r.active ? "Dinonaktifkan" : "Diaktifkan");
+    load();
   };
 
   const inputCls = "mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm";
@@ -144,8 +163,13 @@ function DTypesTab() {
                 <td>{r.name}</td>
                 <td>{r.installmentable ? "Ya" : "Tidak"}</td>
                 <td>{r.auto_recurring ? <span className="text-primary font-medium">Ya · Rp{Number(r.recurring_amount).toLocaleString("id-ID")}</span> : "Tidak"}</td>
-                <td>{r.active ? "Aktif" : "Nonaktif"}</td>
-                <td className="text-right pr-3"><button onClick={() => remove(r.id)} className="p-1.5 hover:bg-muted rounded text-red-600"><Trash2 className="w-4 h-4" /></button></td>
+                <td>
+                  <button onClick={() => toggleActive(r)} title="Klik untuk aktif/nonaktif"
+                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${r.active ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20" : "border-border text-muted-foreground bg-muted hover:bg-muted/70"}`}>
+                    {r.active ? "Aktif" : "Nonaktif"}
+                  </button>
+                </td>
+                <td className="text-right pr-3"><button onClick={() => remove(r)} className="p-1.5 hover:bg-muted rounded text-red-600" title="Hapus"><Trash2 className="w-4 h-4" /></button></td>
               </tr>
             ))}
           </tbody>
