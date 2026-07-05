@@ -24,6 +24,7 @@ import { Route as AdminReportsRouteImport } from './routes/admin.reports'
 import { Route as AdminPnlRouteImport } from './routes/admin.pnl'
 import { Route as AdminPayrollRouteImport } from './routes/admin.payroll'
 import { Route as AdminDeductionsRouteImport } from './routes/admin.deductions'
+import { Route as AdminDataCheckRouteImport } from './routes/admin.data-check'
 import { Route as AdminDashboardRouteImport } from './routes/admin.dashboard'
 import { Route as AdminClientsRouteImport } from './routes/admin.clients'
 import { Route as AdminCalculateRouteImport } from './routes/admin.calculate'
@@ -106,6 +107,11 @@ const AdminDeductionsRoute = AdminDeductionsRouteImport.update({
   path: '/deductions',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminDataCheckRoute = AdminDataCheckRouteImport.update({
+  id: '/data-check',
+  path: '/data-check',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminDashboardRoute = AdminDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -146,6 +152,7 @@ export interface FileRoutesByFullPath {
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
+  '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
   '/admin/payroll': typeof AdminPayrollRoute
   '/admin/pnl': typeof AdminPnlRoute
@@ -169,6 +176,7 @@ export interface FileRoutesByTo {
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
+  '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
   '/admin/payroll': typeof AdminPayrollRoute
   '/admin/pnl': typeof AdminPnlRoute
@@ -193,6 +201,7 @@ export interface FileRoutesById {
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
+  '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
   '/admin/payroll': typeof AdminPayrollRoute
   '/admin/pnl': typeof AdminPnlRoute
@@ -218,6 +227,7 @@ export interface FileRouteTypes {
     | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
+    | '/admin/data-check'
     | '/admin/deductions'
     | '/admin/payroll'
     | '/admin/pnl'
@@ -241,6 +251,7 @@ export interface FileRouteTypes {
     | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
+    | '/admin/data-check'
     | '/admin/deductions'
     | '/admin/payroll'
     | '/admin/pnl'
@@ -264,6 +275,7 @@ export interface FileRouteTypes {
     | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
+    | '/admin/data-check'
     | '/admin/deductions'
     | '/admin/payroll'
     | '/admin/pnl'
@@ -394,6 +406,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminDeductionsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/data-check': {
+      id: '/admin/data-check'
+      path: '/data-check'
+      fullPath: '/admin/data-check'
+      preLoaderRoute: typeof AdminDataCheckRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/dashboard': {
       id: '/admin/dashboard'
       path: '/dashboard'
@@ -443,6 +462,7 @@ interface AdminRouteChildren {
   AdminCalculateRoute: typeof AdminCalculateRoute
   AdminClientsRoute: typeof AdminClientsRoute
   AdminDashboardRoute: typeof AdminDashboardRoute
+  AdminDataCheckRoute: typeof AdminDataCheckRoute
   AdminDeductionsRoute: typeof AdminDeductionsRoute
   AdminPayrollRoute: typeof AdminPayrollRoute
   AdminPnlRoute: typeof AdminPnlRoute
@@ -459,6 +479,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminCalculateRoute: AdminCalculateRoute,
   AdminClientsRoute: AdminClientsRoute,
   AdminDashboardRoute: AdminDashboardRoute,
+  AdminDataCheckRoute: AdminDataCheckRoute,
   AdminDeductionsRoute: AdminDeductionsRoute,
   AdminPayrollRoute: AdminPayrollRoute,
   AdminPnlRoute: AdminPnlRoute,
