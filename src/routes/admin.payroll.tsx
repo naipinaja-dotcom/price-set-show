@@ -61,7 +61,7 @@ function PayrollPage() {
     // dihitung & di-Commit lewat Hitung Fee (skema Type E), sama persis
     // pola delivery_records.fee. Jalur lama (attendance_rules/attendance_incentives,
     // hitung ulang di sini) DIBUANG biar cuma ada SATU sumber kebenaran.
-    const [{ data: riders }, { data: deliveries }, { data: attendance }, { data: installments }] = await Promise.all([
+    const [{ data: riders }, { data: deliveries }, { data: attendance }, { data: installments }, { data: autoTypes }] = await Promise.all([
       supabase.from("riders").select("id, client_id, employee_id, full_name").eq("status", "active"),
       supabase.from("delivery_records").select("rider_id, client_id, fee")
         .gte("delivery_date", activeRun.period_start).lte("delivery_date", activeRun.period_end),
@@ -69,6 +69,9 @@ function PayrollPage() {
         .gte("log_date", activeRun.period_start).lte("log_date", activeRun.period_end),
       supabase.from("rider_installments").select("*").eq("active", true)
         .lte("next_deduction_date", activeRun.period_end),
+      // potongan otomatis (flat, tiap periode) — mis. Biaya Admin
+      (supabase as any).from("deduction_types").select("id, name, recurring_amount")
+        .eq("active", true).eq("auto_recurring", true),
     ]);
 
     const detailsToInsert: any[] = [];
@@ -88,8 +91,14 @@ function PayrollPage() {
       const gross = deliveryFee + attendanceFee + incentiveTotal - penalty;
 
       const rInstall = (installments ?? []).filter((i: any) => i.rider_id === rider.id);
-      const totalDed = rInstall.reduce((s: number, i: any) => s + Number(i.per_period_amount), 0);
+      const installTotal = rInstall.reduce((s: number, i: any) => s + Number(i.per_period_amount), 0);
 
+      // potongan otomatis flat — cuma buat rider yg punya penghasilan periode ini
+      const autoTotal = gross > 0
+        ? (autoTypes ?? []).reduce((s: number, t: any) => s + (Number(t.recurring_amount) || 0), 0)
+        : 0;
+
+      const totalDed = installTotal + autoTotal;
       const net = Math.max(0, gross - totalDed);
       const detailId = crypto.randomUUID();
       detailsToInsert.push({
@@ -104,6 +113,16 @@ function PayrollPage() {
           installment_id: ins.id, description: `Cicilan ${ins.installments_paid + 1}/${ins.installment_count}`,
           amount: ins.per_period_amount,
         });
+      }
+      if (gross > 0) {
+        for (const t of autoTypes ?? []) {
+          const amt = Number(t.recurring_amount) || 0;
+          if (amt <= 0) continue;
+          deductionsToInsert.push({
+            detail_id: detailId, deduction_type_id: t.id,
+            installment_id: null, description: t.name, amount: amt,
+          });
+        }
       }
     }
     if (detailsToInsert.length) {

@@ -8,7 +8,7 @@ import { Plus, Trash2, Loader2, X } from "lucide-react";
 
 export const Route = createFileRoute("/admin/deductions")({ component: DeductionsPage });
 
-type DType = { id: string; code: string; name: string; description: string | null; installmentable: boolean; active: boolean };
+type DType = { id: string; code: string; name: string; description: string | null; installmentable: boolean; active: boolean; auto_recurring: boolean; recurring_amount: number };
 type Rider = { id: string; employee_id: string; full_name: string };
 type Inst = {
   id: string; rider_id: string; deduction_type_id: string;
@@ -38,12 +38,12 @@ function DTypesTab() {
   const [rows, setRows] = useState<DType[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [nf, setNf] = useState({ code: "", name: "", description: "", installmentable: false });
+  const [nf, setNf] = useState({ code: "", name: "", description: "", installmentable: false, auto_recurring: false, recurring_amount: 0 });
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from("deduction_types").select("*").order("name");
+    const { data, error } = await (supabase as any).from("deduction_types").select("*").order("name");
     if (error) toast.error(error.message); else setRows(data ?? []);
     setLoading(false);
   };
@@ -51,17 +51,20 @@ function DTypesTab() {
 
   const save = async () => {
     if (!nf.code.trim() || !nf.name.trim()) return toast.error("Kode & nama wajib diisi");
+    if (nf.auto_recurring && nf.recurring_amount <= 0) return toast.error("Nominal potong otomatis wajib diisi");
     setSaving(true);
-    const { error } = await supabase.from("deduction_types").insert({
+    const { error } = await (supabase as any).from("deduction_types").insert({
       code: nf.code.trim().toUpperCase(),
       name: nf.name.trim(),
       description: nf.description.trim() || null,
       installmentable: nf.installmentable,
+      auto_recurring: nf.auto_recurring,
+      recurring_amount: nf.auto_recurring ? nf.recurring_amount : 0,
     });
     setSaving(false);
     if (error) return toast.error(error.message);
     toast.success("Jenis potongan ditambahkan");
-    setNf({ code: "", name: "", description: "", installmentable: false });
+    setNf({ code: "", name: "", description: "", installmentable: false, auto_recurring: false, recurring_amount: 0 });
     setAdding(false);
     load();
   };
@@ -102,8 +105,24 @@ function DTypesTab() {
             <input value={nf.description} onChange={(e) => setNf({ ...nf, description: e.target.value })} className={inputCls} />
           </div>
           <label className="flex items-center gap-2 mt-3 text-sm">
-            <input type="checkbox" checked={nf.installmentable} onChange={(e) => setNf({ ...nf, installmentable: e.target.checked })} /> Bisa dicicil
+            <input type="checkbox" checked={nf.installmentable}
+              onChange={(e) => setNf({ ...nf, installmentable: e.target.checked, auto_recurring: e.target.checked ? false : nf.auto_recurring })} /> Bisa dicicil
           </label>
+          <label className="flex items-center gap-2 mt-2 text-sm">
+            <input type="checkbox" checked={nf.auto_recurring}
+              onChange={(e) => setNf({ ...nf, auto_recurring: e.target.checked, installmentable: e.target.checked ? false : nf.installmentable })} />
+            Potong otomatis tiap periode <span className="text-muted-foreground text-xs">(semua rider yg ada penghasilan)</span>
+          </label>
+          {nf.auto_recurring && (
+            <div className="mt-3">
+              <label className="text-sm font-medium">Nominal Potong per Periode (Rp)</label>
+              <input inputMode="numeric" placeholder="mis. 2.500"
+                value={nf.recurring_amount ? nf.recurring_amount.toLocaleString("id-ID") : ""}
+                onChange={(e) => setNf({ ...nf, recurring_amount: parseRupiah(e.target.value) })}
+                className={inputCls} />
+              <p className="text-xs text-muted-foreground mt-1">Angka ini otomatis dipotong ke tiap rider tiap kali payroll digenerate.</p>
+            </div>
+          )}
           <div className="flex justify-end gap-2 mt-4">
             <button onClick={() => setAdding(false)} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-muted">Batal</button>
             <button onClick={save} disabled={saving} className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm disabled:opacity-50">
@@ -115,15 +134,16 @@ function DTypesTab() {
 
       <div className="rounded-lg border border-border overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-muted text-left"><tr><th className="p-3">Kode</th><th>Nama</th><th>Bisa Dicicil</th><th>Status</th><th></th></tr></thead>
+          <thead className="bg-muted text-left"><tr><th className="p-3">Kode</th><th>Nama</th><th>Bisa Dicicil</th><th>Otomatis</th><th>Status</th><th></th></tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan={5} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
-            : rows.length === 0 ? <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">Belum ada jenis potongan</td></tr>
+            {loading ? <tr><td colSpan={6} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
+            : rows.length === 0 ? <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">Belum ada jenis potongan</td></tr>
             : rows.map((r) => (
               <tr key={r.id} className="border-t border-border">
                 <td className="p-3 font-mono text-xs">{r.code}</td>
                 <td>{r.name}</td>
                 <td>{r.installmentable ? "Ya" : "Tidak"}</td>
+                <td>{r.auto_recurring ? <span className="text-primary font-medium">Ya · Rp{Number(r.recurring_amount).toLocaleString("id-ID")}</span> : "Tidak"}</td>
                 <td>{r.active ? "Aktif" : "Nonaktif"}</td>
                 <td className="text-right pr-3"><button onClick={() => remove(r.id)} className="p-1.5 hover:bg-muted rounded text-red-600"><Trash2 className="w-4 h-4" /></button></td>
               </tr>
@@ -147,7 +167,8 @@ function AddTab() {
 
   useEffect(() => {
     supabase.from("riders").select("id, employee_id, full_name").order("full_name").then(({ data }) => setRiders(data ?? []));
-    supabase.from("deduction_types").select("*").eq("active", true).then(({ data }) => setTypes(data ?? []));
+    // jenis "otomatis" ga muncul di sini — dia kepotong sendiri tiap payroll, ga perlu didaftarin manual
+    (supabase as any).from("deduction_types").select("*").eq("active", true).eq("auto_recurring", false).then(({ data }: any) => setTypes(data ?? []));
   }, []);
 
   const save = async () => {
