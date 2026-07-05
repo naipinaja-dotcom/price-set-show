@@ -209,6 +209,28 @@ function CalculatePage() {
             </div>
           )}
 
+          {/* Rider yang ordernya di-skip (belum COMPLETED) — biar finance tau
+              rider itu ADA tapi belum dibayar, bukan hilang dari data. */}
+          {result.skippedPerRider.length > 0 && (
+            <div className="rounded-md border border-border bg-card px-3.5 py-2.5 mb-4 text-xs">
+              <div className="flex items-center gap-2 font-medium mb-1.5 text-muted-foreground">
+                <Info className="w-4 h-4 flex-shrink-0" />
+                Rider dengan order belum COMPLETED (belum dibayar, bukan hilang):
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-0.5">
+                {result.skippedPerRider.map((s, i) => (
+                  <div key={i} className="flex justify-between gap-3">
+                    <span className="font-medium">{riderNames[s.rider] ?? s.rider}</span>
+                    <span className="text-muted-foreground tabular-nums whitespace-nowrap">
+                      {s.count} order · {Object.entries(s.statuses).map(([st, n]) => `${st} ${n}×`).join(", ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-muted-foreground mt-1.5">Nanti kalau statusnya udah COMPLETED & data di-upload ulang, otomatis kehitung.</p>
+            </div>
+          )}
+
           {/* Anomali */}
           {result.anomalies.length > 0 && (
             <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 mb-4 text-xs text-warning">

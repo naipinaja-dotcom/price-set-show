@@ -50,6 +50,15 @@ export interface RowAnomaly {
   detail: string;
 }
 
+// Rekap baris yang DI-SKIP (status bukan COMPLETED), dikelompokkan per rider —
+// bukan data/aturan baru: ini isi "tumpukan buangan" yang selama ini cuma
+// ditampilkan jumlahnya. Buat jawab "kok rider X ga muncul?" dengan bukti.
+export interface SkippedRiderLine {
+  rider: string;
+  count: number;
+  statuses: Record<string, number>; // mis. { PENDING_PICKUP: 5, FAILED: 1 }
+}
+
 export interface CalcResult {
   perRow: RowFee[]; // 1 entri per baris COMPLETED (buat commit ke DB)
   perRider: RiderLine[];
@@ -58,6 +67,7 @@ export interface CalcResult {
   grandTotal: number;
   completedRows: number;
   skippedRows: number;
+  skippedPerRider: SkippedRiderLine[];
   warnings: string[];
   anomalies: RowAnomaly[]; // ga bikin gagal komputasi, cuma diflag buat dicek manual
 }
@@ -122,6 +132,19 @@ export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResul
   const warnings: string[] = [];
   const completed = rows.filter(isCompleted);
   const skipped = rows.length - completed.length;
+
+  // kelompokkan baris yang di-skip per rider (transparansi, bukan aturan baru)
+  const skipMap = new Map<string, SkippedRiderLine>();
+  for (const r of rows) {
+    if (isCompleted(r)) continue;
+    const k = riderKey(r);
+    const line = skipMap.get(k) ?? { rider: k, count: 0, statuses: {} };
+    line.count++;
+    const st = String(r.status ?? "").trim().toUpperCase() || "(KOSONG)";
+    line.statuses[st] = (line.statuses[st] ?? 0) + 1;
+    skipMap.set(k, line);
+  }
+  const skippedPerRider = [...skipMap.values()].sort((a, b) => b.count - a.count);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cfg = env.config as any;
@@ -261,7 +284,7 @@ export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResul
 
   if (skipped > 0) warnings.push(`${skipped} baris di-skip (status bukan COMPLETED).`);
 
-  return { perRow, perRider, subtotal, billing, grandTotal, completedRows: completed.length, skippedRows: skipped, warnings, anomalies };
+  return { perRow, perRider, subtotal, billing, grandTotal, completedRows: completed.length, skippedRows: skipped, skippedPerRider, warnings, anomalies };
 }
 
 // =========================================================
