@@ -27,7 +27,6 @@ import { Route as AdminDeductionsRouteImport } from './routes/admin.deductions'
 import { Route as AdminDashboardRouteImport } from './routes/admin.dashboard'
 import { Route as AdminClientsRouteImport } from './routes/admin.clients'
 import { Route as AdminCalculateRouteImport } from './routes/admin.calculate'
-import { Route as AdminAttendanceRouteImport } from './routes/admin.attendance'
 import { Route as AdminPricingIndexRouteImport } from './routes/admin.pricing.index'
 import { Route as AdminPricingNewRouteImport } from './routes/admin.pricing.new'
 import { Route as AdminPricingIdRouteImport } from './routes/admin.pricing.$id'
@@ -122,11 +121,6 @@ const AdminCalculateRoute = AdminCalculateRouteImport.update({
   path: '/calculate',
   getParentRoute: () => AdminRoute,
 } as any)
-const AdminAttendanceRoute = AdminAttendanceRouteImport.update({
-  id: '/attendance',
-  path: '/attendance',
-  getParentRoute: () => AdminRoute,
-} as any)
 const AdminPricingIndexRoute = AdminPricingIndexRouteImport.update({
   id: '/pricing/',
   path: '/pricing/',
@@ -149,7 +143,6 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/rider': typeof RiderRouteWithChildren
   '/sitemap.xml': typeof SitemapDotxmlRoute
-  '/admin/attendance': typeof AdminAttendanceRoute
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
@@ -173,7 +166,6 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/rider': typeof RiderRouteWithChildren
   '/sitemap.xml': typeof SitemapDotxmlRoute
-  '/admin/attendance': typeof AdminAttendanceRoute
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
@@ -198,7 +190,6 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/rider': typeof RiderRouteWithChildren
   '/sitemap.xml': typeof SitemapDotxmlRoute
-  '/admin/attendance': typeof AdminAttendanceRoute
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
@@ -224,7 +215,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/rider'
     | '/sitemap.xml'
-    | '/admin/attendance'
     | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
@@ -248,7 +238,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/rider'
     | '/sitemap.xml'
-    | '/admin/attendance'
     | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
@@ -272,7 +261,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/rider'
     | '/sitemap.xml'
-    | '/admin/attendance'
     | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
@@ -427,13 +415,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminCalculateRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/admin/attendance': {
-      id: '/admin/attendance'
-      path: '/attendance'
-      fullPath: '/admin/attendance'
-      preLoaderRoute: typeof AdminAttendanceRouteImport
-      parentRoute: typeof AdminRoute
-    }
     '/admin/pricing/': {
       id: '/admin/pricing/'
       path: '/pricing'
@@ -459,7 +440,6 @@ declare module '@tanstack/react-router' {
 }
 
 interface AdminRouteChildren {
-  AdminAttendanceRoute: typeof AdminAttendanceRoute
   AdminCalculateRoute: typeof AdminCalculateRoute
   AdminClientsRoute: typeof AdminClientsRoute
   AdminDashboardRoute: typeof AdminDashboardRoute
@@ -476,7 +456,6 @@ interface AdminRouteChildren {
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
-  AdminAttendanceRoute: AdminAttendanceRoute,
   AdminCalculateRoute: AdminCalculateRoute,
   AdminClientsRoute: AdminClientsRoute,
   AdminDashboardRoute: AdminDashboardRoute,
