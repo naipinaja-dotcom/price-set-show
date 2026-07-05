@@ -188,7 +188,7 @@ function buildEnvelope(type: PricingCalcType, schemeFor: SchemeFor, f: FormState
     version: 1,
     type,
     config: buildConfig(type, f),
-    add_kg: type !== "attendance" && f.addKgOn ? { enabled: true, tier: buildStepTier(f.addKg) } : null,
+    add_kg: (type === "flat_unit" || type === "threshold_multiple") && f.addKgOn ? { enabled: true, tier: buildStepTier(f.addKg) } : null,
     multi_drop: f.multiDropOn ? { fee_per_extra_shipment: parseRupiah(f.multiDropFee) } : null,
     billing_addons:
       schemeFor === "client" && f.billingOn
@@ -241,7 +241,7 @@ function stepTierBreakdown(s: StepTierState, value: number, unit: string): { ste
 function buildExample(calcType: PricingCalcType, f: FormState, schemeFor: SchemeFor): WorkedExample | null {
   const notes: string[] = [];
   const addModifierNotes = () => {
-    if (calcType !== "attendance" && f.addKgOn)
+    if ((calcType === "flat_unit" || calcType === "threshold_multiple") && f.addKgOn)
       notes.push("Add-KG nyala: biaya berat ditambah DI ATAS hasil ini, sesuai berat tiap kiriman.");
     if (f.multiDropOn)
       notes.push(`Multi-drop nyala: kiriman ke-2 dst di hari yang sama +${formatRupiah(parseRupiah(f.multiDropFee))} per kiriman.`);
@@ -974,10 +974,10 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
       <div className="rounded-lg border border-border bg-card p-5 mb-4 space-y-3">
         <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Modifier (opsional)</p>
 
-        {calcType !== "attendance" && (
+        {(calcType === "flat_unit" || calcType === "threshold_multiple") && (
           <ToggleBlock
             label="Add-KG (surcharge berat)"
-            hint="Biaya tambahan berdasarkan berat, bertingkat. Ditulis sekali, berlaku di tipe ini."
+            hint="Biaya tambahan berdasarkan berat, bertingkat. Buat tipe yang belum punya hitungan berat sendiri."
             on={f.addKgOn}
             onToggle={(on) => patch({ addKgOn: on })}
           >
