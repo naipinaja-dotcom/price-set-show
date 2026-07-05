@@ -5,9 +5,10 @@ import { AdminLayout } from "@/components/admin-layout";
 import { parseCSV } from "@/lib/csv";
 import { resolveOrCreateRiders } from "@/lib/rider-lookup";
 import { classifyAllClients } from "@/lib/delivery-classification";
+import { cleanDuplicateDeliveries } from "@/lib/delivery-dedup";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
-import { Upload, FileText, Loader2, AlertTriangle, X, RefreshCw } from "lucide-react";
+import { Upload, FileText, Loader2, AlertTriangle, X, RefreshCw, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/admin/upload")({ component: UploadPage });
 
@@ -68,6 +69,7 @@ function DeliveryUpload() {
   const [analyzing, setAnalyzing] = useState(false);
   const [preview, setPreview] = useState<DeliveryPreview | null>(null);
   const [reclassifying, setReclassifying] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
 
   useEffect(() => {
     supabase.from("clients").select("id, name").then(({ data }) => setClients(data ?? []));
@@ -87,6 +89,26 @@ function DeliveryUpload() {
       toast.error((e as Error).message);
     } finally {
       setReclassifying(false);
+    }
+  };
+
+  // Bersihin data yang terlanjur dobel di DB (dari upload-upload lama sebelum
+  // fitur timpa ada). Sisain 1 per order (yang terbaru), buang salinannya.
+  const cleanDupes = async () => {
+    if (!(await confirmDialog({
+      title: "Bersihkan data duplikat?",
+      description: "Sistem nyisir semua data pengiriman, cari yang Dash ID + Provider ID kembar, lalu hapus salinannya (sisain 1 yang paling baru). Data yang tidak dobel aman.",
+      confirmText: "Bersihkan", danger: false,
+    }))) return;
+    setCleaning(true);
+    try {
+      const r = await cleanDuplicateDeliveries();
+      if (r.deleted === 0) toast.success(`Bersih — ga ada duplikat dari ${r.scanned.toLocaleString("id-ID")} baris.`);
+      else toast.success(`${r.deleted.toLocaleString("id-ID")} baris dobel dihapus (dari ${r.duplicateGroups} order). Total dicek: ${r.scanned.toLocaleString("id-ID")}.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setCleaning(false);
     }
   };
 
@@ -331,7 +353,12 @@ function DeliveryUpload() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-4">
+        <button onClick={cleanDupes} disabled={cleaning}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">
+          {cleaning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+          Bersihkan Duplikat (data lama)
+        </button>
         <button onClick={reclassifyAll} disabled={reclassifying || clients.length === 0}
           className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">
           {reclassifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
