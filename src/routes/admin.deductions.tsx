@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { parseRupiah } from "@/lib/format";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { toast } from "sonner";
 import { Plus, Trash2, Loader2, X } from "lucide-react";
 
@@ -69,13 +70,17 @@ function DTypesTab() {
     load();
   };
   const remove = async (r: DType) => {
-    if (!confirm(`Hapus jenis potongan "${r.name}"?`)) return;
+    if (!(await confirmDialog({ title: "Hapus jenis potongan?", description: `"${r.name}" akan dihapus permanen.`, confirmText: "Hapus" }))) return;
     const { error } = await (supabase as any).from("deduction_types").delete().eq("id", r.id);
     if (!error) { toast.success("Jenis potongan dihapus"); return load(); }
     // Kalau masih dipakai cicilan/potongan tercatat → FK error. Tawarin nonaktifin.
     const inUse = (error as any).code === "23503" || /foreign key/i.test(error.message);
     if (inUse) {
-      if (confirm(`"${r.name}" masih dipakai potongan/cicilan yang sudah tercatat, jadi tidak bisa dihapus total.\n\nNonaktifkan saja? (tidak muncul lagi saat bikin potongan baru, tapi data lama tetap aman)`)) {
+      if (await confirmDialog({
+        title: "Tidak bisa dihapus",
+        description: `"${r.name}" masih dipakai potongan/cicilan yang sudah tercatat.\n\nNonaktifkan saja? Jenis ini tidak muncul lagi saat bikin potongan baru, tapi data lama tetap aman.`,
+        confirmText: "Nonaktifkan", danger: false,
+      })) {
         const { error: e2 } = await (supabase as any).from("deduction_types").update({ active: false }).eq("id", r.id);
         if (e2) return toast.error(e2.message);
         toast.success("Jenis potongan dinonaktifkan");
@@ -299,10 +304,10 @@ function ActiveTab() {
 
   const remove = async (r: Inst & { rider?: Rider; type?: DType }) => {
     const paid = (r.installments_paid ?? 0) > 0;
-    const msg = paid
-      ? `Hapus cicilan "${r.type?.name}" milik ${r.rider?.full_name}?\n\nSudah terpotong ${r.installments_paid}× di payroll sebelumnya — potongan yang SUDAH tercatat tidak berubah, cicilan ini cuma berhenti & hilang dari daftar.`
-      : `Hapus cicilan "${r.type?.name}" milik ${r.rider?.full_name}?\n\nBelum pernah kepotong, jadi aman dihapus.`;
-    if (!confirm(msg)) return;
+    const desc = paid
+      ? `Milik ${r.rider?.full_name}.\n\nSudah terpotong ${r.installments_paid}× di payroll sebelumnya — potongan yang SUDAH tercatat tidak berubah, cicilan ini cuma berhenti & hilang dari daftar.`
+      : `Milik ${r.rider?.full_name}.\n\nBelum pernah kepotong, jadi aman dihapus.`;
+    if (!(await confirmDialog({ title: `Hapus cicilan ${r.type?.name}?`, description: desc, confirmText: "Hapus" }))) return;
     setDeletingId(r.id);
     const { error } = await supabase.from("rider_installments").delete().eq("id", r.id);
     setDeletingId(null);

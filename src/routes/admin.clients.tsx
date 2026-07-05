@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { toast } from "sonner";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { Plus, Pencil, Trash2, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/admin/clients")({ component: ClientsPage });
@@ -27,7 +28,7 @@ function ClientsPage() {
   useEffect(() => { load(); }, []);
 
   const remove = async (id: string) => {
-    if (!confirm("Hapus client ini?")) return;
+    if (!(await confirmDialog({ title: "Hapus client ini?", description: "Client akan dihapus permanen.", confirmText: "Hapus" }))) return;
     const { error } = await supabase.from("clients").delete().eq("id", id);
     if (error) return toast.error(error.message);
     toast.success("Client dihapus"); load();

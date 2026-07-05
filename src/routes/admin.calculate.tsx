@@ -8,6 +8,7 @@ import { PRICING_TYPES } from "@/lib/pricing-types";
 import { calcScheme, type DeliveryRow, type CalcResult, calcAttendanceScheme, type AttendanceLogRow, type AttendanceCalcResult } from "@/lib/pricing-calc";
 import { formatRupiah } from "@/lib/format";
 import { toast } from "sonner";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { Loader2, Play, AlertTriangle, Info, Save } from "lucide-react";
 
 export const Route = createFileRoute("/admin/calculate")({ component: CalculatePage });
@@ -123,7 +124,7 @@ function CalculatePage() {
     const rows = isAttendance ? (attResult?.perRow.filter((r) => r.id) ?? []) : (result?.perRow.filter((r) => r.id) ?? []);
     if (rows.length === 0) return toast.error("Tidak ada baris untuk disimpan.");
     const table = isAttendance ? "attendance_logs" : "delivery_records";
-    if (!confirm(`Simpan fee ke ${rows.length} baris ${isAttendance ? "absensi" : "pengiriman"}? Angka ini yang akan dipakai Payroll Run.`)) return;
+    if (!(await confirmDialog({ title: "Simpan hasil fee?", description: `Fee akan disimpan ke ${rows.length} baris ${isAttendance ? "absensi" : "pengiriman"}. Angka ini yang akan dipakai Payroll Run.`, confirmText: "Simpan", danger: false }))) return;
     setCommitting(true);
     try {
       const chunkSize = 100;

@@ -13,6 +13,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider } from "@/lib/auth";
 import { Toaster } from "@/components/ui/sonner";
+import { ConfirmHost } from "@/components/confirm-dialog";
 
 function NotFoundComponent() {
   return (
@@ -107,6 +108,7 @@ function RootComponent() {
       <AuthProvider>
         <Outlet />
         <Toaster position="top-right" richColors />
+        <ConfirmHost />
       </AuthProvider>
     </QueryClientProvider>
   );

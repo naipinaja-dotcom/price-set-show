@@ -6,6 +6,7 @@ import { parseCSV } from "@/lib/csv";
 import { resolveOrCreateRiders } from "@/lib/rider-lookup";
 import { classifyAllClients } from "@/lib/delivery-classification";
 import { toast } from "sonner";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { Upload, FileText, Loader2, AlertTriangle, X, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/admin/upload")({ component: UploadPage });
@@ -72,7 +73,7 @@ function DeliveryUpload() {
   // Buat data lama yang udah keupload SEBELUM fitur klasifikasi Delivery/Return
   // ini ada — hitung ulang semua client, bukan cuma yang baru diupload.
   const reclassifyAll = async () => {
-    if (!confirm(`Hitung ulang Delivery/Return buat semua ${clients.length} client? Ini bisa makan waktu kalau datanya banyak.`)) return;
+    if (!(await confirmDialog({ title: "Hitung ulang Delivery/Return?", description: `Untuk semua ${clients.length} client. Ini bisa makan waktu kalau datanya banyak.`, confirmText: "Hitung ulang", danger: false }))) return;
     setReclassifying(true);
     try {
       const results = await classifyAllClients(clients.map((c) => c.id));

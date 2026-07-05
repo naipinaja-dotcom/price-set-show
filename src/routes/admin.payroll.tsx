@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { toast } from "sonner";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { Plus, Loader2, CheckCircle2, Send, X } from "lucide-react";
 
 export const Route = createFileRoute("/admin/payroll")({ component: PayrollPage });
@@ -51,7 +52,7 @@ function PayrollPage() {
 
   const generate = async () => {
     if (!activeRun) return;
-    if (!confirm("Generate ulang detail payroll? Detail lama akan dihapus.")) return;
+    if (!(await confirmDialog({ title: "Generate ulang payroll?", description: "Detail payroll yang lama untuk run ini akan dihapus dan dihitung ulang.", confirmText: "Generate ulang", danger: false }))) return;
     setLoading(true);
     // delete existing details for this run
     await supabase.from("payroll_details").delete().eq("run_id", activeRun.id);

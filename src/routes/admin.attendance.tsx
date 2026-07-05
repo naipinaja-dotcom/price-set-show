@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { toast } from "sonner";
+import { confirmDialog } from "@/components/confirm-dialog";
+import { parseRupiah } from "@/lib/format";
 import { Plus, Pencil, Trash2, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 
 export const Route = createFileRoute("/admin/attendance")({ component: AttendancePage });
@@ -23,6 +25,7 @@ function AttendancePage() {
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Rule | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [incFor, setIncFor] = useState<string | null>(null); // ruleId yang lagi ditambahin insentif
 
   const load = async () => {
     setLoading(true);
@@ -39,22 +42,14 @@ function AttendancePage() {
   useEffect(() => { load(); }, []);
 
   const removeRule = async (id: string) => {
-    if (!confirm("Hapus rule ini beserta insentifnya?")) return;
+    if (!(await confirmDialog({ title: "Hapus rule absensi?", description: "Rule ini beserta semua insentifnya akan dihapus.", confirmText: "Hapus" }))) return;
     const { error } = await supabase.from("attendance_rules").delete().eq("id", id);
     if (error) return toast.error(error.message);
     toast.success("Dihapus"); load();
   };
 
-  const addIncentive = async (ruleId: string) => {
-    const name = prompt("Nama insentif"); if (!name) return;
-    const amount = parseFloat(prompt("Nominal (Rp)") ?? "0"); if (isNaN(amount)) return;
-    const condition = prompt("Kondisi (opsional)") || null;
-    const { error } = await supabase.from("attendance_incentives").insert({ rule_id: ruleId, name, amount, condition });
-    if (error) return toast.error(error.message);
-    toast.success("Insentif ditambahkan"); load();
-  };
   const removeIncentive = async (id: string) => {
-    if (!confirm("Hapus insentif?")) return;
+    if (!(await confirmDialog({ title: "Hapus insentif?", confirmText: "Hapus" }))) return;
     const { error } = await supabase.from("attendance_incentives").delete().eq("id", id);
     if (error) return toast.error(error.message);
     load();
@@ -96,7 +91,7 @@ function AttendancePage() {
                 <div className="p-3 bg-muted/30 border-t border-border">
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="text-xs font-semibold uppercase text-muted-foreground">Insentif</h4>
-                    <button onClick={() => addIncentive(r.id)} className="text-xs text-primary hover:underline">+ Tambah insentif</button>
+                    <button onClick={() => setIncFor(r.id)} className="text-xs text-primary hover:underline">+ Tambah insentif</button>
                   </div>
                   {ruleInc.length === 0 ? <p className="text-xs text-muted-foreground">Tidak ada insentif</p> :
                     <ul className="space-y-1 text-sm">
@@ -118,7 +113,55 @@ function AttendancePage() {
         })}
       </div>
       {open && <RuleModal initial={edit} clients={clients} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); load(); }} />}
+      {incFor && <IncentiveModal ruleId={incFor} onClose={() => setIncFor(null)} onSaved={() => { setIncFor(null); load(); }} />}
     </AdminLayout>
+  );
+}
+
+function IncentiveModal({ ruleId, onClose, onSaved }: { ruleId: string; onClose: () => void; onSaved: () => void }) {
+  const [f, setF] = useState({ name: "", amount: 0, condition: "" });
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!f.name.trim()) return toast.error("Nama insentif wajib diisi");
+    setSaving(true);
+    const { error } = await supabase.from("attendance_incentives").insert({
+      rule_id: ruleId, name: f.name.trim(), amount: f.amount, condition: f.condition.trim() || null,
+    });
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    toast.success("Insentif ditambahkan"); onSaved();
+  };
+
+  const inputCls = "mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm";
+  return (
+    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4" onClick={onClose}>
+      <div className="bg-card rounded-lg w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-base font-semibold mb-4">Tambah Insentif</h2>
+        <div className="space-y-3">
+          <div>
+            <label className="text-sm font-medium">Nama Insentif</label>
+            <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="mis. Insentif Ontime" className={inputCls} />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Nominal (Rp)</label>
+            <input inputMode="numeric" placeholder="0"
+              value={f.amount ? f.amount.toLocaleString("id-ID") : ""}
+              onChange={(e) => setF({ ...f, amount: parseRupiah(e.target.value) })} className={inputCls} />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Kondisi <span className="font-normal text-muted-foreground">(opsional)</span></label>
+            <input value={f.condition} onChange={(e) => setF({ ...f, condition: e.target.value })} placeholder="mis. ontime" className={inputCls} />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded border border-border hover:bg-muted">Batal</button>
+          <button onClick={save} disabled={saving} className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50">
+            {saving ? "Menyimpan…" : "Simpan"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
