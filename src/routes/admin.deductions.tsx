@@ -188,11 +188,19 @@ function AddTab() {
   const [riders, setRiders] = useState<Rider[]>([]);
   const [types, setTypes] = useState<DType[]>([]);
   const [f, setF] = useState({
-    rider_id: "", deduction_type_id: "", total_amount: 0,
+    rider_ids: [] as string[], deduction_type_id: "", total_amount: 0,
     start_date: new Date().toISOString().slice(0,10),
     installment: false, installment_count: 1, notes: "",
   });
+  const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const filtered = riders.filter((r) => {
+    const q = search.trim().toLowerCase();
+    return !q || r.full_name.toLowerCase().includes(q) || r.employee_id.toLowerCase().includes(q);
+  });
+  const toggleRider = (id: string) =>
+    setF((p) => ({ ...p, rider_ids: p.rider_ids.includes(id) ? p.rider_ids.filter((x) => x !== id) : [...p.rider_ids, id] }));
 
   useEffect(() => {
     supabase.from("riders").select("id, employee_id, full_name").order("full_name").then(({ data }) => setRiders(data ?? []));
@@ -201,31 +209,47 @@ function AddTab() {
   }, []);
 
   const save = async () => {
-    if (!f.rider_id || !f.deduction_type_id || !f.total_amount) return toast.error("Lengkapi data");
+    if (f.rider_ids.length === 0) return toast.error("Pilih minimal 1 rider");
+    if (!f.deduction_type_id || !f.total_amount) return toast.error("Lengkapi jenis & nominal potongan");
     setSaving(true);
     const count = f.installment ? Math.max(1, f.installment_count) : 1;
     const per = +(f.total_amount / count).toFixed(2);
-    const { error } = await supabase.from("rider_installments").insert({
-      rider_id: f.rider_id, deduction_type_id: f.deduction_type_id,
+    const rows = f.rider_ids.map((rid) => ({
+      rider_id: rid, deduction_type_id: f.deduction_type_id,
       total_amount: f.total_amount, installment_count: count, per_period_amount: per,
       start_date: f.start_date, next_deduction_date: f.start_date,
       notes: f.notes || null,
-    });
+    }));
+    const { error } = await supabase.from("rider_installments").insert(rows);
     setSaving(false);
     if (error) return toast.error(error.message);
-    toast.success("Potongan ditambahkan");
-    setF({ ...f, total_amount: 0, notes: "" });
+    toast.success(`Potongan ditambahkan ke ${f.rider_ids.length} rider`);
+    setF({ ...f, rider_ids: [], total_amount: 0, notes: "" });
+    setSearch("");
   };
 
   return (
     <div className="max-w-lg space-y-3 text-sm">
       <div>
-        <label className="font-medium">Rider</label>
-        <select value={f.rider_id} onChange={(e) => setF({ ...f, rider_id: e.target.value })}
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
-          <option value="">— pilih rider —</option>
-          {riders.map((r) => <option key={r.id} value={r.id}>{r.employee_id} — {r.full_name}</option>)}
-        </select>
+        <label className="font-medium">Rider <span className="font-normal text-muted-foreground">({f.rider_ids.length} dipilih)</span></label>
+        <input placeholder="Cari nama / kode rider…" value={search} onChange={(e) => setSearch(e.target.value)}
+          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
+        <div className="mt-1.5 flex items-center gap-3 text-xs">
+          <button type="button" onClick={() => setF((p) => ({ ...p, rider_ids: Array.from(new Set([...p.rider_ids, ...filtered.map((r) => r.id)])) }))}
+            className="text-primary hover:underline">Pilih semua{search ? ` (${filtered.length})` : ""}</button>
+          <button type="button" onClick={() => setF((p) => ({ ...p, rider_ids: [] }))}
+            className="text-muted-foreground hover:text-foreground">Hapus pilihan</button>
+        </div>
+        <div className="mt-2 max-h-56 overflow-y-auto rounded-md border border-border divide-y divide-border">
+          {filtered.length === 0 ? <div className="px-3 py-2 text-muted-foreground text-xs">Ga ada rider cocok</div> :
+            filtered.map((r) => (
+              <label key={r.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted cursor-pointer">
+                <input type="checkbox" checked={f.rider_ids.includes(r.id)} onChange={() => toggleRider(r.id)} />
+                <span className="font-mono text-xs text-muted-foreground">{r.employee_id}</span>
+                <span>{r.full_name}</span>
+              </label>
+            ))}
+        </div>
       </div>
       <div>
         <label className="font-medium">Jenis Potongan</label>
