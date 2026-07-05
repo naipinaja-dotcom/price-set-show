@@ -239,27 +239,42 @@ function AddTab() {
 function ActiveTab() {
   const [rows, setRows] = useState<(Inst & { rider?: Rider; type?: DType })[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const { data, error } = await supabase.from("rider_installments")
-        .select("*, riders(id, employee_id, full_name), deduction_types(id, code, name, description, installmentable, active)")
-        .eq("active", true).order("created_at", { ascending: false });
-      if (error) toast.error(error.message);
-      else setRows((data ?? []).map((r: any) => ({ ...r, rider: r.riders, type: r.deduction_types })));
-      setLoading(false);
-    })();
-  }, []);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from("rider_installments")
+      .select("*, riders(id, employee_id, full_name), deduction_types(id, code, name, description, installmentable, active)")
+      .eq("active", true).order("created_at", { ascending: false });
+    if (error) toast.error(error.message);
+    else setRows((data ?? []).map((r: any) => ({ ...r, rider: r.riders, type: r.deduction_types })));
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const remove = async (r: Inst & { rider?: Rider; type?: DType }) => {
+    const paid = (r.installments_paid ?? 0) > 0;
+    const msg = paid
+      ? `Hapus cicilan "${r.type?.name}" milik ${r.rider?.full_name}?\n\nSudah terpotong ${r.installments_paid}× di payroll sebelumnya — potongan yang SUDAH tercatat tidak berubah, cicilan ini cuma berhenti & hilang dari daftar.`
+      : `Hapus cicilan "${r.type?.name}" milik ${r.rider?.full_name}?\n\nBelum pernah kepotong, jadi aman dihapus.`;
+    if (!confirm(msg)) return;
+    setDeletingId(r.id);
+    const { error } = await supabase.from("rider_installments").delete().eq("id", r.id);
+    setDeletingId(null);
+    if (error) return toast.error(error.message);
+    toast.success("Cicilan dihapus");
+    load();
+  };
 
   return (
     <div className="rounded-lg border border-border overflow-hidden">
       <table className="w-full text-sm">
         <thead className="bg-muted text-left">
-          <tr><th className="p-3">Rider</th><th>Jenis</th><th>Total</th><th>Per Periode</th><th>Progress</th><th>Potong Berikutnya</th></tr>
+          <tr><th className="p-3">Rider</th><th>Jenis</th><th>Total</th><th>Per Periode</th><th>Progress</th><th>Potong Berikutnya</th><th></th></tr>
         </thead>
         <tbody>
-          {loading ? <tr><td colSpan={6} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
-          : rows.length === 0 ? <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">Tidak ada cicilan aktif</td></tr>
+          {loading ? <tr><td colSpan={7} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
+          : rows.length === 0 ? <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">Tidak ada cicilan aktif</td></tr>
           : rows.map((r) => (
             <tr key={r.id} className="border-t border-border">
               <td className="p-3"><div className="font-medium">{r.rider?.full_name}</div><div className="text-xs text-muted-foreground">{r.rider?.employee_id}</div></td>
@@ -268,6 +283,12 @@ function ActiveTab() {
               <td>Rp{Number(r.per_period_amount).toLocaleString("id-ID")}</td>
               <td>{r.installments_paid}/{r.installment_count}</td>
               <td>{r.next_deduction_date ?? "—"}</td>
+              <td className="text-right pr-3">
+                <button onClick={() => remove(r)} disabled={deletingId === r.id}
+                  className="p-1.5 hover:bg-muted rounded text-red-600 disabled:opacity-50" title="Hapus cicilan">
+                  {deletingId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
