@@ -28,7 +28,7 @@ function UploadPage() {
   );
 }
 
-const DELIVERY_FIELDS = ["driver_code","driver_name","delivery_date","awb","district","distance_km","weight_kg","destination_address","receiver_name","service_type"];
+const DELIVERY_FIELDS = ["driver_code","driver_name","client_name","status","delivery_date","awb","district","distance_km","weight_kg","destination_address","receiver_name","service_type"];
 
 function DeliveryUpload() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -51,18 +51,28 @@ function DeliveryUpload() {
     setHeaders(parsed[0]); setRows(parsed.slice(1));
     const m: Record<string, string> = {};
     DELIVERY_FIELDS.forEach((field) => {
-      const found = parsed[0].find((h) => h.toLowerCase().replace(/[^a-z]/g, "") === field.replace(/_/g, ""));
+      let found = parsed[0].find((h) => h.toLowerCase().replace(/[^a-z]/g, "") === field.replace(/_/g, ""));
+      // Fallback buat nama kolom yang lebih verbose di data mentah operasional
+      // (mis. "Total Distance In KM" alih-alih "distance_km").
+      if (!found) {
+        if (field === "client_name") found = parsed[0].find((h) => /provider|client/i.test(h));
+        else if (field === "distance_km") found = parsed[0].find((h) => /distance/i.test(h));
+        else if (field === "weight_kg") found = parsed[0].find((h) => /weight/i.test(h));
+        else if (field === "destination_address") found = parsed[0].find((h) => /destination/i.test(h) && !/lat|long/i.test(h));
+      }
       if (found) m[field] = found;
     });
     setMapping(m);
   };
 
+  const hasClientColumn = !!mapping["client_name"];
+
   const process = async () => {
-    if (!clientId) return toast.error("Pilih client");
+    if (!clientId && !hasClientColumn) return toast.error("Pilih client, atau map kolom client di file");
     if (!file || rows.length === 0) return toast.error("Upload CSV dulu");
     setBusy(true);
     const { data: batch, error: bErr } = await supabase.from("upload_batches")
-      .insert({ kind: "delivery", client_id: clientId, filename: file.name, row_count: rows.length })
+      .insert({ kind: "delivery", client_id: clientId || null, filename: file.name, row_count: rows.length })
       .select().single();
     if (bErr) { setBusy(false); return toast.error(bErr.message); }
 
@@ -89,11 +99,30 @@ function DeliveryUpload() {
       return toast.error(`Gagal lookup rider: ${(e as Error).message}`);
     }
 
+    // Client TIDAK di-auto-create (beda kebijakan sama rider) — nama yang ga
+    // ketemu di daftar client yang ADA cuma diflag, bukan ditebak/dibikinin,
+    // karena salah tulis dikit bisa bikin "client hantu" & fee nyasar.
+    const clientByName = new Map(clients.map((c) => [c.name.trim().toLowerCase(), c.id]));
+    const unmatchedClients = new Set<string>();
+    const matchedClientIds = new Set<string>();
+    const resolveClientId = (rawName: string | null): string | null => {
+      if (rawName && rawName.trim()) {
+        const hit = clientByName.get(rawName.trim().toLowerCase());
+        if (hit) { matchedClientIds.add(hit); return hit; }
+        unmatchedClients.add(rawName.trim());
+        return null; // JANGAN fallback ke dropdown — beda client, jangan ditebak salah
+      }
+      return clientId || null; // baris tanpa nilai client -> pakai default dropdown
+    };
+
     const records = rows.map((r) => {
       const driverCode = get(r, "driver_code");
       return {
-        batch_id: batch.id, client_id: clientId, rider_id: driverCode ? riderMap.get(driverCode) ?? null : null,
+        batch_id: batch.id,
+        client_id: hasClientColumn ? resolveClientId(get(r, "client_name")) : (clientId || null),
+        rider_id: driverCode ? riderMap.get(driverCode) ?? null : null,
         driver_code: driverCode,
+        status: get(r, "status"),
         delivery_date: get(r, "delivery_date") || new Date().toISOString().slice(0, 10),
         awb: get(r, "awb"), district: get(r, "district"),
         distance_km: parseFloat(get(r, "distance_km") || "0") || null,
@@ -108,24 +137,36 @@ function DeliveryUpload() {
     let inserted = 0;
     for (let i = 0; i < records.length; i += 500) {
       const chunk = records.slice(i, i + 500);
-      const { error } = await supabase.from("delivery_records").insert(chunk);
+      const { error } = await (supabase as any).from("delivery_records").insert(chunk);
       if (error) { setBusy(false); return toast.error(error.message); }
       inserted += chunk.length;
     }
     setBusy(false);
-    toast.success(`Berhasil upload ${inserted} record` + (createdCodes.length ? ` · ${createdCodes.length} rider baru otomatis terdaftar` : ""));
+    toast.success(
+      `Berhasil upload ${inserted} record` +
+      (hasClientColumn ? ` · ${matchedClientIds.size} client terdeteksi` : "") +
+      (createdCodes.length ? ` · ${createdCodes.length} rider baru otomatis terdaftar` : "")
+    );
+    if (unmatchedClients.size > 0) {
+      toast.warning(`Nama client tidak dikenal (baris ini ke-skip dari perhitungan sampai dibetulkan): ${Array.from(unmatchedClients).join(", ")}`);
+    }
     setFile(null); setHeaders([]); setRows([]); setMapping({});
   };
 
   return (
     <div className="space-y-4">
       <div>
-        <label className="text-sm font-medium">Client</label>
-        <select value={clientId} onChange={(e) => setClientId(e.target.value)}
-          className="mt-1 w-full max-w-sm rounded-md border border-border bg-background px-3 py-2 text-sm">
+        <label className="text-sm font-medium">Client {hasClientColumn && <span className="font-normal text-muted-foreground">(diabaikan — file sudah punya kolom client sendiri, per baris auto-detect)</span>}</label>
+        <select value={clientId} onChange={(e) => setClientId(e.target.value)} disabled={hasClientColumn}
+          className="mt-1 w-full max-w-sm rounded-md border border-border bg-background px-3 py-2 text-sm disabled:opacity-50">
           <option value="">— pilih client —</option>
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+        <p className="text-xs text-muted-foreground mt-1">
+          {hasClientColumn
+            ? "Client dideteksi otomatis per baris dari file (1 file boleh campur banyak client)."
+            : "Dipakai kalau file TIDAK punya kolom client sendiri. Kalau file punya kolom Provider Name/Client, itu otomatis kepakai duluan."}
+        </p>
       </div>
       <label className="block">
         <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} className="hidden" />
@@ -151,7 +192,7 @@ function DeliveryUpload() {
           </div>
         </div>
       )}
-      <button onClick={process} disabled={busy || rows.length === 0 || !clientId}
+      <button onClick={process} disabled={busy || rows.length === 0 || (!clientId && !hasClientColumn)}
         className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm disabled:opacity-50">
         {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />} Proses Upload
       </button>
