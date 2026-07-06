@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { parseCSV, toCSV, downloadCSV } from "@/lib/csv";
 import { toast } from "sonner";
-import { Plus, Pencil, Loader2, AlertCircle, Upload, Download, X } from "lucide-react";
+import { Plus, Pencil, Loader2, AlertCircle, Upload, Download, X, Search } from "lucide-react";
 
 export const Route = createFileRoute("/admin/riders")({ component: RidersPage });
 
@@ -24,6 +24,7 @@ function RidersPage() {
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Rider | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -48,7 +49,11 @@ function RidersPage() {
     load();
   };
 
-  const filtered = filter === "all" ? rows : rows.filter((r) => r.status === filter);
+  const q = search.trim().toLowerCase();
+  const filtered = rows.filter((r) =>
+    (filter === "all" || r.status === filter) &&
+    (!q || r.full_name.toLowerCase().includes(q) || r.employee_id.toLowerCase().includes(q))
+  );
   const statusBadge = (s: RiderStatus) => {
     const map: Record<RiderStatus, string> = {
       active: "bg-success/10 text-success",
@@ -63,6 +68,15 @@ function RidersPage() {
 
   return (
     <AdminLayout title="Riders">
+      <div className="relative mb-3 max-w-md">
+        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Cari nama atau kode MTR…"
+          className="w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+        />
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex gap-2">
           {(["all","active","pending_review","inactive","suspended"] as const).map((s) => (
