@@ -37,6 +37,17 @@ function RidersPage() {
   };
   useEffect(() => { load(); }, []);
 
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const toggleStatus = async (r: Rider) => {
+    const next: RiderStatus = r.status === "active" ? "inactive" : "active";
+    setTogglingId(r.id);
+    const { error } = await supabase.from("riders").update({ status: next }).eq("id", r.id);
+    setTogglingId(null);
+    if (error) return toast.error(error.message);
+    toast.success(`${r.full_name} → ${next === "active" ? "Aktif" : "Nonaktif"}`);
+    load();
+  };
+
   const filtered = filter === "all" ? rows : rows.filter((r) => r.status === filter);
   const statusBadge = (s: RiderStatus) => {
     const map: Record<RiderStatus, string> = {
@@ -88,7 +99,11 @@ function RidersPage() {
                 <td>{r.phone ?? "—"}</td>
                 <td>{statusBadge(r.status)}</td>
                 <td className="text-right pr-3">
-                  <button onClick={() => { setEdit(r); setOpen(true); }} className="p-1.5 hover:bg-muted rounded"><Pencil className="w-4 h-4" /></button>
+                  <button onClick={() => toggleStatus(r)} disabled={togglingId === r.id} title={r.status === "active" ? "Nonaktifkan rider" : "Aktifkan rider"}
+                    className="text-xs px-2.5 py-1 rounded-md border border-border hover:bg-muted disabled:opacity-50 mr-1">
+                    {togglingId === r.id ? "…" : r.status === "active" ? "Nonaktifkan" : "Aktifkan"}
+                  </button>
+                  <button onClick={() => { setEdit(r); setOpen(true); }} className="p-1.5 hover:bg-muted rounded" title="Edit"><Pencil className="w-4 h-4" /></button>
                 </td>
               </tr>
             ))}
