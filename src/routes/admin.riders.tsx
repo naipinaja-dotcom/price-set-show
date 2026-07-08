@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { parseCSV, toCSV, downloadCSV } from "@/lib/csv";
 import { toast } from "sonner";
-import { Plus, Pencil, Loader2, AlertCircle, Upload, Download, X, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, AlertCircle, Upload, Download, X, Search } from "lucide-react";
 
 export const Route = createFileRoute("/admin/riders")({ component: RidersPage });
 
@@ -25,6 +25,7 @@ function RidersPage() {
   const [edit, setEdit] = useState<Rider | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -37,6 +38,19 @@ function RidersPage() {
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
+
+  const handleDelete = async (r: Rider) => {
+    if (!confirm(`Yakin mau hapus rider "${r.full_name}" (${r.employee_id})?\n\nData delivery & attendance tetap aman, cuma profil rider yang dihapus.`)) return;
+    setDeletingId(r.id);
+    const { error } = await supabase.from("riders").delete().eq("id", r.id);
+    setDeletingId(null);
+    if (error) {
+      toast.error("Gagal hapus: " + error.message);
+    } else {
+      toast.success("Rider berhasil dihapus");
+      load();
+    }
+  };
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const toggleStatus = async (r: Rider) => {
@@ -100,7 +114,7 @@ function RidersPage() {
       <div className="rounded-lg border border-border overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted text-left">
-            <tr><th className="p-3">Employee ID</th><th>Nama</th><th>Client</th><th>Telepon</th><th>Status</th><th className="text-right pr-3">Aksi</th></tr>
+            <tr><th className="p-3">Employee ID (MTR)</th><th>Nama</th><th>Client</th><th>Telepon</th><th>Status</th><th className="text-right pr-3">Aksi</th></tr>
           </thead>
           <tbody>
             {loading ? <tr><td colSpan={6} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
@@ -117,7 +131,11 @@ function RidersPage() {
                     className="text-xs px-2.5 py-1 rounded-md border border-border hover:bg-muted disabled:opacity-50 mr-1">
                     {togglingId === r.id ? "…" : r.status === "active" ? "Nonaktifkan" : "Aktifkan"}
                   </button>
-                  <button onClick={() => { setEdit(r); setOpen(true); }} className="p-1.5 hover:bg-muted rounded" title="Edit"><Pencil className="w-4 h-4" /></button>
+                  <button onClick={() => { setEdit(r); setOpen(true); }} className="p-1.5 hover:bg-muted rounded mr-1" title="Edit"><Pencil className="w-4 h-4" /></button>
+                  <button onClick={() => handleDelete(r)} disabled={deletingId === r.id} title="Hapus rider permanen"
+                    className="p-1.5 hover:bg-destructive/10 text-destructive hover:text-destructive rounded disabled:opacity-50">
+                    {deletingId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  </button>
                 </td>
               </tr>
             ))}
@@ -286,7 +304,6 @@ function RiderModal({ initial, clients, onClose, onSaved }:
     full_name: initial?.full_name ?? "",
     phone: initial?.phone ?? "",
     email: initial?.email ?? "",
-    client_id: initial?.client_id ?? "",
     status: (initial?.status ?? "active") as RiderStatus,
     bank_name: initial?.bank_name ?? "",
     bank_account: initial?.bank_account ?? "",
@@ -295,9 +312,9 @@ function RiderModal({ initial, clients, onClose, onSaved }:
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
-    if (!f.employee_id || !f.full_name) return toast.error("Employee ID & nama wajib");
+    if (!f.employee_id || !f.full_name) return toast.error("Employee ID (MTR) & nama wajib");
     setSaving(true);
-    const payload: any = { ...f, client_id: f.client_id || null };
+    const payload: any = { ...f };
     ["phone","email","bank_name","bank_account","notes"].forEach((k) => { if (!payload[k]) payload[k] = null; });
     const { error } = initial
       ? await supabase.from("riders").update(payload).eq("id", initial.id)
@@ -311,19 +328,14 @@ function RiderModal({ initial, clients, onClose, onSaved }:
     <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4" onClick={onClose}>
       <div className="bg-card rounded-lg w-full max-w-lg p-5 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold mb-4">{initial ? "Edit" : "Tambah"} Rider</h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          Catatan: rider TIDAK terikat 1 client — dia bisa jalan untuk banyak client. Client-nya nempel di tiap data pengiriman/absensi, bukan di profil rider.
+        </p>
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <Field label="Employee ID" value={f.employee_id} onChange={(v) => setF({ ...f, employee_id: v })} />
+          <Field label="Employee ID (MTR)" placeholder="MTR001" value={f.employee_id} onChange={(v) => setF({ ...f, employee_id: v })} />
           <Field label="Nama Lengkap" value={f.full_name} onChange={(v) => setF({ ...f, full_name: v })} />
           <Field label="Telepon" value={f.phone} onChange={(v) => setF({ ...f, phone: v })} />
           <Field label="Email" value={f.email} onChange={(v) => setF({ ...f, email: v })} />
-          <div>
-            <label className="font-medium">Client</label>
-            <select value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })}
-              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
-              <option value="">—</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
           <div>
             <label className="font-medium">Status</label>
             <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value as RiderStatus })}

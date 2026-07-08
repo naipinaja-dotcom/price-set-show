@@ -62,17 +62,37 @@ function CalculatePage() {
     setAttResult(null);
     try {
       if (scheme.calc_type === "attendance") {
+        // STEP 1: Fetch semua attendance_logs di rentang tanggal & client ini (tanpa join riders)
         let q = (supabase as any)
           .from("attendance_logs")
-          .select("id, rider_id, driver_code, log_date, duration_minutes, is_late, is_absent, riders(full_name, employee_id)")
+          .select("id, rider_id, driver_code, log_date, duration_minutes, is_late, is_absent")
           .gte("log_date", from)
           .lte("log_date", to);
         if (clientId) q = q.eq("client_id", clientId);
         const { data, error } = await q;
         if (error) throw error;
 
-        const rows = (data ?? []) as (AttendanceLogRow & { riders?: { full_name?: string; employee_id?: string } })[];
-        if (rows.length === 0) toast.message("Tidak ada data absensi di rentang & client ini.");
+        const rowsPlain = (data ?? []) as AttendanceLogRow[];
+        if (rowsPlain.length === 0) toast.message("Tidak ada data absensi di rentang & client ini.");
+
+        // STEP 2: Extract unique rider_id
+        const riderIds = [...new Set(rowsPlain.map((r) => r.rider_id).filter(Boolean))];
+
+        // STEP 3: Fetch nama rider berdasarkan ID
+        let riderMap: Record<string, { full_name: string; employee_id: string }> = {};
+        if (riderIds.length > 0) {
+          const { data: riderData } = await supabase
+            .from("riders")
+            .select("id, full_name, employee_id")
+            .in("id", riderIds);
+          riderMap = Object.fromEntries((riderData ?? []).map((r) => [r.id, { full_name: r.full_name, employee_id: r.employee_id }]));
+        }
+
+        // STEP 4: Gabungkan data attendance dengan info rider
+        const rows = rowsPlain.map((r) => ({
+          ...r,
+          riders: r.rider_id ? riderMap[r.rider_id] : undefined,
+        })) as (AttendanceLogRow & { riders?: { full_name?: string; employee_id?: string } })[];
 
         const names: Record<string, string> = {};
         for (const r of rows) {
@@ -85,19 +105,39 @@ function CalculatePage() {
         setAttResult(res);
         setRanScheme(scheme);
       } else {
+        // STEP 1: Fetch semua delivery_records di rentang tanggal & client ini (tanpa join riders)
         let q = supabase
           .from("delivery_records")
-          .select("id, rider_id, driver_code, delivery_date, awb, district, distance_km, weight_kg, destination_address, service_type, status, delivery_type, riders(full_name, employee_id)")
+          .select("id, rider_id, driver_code, delivery_date, awb, district, distance_km, weight_kg, destination_address, service_type, status, delivery_type")
           .gte("delivery_date", from)
           .lte("delivery_date", to);
         if (clientId) q = q.eq("client_id", clientId);
         const { data, error } = await q;
         if (error) throw error;
 
-        const rows = (data ?? []) as unknown as (DeliveryRow & { riders?: { full_name?: string; employee_id?: string } })[];
-        if (rows.length === 0) {
+        const rowsPlain = (data ?? []) as unknown as DeliveryRow[];
+        if (rowsPlain.length === 0) {
           toast.message("Tidak ada data pengiriman di rentang & client ini.");
         }
+
+        // STEP 2: Extract unique rider_id
+        const riderIds = [...new Set(rowsPlain.map((r) => r.rider_id).filter(Boolean))];
+
+        // STEP 3: Fetch nama rider berdasarkan ID
+        let riderMap: Record<string, { full_name: string; employee_id: string }> = {};
+        if (riderIds.length > 0) {
+          const { data: riderData } = await supabase
+            .from("riders")
+            .select("id, full_name, employee_id")
+            .in("id", riderIds);
+          riderMap = Object.fromEntries((riderData ?? []).map((r) => [r.id, { full_name: r.full_name, employee_id: r.employee_id }]));
+        }
+
+        // STEP 4: Gabungkan data delivery dengan info rider
+        const rows = rowsPlain.map((r) => ({
+          ...r,
+          riders: r.rider_id ? riderMap[r.rider_id] : undefined,
+        })) as unknown as (DeliveryRow & { riders?: { full_name?: string; employee_id?: string } })[];
 
         // map nama rider untuk tampilan
         const names: Record<string, string> = {};

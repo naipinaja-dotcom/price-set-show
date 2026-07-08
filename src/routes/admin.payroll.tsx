@@ -59,20 +59,33 @@ function PayrollPage() {
     // delete existing details for this run
     await supabase.from("payroll_details").delete().eq("run_id", activeRun.id);
 
-    // fetch riders + their deliveries + attendance in period.
-    // Attendance fee sekarang dipungut dari attendance_logs.fee — udah
-    // dihitung & di-Commit lewat Hitung Fee (skema Type E), sama persis
-    // pola delivery_records.fee. Jalur lama (attendance_rules/attendance_incentives,
-    // hitung ulang di sini) DIBUANG biar cuma ada SATU sumber kebenaran.
-    const [{ data: riders }, { data: deliveries }, { data: attendance }, { data: installments }, { data: autoTypes }] = await Promise.all([
-      supabase.from("riders").select("id, client_id, employee_id, full_name").eq("status", "active"),
-      supabase.from("delivery_records").select("rider_id, client_id, fee")
+    // STEP 1: Fetch semua delivery & attendance di periode ini dulu
+    const [{ data: deliveries }, { data: attendance }] = await Promise.all([
+      supabase.from("delivery_records").select("rider_id")
         .gte("delivery_date", activeRun.period_start).lte("delivery_date", activeRun.period_end),
-      (supabase as any).from("attendance_logs").select("rider_id, fee")
+      (supabase as any).from("attendance_logs").select("rider_id")
         .gte("log_date", activeRun.period_start).lte("log_date", activeRun.period_end),
+    ]);
+
+    // STEP 2: Extract unique rider_id yang punya aktivitas di periode ini
+    const riderIds = [...new Set([
+      ...(deliveries ?? []).map((d: any) => d.rider_id),
+      ...(attendance ?? []).map((a: any) => a.rider_id),
+    ])].filter(Boolean);
+
+    // STEP 3: Fetch detail rider HANYA yang ada di list rider_ids
+    let riders: any[] = [];
+    if (riderIds.length > 0) {
+      const { data } = await supabase.from("riders")
+        .select("id, client_id, employee_id, full_name")
+        .in("id", riderIds);
+      riders = data ?? [];
+    }
+
+    // STEP 4: Fetch data pendukung lain (installments, deduction_types)
+    const [{ data: installments }, { data: autoTypes }] = await Promise.all([
       supabase.from("rider_installments").select("*").eq("active", true)
         .lte("next_deduction_date", activeRun.period_end),
-      // potongan otomatis (flat, tiap periode) — mis. Biaya Admin
       (supabase as any).from("deduction_types").select("id, name, recurring_amount")
         .eq("active", true).eq("auto_recurring", true),
     ]);
@@ -81,12 +94,26 @@ function PayrollPage() {
     const deductionsToInsert: any[] = [];
 
     for (const rider of riders ?? []) {
-      const rDelivs = (deliveries ?? []).filter((d) => d.rider_id === rider.id);
+      const rDelivs = (deliveries ?? []).filter((d: any) => d.rider_id === rider.id);
       const rAttend = (attendance ?? []).filter((a: any) => a.rider_id === rider.id);
 
-      const deliveryFee = rDelivs.reduce((s, d) => s + Number(d.fee || 0), 0);
-      const deliveryCount = rDelivs.length;
-      const attendanceFee = rAttend.reduce((s: number, a: any) => s + Number(a.fee || 0), 0);
+      // Fetch detail delivery & attendance dengan fee untuk rider ini
+      const [{ data: rDelivDetails }, { data: rAttendDetails }] = await Promise.all([
+        rDelivs.length > 0 
+          ? supabase.from("delivery_records").select("fee")
+              .eq("rider_id", rider.id)
+              .gte("delivery_date", activeRun.period_start).lte("delivery_date", activeRun.period_end)
+          : Promise.resolve({ data: [] }),
+        rAttend.length > 0
+          ? (supabase as any).from("attendance_logs").select("fee")
+              .eq("rider_id", rider.id)
+              .gte("log_date", activeRun.period_start).lte("log_date", activeRun.period_end)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const deliveryFee = (rDelivDetails ?? []).reduce((s, d) => s + Number(d.fee || 0), 0);
+      const deliveryCount = rDelivDetails?.length ?? 0;
+      const attendanceFee = (rAttendDetails ?? []).reduce((s: number, a: any) => s + Number(a.fee || 0), 0);
       // Insentif & penalty udah dianyam ke dalam attendance_fee sama Type E
       // engine (bukan line-item terpisah lagi kayak jalur lama).
       const incentiveTotal = 0;
