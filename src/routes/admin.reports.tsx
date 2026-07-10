@@ -7,6 +7,7 @@ import { usePagination } from "@/lib/use-pagination";
 import { toCSV, downloadCSV } from "@/lib/csv";
 import { toast } from "sonner";
 import { Download, Loader2 } from "lucide-react";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 export const Route = createFileRoute("/admin/reports")({ component: ReportsPage });
 
@@ -61,22 +62,6 @@ type RiderRow = {
   total: number;
 };
 
-// ambil semua baris (paginasi — batas 1000/request)
-async function fetchAllDeliv(start: string, end: string) {
-  const pageSize = 1000; let from = 0;
-  const rows: { rider_id: string | null; delivery_date: string }[] = [];
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const { data, error } = await sb.from("delivery_records")
-      .select("rider_id, delivery_date").gte("delivery_date", start).lte("delivery_date", end)
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    rows.push(...(data ?? []));
-    if (!data || data.length < pageSize) break;
-    from += pageSize;
-  }
-  return rows;
-}
 
 function RiderFinanceReport({ runId, run }: { runId: string; run?: Run }) {
   const [rows, setRows] = useState<RiderRow[]>([]);
@@ -111,7 +96,12 @@ function RiderFinanceReport({ runId, run }: { runId: string; run?: Run }) {
         }
 
         // hari aktif = jumlah tanggal beda per rider di periode run
-        const delivs = await fetchAllDeliv(run.period_start, run.period_end);
+        const delivs = await fetchAllRows<{ rider_id: string | null; delivery_date: string }>(
+          (client, from, to) => client.from("delivery_records" as any)
+            .select("rider_id, delivery_date")
+            .gte("delivery_date", run.period_start).lte("delivery_date", run.period_end)
+            .range(from, to)
+        );
         const datesByRider = new Map<string, Set<string>>();
         for (const r of delivs) {
           if (!r.rider_id) continue;

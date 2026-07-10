@@ -7,6 +7,7 @@ import { usePagination } from "@/lib/use-pagination";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { Plus, Loader2, CheckCircle2, Send, X } from "lucide-react";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 export const Route = createFileRoute("/admin/payroll")({ component: PayrollPage });
 
@@ -66,17 +67,22 @@ function PayrollPage() {
     await supabase.from("payroll_details").delete().eq("run_id", activeRun.id);
 
     // STEP 1: Fetch semua delivery & attendance di periode ini dulu
-    const [{ data: deliveries }, { data: attendance }] = await Promise.all([
-      supabase.from("delivery_records").select("rider_id")
-        .gte("delivery_date", activeRun.period_start).lte("delivery_date", activeRun.period_end),
-      (supabase as any).from("attendance_logs").select("rider_id")
-        .gte("log_date", activeRun.period_start).lte("log_date", activeRun.period_end),
+    // Pakai fetchAllRows supaya data >1000 baris tidak terpotong diam-diam.
+    const [deliveries, attendance] = await Promise.all([
+      fetchAllRows<{ rider_id: string }>((sb, from, to) =>
+        sb.from("delivery_records").select("rider_id")
+          .gte("delivery_date", activeRun.period_start).lte("delivery_date", activeRun.period_end)
+          .range(from, to)),
+      fetchAllRows<{ rider_id: string }>((sb, from, to) =>
+        (sb as any).from("attendance_logs").select("rider_id")
+          .gte("log_date", activeRun.period_start).lte("log_date", activeRun.period_end)
+          .range(from, to)),
     ]);
 
     // STEP 2: Extract unique rider_id yang punya aktivitas di periode ini
     const riderIds = [...new Set([
-      ...(deliveries ?? []).map((d: any) => d.rider_id),
-      ...(attendance ?? []).map((a: any) => a.rider_id),
+      ...deliveries.map((d) => d.rider_id),
+      ...attendance.map((a) => a.rider_id),
     ])].filter(Boolean);
 
     // STEP 3: Fetch detail rider HANYA yang ada di list rider_ids
@@ -100,8 +106,8 @@ function PayrollPage() {
     const deductionsToInsert: any[] = [];
 
     for (const rider of riders ?? []) {
-      const rDelivs = (deliveries ?? []).filter((d: any) => d.rider_id === rider.id);
-      const rAttend = (attendance ?? []).filter((a: any) => a.rider_id === rider.id);
+      const rDelivs = deliveries.filter((d) => d.rider_id === rider.id);
+      const rAttend = attendance.filter((a) => a.rider_id === rider.id);
 
       // Fetch detail delivery & attendance dengan fee untuk rider ini
       const [{ data: rDelivDetails }, { data: rAttendDetails }] = await Promise.all([
