@@ -1,0 +1,121 @@
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { getSupabaseAdmin } from "@/lib/supabase-admin.server";
+
+// Riders log in with their Kode Mitra (employee_id) + a short PIN, not
+// email/password. Supabase Auth is email-based under the hood, so each
+// rider gets a synthetic, unreachable email derived from employee_id —
+// the PIN becomes their Supabase Auth "password". Login translates
+// employeeId -> this same synthetic email (see loginRider in auth.tsx).
+function syntheticEmail(employeeId: string) {
+  const slug = employeeId.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  return `rider-${slug}@dash.internal`;
+}
+
+// Placeholder password the rider can never guess/use — set on
+// activate/reset so the account exists but is unusable until the rider
+// completes first-time PIN setup (which overwrites it with their own PIN).
+function randomPlaceholder() {
+  return `x${Math.random().toString(36).slice(2)}${Date.now().toString(36)}!Aa1`;
+}
+
+async function requireAdmin(adminToken: string) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data: userRes, error: userErr } = await supabaseAdmin.auth.getUser(adminToken);
+  if (userErr || !userRes.user) throw new Error(`Sesi admin tidak valid: ${userErr?.message ?? "no user"}`);
+  const { data: roles } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userRes.user.id);
+  if (!roles?.some((r) => r.role === "admin")) throw new Error("Hanya admin yang bisa lakukan ini");
+  return supabaseAdmin;
+}
+
+// Admin: activate login for a rider. No PIN typed by admin — the rider
+// sets their own PIN on first login (see setFirstTimeRiderPin below).
+export const activateRiderLogin = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    adminToken: z.string().min(1),
+    riderId: z.string().uuid(),
+    employeeId: z.string().min(1),
+    fullName: z.string().min(1),
+  }))
+  .handler(async ({ data }) => {
+    const supabaseAdmin = await requireAdmin(data.adminToken);
+    const email = syntheticEmail(data.employeeId);
+    const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password: randomPlaceholder(),
+      email_confirm: true,
+      user_metadata: { full_name: data.fullName },
+    });
+    if (error) throw new Error(error.message);
+    const userId = created.user.id;
+    // handle_new_user trigger already inserted profiles + user_roles(role='rider').
+    await supabaseAdmin.from("profiles").update({ employee_id: data.employeeId }).eq("id", userId);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: linkErr } = await (supabaseAdmin as any).from("riders")
+      .update({ user_id: userId, must_change_pin: true }).eq("id", data.riderId);
+    if (linkErr) throw new Error(linkErr.message);
+    return { ok: true };
+  });
+
+// Admin: rider forgot their PIN. Scrambles the password again and flags
+// must_change_pin so the rider redoes first-time setup with a fresh PIN.
+export const resetRiderLogin = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    adminToken: z.string().min(1),
+    userId: z.string().uuid(),
+    riderId: z.string().uuid(),
+  }))
+  .handler(async ({ data }) => {
+    const supabaseAdmin = await requireAdmin(data.adminToken);
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(data.userId, { password: randomPlaceholder() });
+    if (error) throw new Error(error.message);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: flagErr } = await (supabaseAdmin as any).from("riders").update({ must_change_pin: true }).eq("id", data.riderId);
+    if (flagErr) throw new Error(flagErr.message);
+    return { ok: true };
+  });
+
+export const unlinkRiderLogin = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    adminToken: z.string().min(1),
+    riderId: z.string().uuid(),
+  }))
+  .handler(async ({ data }) => {
+    const supabaseAdmin = await requireAdmin(data.adminToken);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabaseAdmin as any).from("riders").update({ user_id: null, must_change_pin: false }).eq("id", data.riderId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+function normalizePhone(p: string) {
+  return p.replace(/[^0-9]/g, "").replace(/^0/, "62");
+}
+
+// Rider self-service: verify Kode Mitra + WhatsApp number (both already on
+// file), then set their own PIN for the first time. No admin token needed —
+// the phone match IS the verification. Returns the synthetic email so the
+// client can immediately sign in with the new PIN.
+export const setFirstTimeRiderPin = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    employeeId: z.string().min(1),
+    phone: z.string().min(6),
+    newPin: z.string().min(4).max(8),
+  }))
+  .handler(async ({ data }) => {
+    const supabaseAdmin = getSupabaseAdmin();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: rider, error } = await (supabaseAdmin as any).from("riders")
+      .select("id, user_id, phone, must_change_pin").eq("employee_id", data.employeeId).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!rider || !rider.user_id) throw new Error("Kode Mitra belum aktif — hubungi admin");
+    if (!rider.must_change_pin) throw new Error("PIN sudah pernah di-set — pakai login biasa, atau minta admin reset");
+    if (!rider.phone || normalizePhone(rider.phone) !== normalizePhone(data.phone)) {
+      throw new Error("Nomor WhatsApp tidak cocok dengan data kami");
+    }
+    const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(rider.user_id, { password: data.newPin });
+    if (pwErr) throw new Error(pwErr.message);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabaseAdmin as any).from("riders").update({ must_change_pin: false }).eq("id", rider.id);
+    return { email: syntheticEmail(data.employeeId) };
+  });

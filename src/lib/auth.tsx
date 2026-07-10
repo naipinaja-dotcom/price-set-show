@@ -80,8 +80,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       if (error) throw new Error(error.message);
     },
-    loginRider: async () => {
-      throw new Error("Login rider belum tersedia — hubungi admin");
+    loginRider: async (employeeId, pin) => {
+      const slug = employeeId.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+      const { error } = await supabase.auth.signInWithPassword({ email: `rider-${slug}@dash.internal`, password: pin });
+      if (error) throw new Error("Kode Mitra atau PIN salah");
     },
     logout: async () => {
       await supabase.auth.signOut();

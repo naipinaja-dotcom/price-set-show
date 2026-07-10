@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate, Navigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { setFirstTimeRiderPin } from "@/lib/api/rider-auth.functions";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
@@ -20,10 +21,17 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
-  const { user, loginAdmin, loading: authLoading } = useAuth();
+  const { user, loginAdmin, loginRider, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const [mode, setMode] = useState<"admin" | "rider">("admin");
+  const [riderSubMode, setRiderSubMode] = useState<"login" | "firstTime">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+  const [pin, setPin] = useState("");
+  const [phone, setPhone] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [newPinConfirm, setNewPinConfirm] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   if (authLoading) return null;
@@ -33,10 +41,25 @@ function LoginPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      if (!email || !password) throw new Error("Email & password wajib diisi");
-      await loginAdmin(email, password);
-      toast.success("Berhasil masuk");
-      navigate({ to: "/admin/dashboard" });
+      if (mode === "admin") {
+        if (!email || !password) throw new Error("Email & password wajib diisi");
+        await loginAdmin(email, password);
+        toast.success("Berhasil masuk");
+        navigate({ to: "/admin/dashboard" });
+      } else if (riderSubMode === "login") {
+        if (!employeeId || !pin) throw new Error("Kode Mitra & PIN wajib diisi");
+        await loginRider(employeeId, pin);
+        toast.success("Berhasil masuk");
+        navigate({ to: "/rider/dashboard" });
+      } else {
+        if (!employeeId || !phone || !newPin) throw new Error("Semua kolom wajib diisi");
+        if (newPin !== newPinConfirm) throw new Error("PIN baru tidak sama");
+        if (!/^\d{4,8}$/.test(newPin)) throw new Error("PIN 4-8 digit angka");
+        await setFirstTimeRiderPin({ data: { employeeId, phone, newPin } });
+        await loginRider(employeeId, newPin);
+        toast.success("PIN berhasil dibuat, berhasil masuk");
+        navigate({ to: "/rider/dashboard" });
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Login gagal");
     } finally {
@@ -68,32 +91,117 @@ function LoginPage() {
       <div className="flex items-center justify-center p-6">
         <form onSubmit={submit} className="w-full max-w-sm">
           <h1 className="text-xl font-semibold mb-1">Masuk ke DASH</h1>
-          <p className="text-sm text-muted-foreground mb-6">
-            Masuk dengan email &amp; password admin Anda. Akun baru hanya dapat dibuat oleh administrator.
+          <p className="text-sm text-muted-foreground mb-4">
+            {mode === "admin"
+              ? "Masuk dengan email & password admin Anda. Akun baru hanya dapat dibuat oleh administrator."
+              : riderSubMode === "login"
+                ? "Masuk pakai Kode Mitra & PIN yang sudah kamu buat sendiri."
+                : "Verifikasi pakai Kode Mitra & Nomor WhatsApp yang terdaftar, lalu buat PIN sendiri."}
           </p>
 
-          <div className="space-y-3">
-            <div>
-              <label className="text-sm font-medium">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@dash.id"
-                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
+          <div className="flex gap-1 p-1 bg-muted rounded-md mb-4 max-w-[220px]">
+            {([["admin", "Admin"], ["rider", "Rider"]] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => { setMode(k); setRiderSubMode("login"); }}
+                className={`flex-1 px-3 py-1.5 text-sm rounded ${mode === k ? "bg-card shadow-sm font-medium" : "text-muted-foreground"}`}>{l}</button>
+            ))}
           </div>
+
+          {mode === "admin" ? (
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-medium">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="admin@dash.id"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+            </div>
+          ) : riderSubMode === "login" ? (
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-medium">Kode Mitra</label>
+                <input
+                  value={employeeId}
+                  onChange={(e) => setEmployeeId(e.target.value)}
+                  placeholder="MTR0001"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">PIN</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  placeholder="••••"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <button type="button" onClick={() => setRiderSubMode("firstTime")} className="text-xs text-primary hover:underline">
+                Belum pernah login? Buat PIN pertama kali
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-medium">Kode Mitra</label>
+                <input
+                  value={employeeId}
+                  onChange={(e) => setEmployeeId(e.target.value)}
+                  placeholder="MTR0001"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Nomor WhatsApp terdaftar</label>
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="0812..."
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">PIN baru</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={newPin}
+                  onChange={(e) => setNewPin(e.target.value)}
+                  placeholder="4-8 digit"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Ulangi PIN baru</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={newPinConfirm}
+                  onChange={(e) => setNewPinConfirm(e.target.value)}
+                  placeholder="4-8 digit"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <button type="button" onClick={() => setRiderSubMode("login")} className="text-xs text-primary hover:underline">
+                Sudah pernah buat PIN? Masuk di sini
+              </button>
+            </div>
+          )}
 
           <button
             type="submit"
@@ -101,7 +209,7 @@ function LoginPage() {
             className="mt-5 w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-medium hover:opacity-90 disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-            Masuk
+            {mode === "rider" && riderSubMode === "firstTime" ? "Buat PIN & Masuk" : "Masuk"}
           </button>
         </form>
       </div>

@@ -6,7 +6,10 @@ import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
 import { parseCSV, toCSV, downloadCSV } from "@/lib/csv";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Loader2, AlertCircle, Upload, Download, X, Search } from "lucide-react";
+import { confirmDialog } from "@/components/confirm-dialog";
+import { useAuth } from "@/lib/auth";
+import { activateRiderLogin, resetRiderLogin, unlinkRiderLogin } from "@/lib/api/rider-auth.functions";
+import { Plus, Pencil, Trash2, Loader2, AlertCircle, Upload, Download, X, Search, KeyRound } from "lucide-react";
 
 export const Route = createFileRoute("/admin/riders")({ component: RidersPage });
 
@@ -21,6 +24,7 @@ type Rider = {
   client_id: string | null; status: string; join_date: string | null;
   bank_name: string | null; bank_account: string | null; notes: string | null;
   nik?: string | null; bank_account_holder?: string | null; birth_date?: string | null; birth_place?: string | null;
+  user_id?: string | null; must_change_pin?: boolean;
 };
 type Client = { id: string; name: string };
 
@@ -358,6 +362,54 @@ function RiderModal({ initial, clients, onClose, onSaved }:
     notes: initial?.notes ?? "",
   });
   const [saving, setSaving] = useState(false);
+  const { session } = useAuth();
+  const [pinBusy, setPinBusy] = useState(false);
+  const hasLogin = !!initial?.user_id;
+  const pendingSetup = hasLogin && !!initial?.must_change_pin;
+
+  const activateLogin = async () => {
+    if (!initial || !session?.access_token) return toast.error("Sesi admin habis — login ulang");
+    setPinBusy(true);
+    try {
+      await activateRiderLogin({ data: { adminToken: session.access_token, riderId: initial.id, employeeId: f.employee_id, fullName: f.full_name } });
+      toast.success("Login diaktifkan — rider bisa set PIN sendiri lewat halaman login");
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Gagal aktifkan login");
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
+  const resetLogin = async () => {
+    if (!initial?.user_id || !session?.access_token) return;
+    if (!(await confirmDialog({ title: "Reset login rider?", description: `${initial.full_name} harus set PIN baru lagi lewat halaman login (Kode Mitra + Nomor WhatsApp).`, confirmText: "Reset", danger: false }))) return;
+    setPinBusy(true);
+    try {
+      await resetRiderLogin({ data: { adminToken: session.access_token, userId: initial.user_id, riderId: initial.id } });
+      toast.success("Login direset — rider perlu set PIN baru");
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Gagal reset login");
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
+  const removeLogin = async () => {
+    if (!initial || !session?.access_token) return;
+    if (!(await confirmDialog({ title: "Cabut akses login?", description: `${initial.full_name} tidak akan bisa login lagi sampai PIN baru dibuat.`, confirmText: "Cabut", danger: true }))) return;
+    setPinBusy(true);
+    try {
+      await unlinkRiderLogin({ data: { adminToken: session.access_token, riderId: initial.id } });
+      toast.success("Akses login dicabut");
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Gagal cabut akses");
+    } finally {
+      setPinBusy(false);
+    }
+  };
 
   const save = async () => {
     if (!f.employee_id || !f.full_name) return toast.error("Employee ID (MTR) & nama wajib");
@@ -406,6 +458,44 @@ function RiderModal({ initial, clients, onClose, onSaved }:
               rows={2} className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
           </div>
         </div>
+
+        {initial && (
+          <div className="mt-4 rounded-md border border-border bg-muted/30 p-3">
+            <div className="flex items-center gap-2 text-sm font-medium mb-2">
+              <KeyRound className="w-4 h-4" /> Login Rider
+              <span className={`ml-auto px-2 py-0.5 rounded-full text-xs ${hasLogin && !pendingSetup ? "bg-success/10 text-success" : hasLogin ? "bg-warning/10 text-warning" : "bg-muted text-muted-foreground"}`}>
+                {hasLogin && !pendingSetup ? "Aktif" : hasLogin ? "Menunggu rider set PIN" : "Belum ada"}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-2">
+              {!hasLogin
+                ? "Rider akan set PIN sendiri lewat halaman login (verifikasi pakai Kode Mitra + Nomor WhatsApp)."
+                : pendingSetup
+                  ? "Login sudah aktif, rider belum set PIN sendiri — arahkan ke halaman login → \"Buat PIN pertama kali\"."
+                  : `Rider login pakai Kode Mitra (${f.employee_id || "—"}) + PIN yang sudah dia set sendiri.`}
+            </p>
+            <div className="flex gap-2">
+              {!hasLogin ? (
+                <button onClick={activateLogin} disabled={pinBusy} type="button"
+                  className="px-3 py-2 text-sm rounded-md bg-primary text-primary-foreground disabled:opacity-50 whitespace-nowrap">
+                  {pinBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Aktifkan Login"}
+                </button>
+              ) : (
+                <button onClick={resetLogin} disabled={pinBusy} type="button"
+                  className="px-3 py-2 text-sm rounded-md border border-border disabled:opacity-50 whitespace-nowrap">
+                  {pinBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Reset (lupa PIN)"}
+                </button>
+              )}
+              {hasLogin && (
+                <button onClick={removeLogin} disabled={pinBusy} type="button"
+                  className="px-3 py-2 text-sm rounded-md border border-destructive/40 text-destructive disabled:opacity-50 whitespace-nowrap">
+                  Cabut
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 mt-5">
           <button onClick={onClose} className="px-3 py-1.5 text-sm rounded border border-border">Batal</button>
           <button onClick={save} disabled={saving} className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50">
