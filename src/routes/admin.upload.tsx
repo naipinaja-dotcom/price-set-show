@@ -9,17 +9,26 @@ import { cleanDuplicateDeliveries } from "@/lib/delivery-dedup";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { Upload, FileText, Loader2, AlertTriangle, X, RefreshCw, Trash2 } from "lucide-react";
+import { usePostHog } from "@posthog/react";
 
 export const Route = createFileRoute("/admin/upload")({ component: UploadPage });
 
 type Client = { id: string; name: string };
 
 // buat query .in() dgn ribuan ID tanpa nabrak batas panjang URL
-async function inChunks<T>(table: string, column: string, values: string[], select: string): Promise<T[]> {
+async function inChunks<T>(
+  table: string,
+  column: string,
+  values: string[],
+  select: string,
+): Promise<T[]> {
   const uniq = Array.from(new Set(values.filter(Boolean)));
   const out: T[] = [];
   for (let i = 0; i < uniq.length; i += 200) {
-    const { data } = await (supabase as any).from(table).select(select).in(column, uniq.slice(i, i + 200));
+    const { data } = await (supabase as any)
+      .from(table)
+      .select(select)
+      .in(column, uniq.slice(i, i + 200));
     out.push(...((data ?? []) as T[]));
   }
   return out;
@@ -30,9 +39,12 @@ function UploadPage() {
   return (
     <AdminLayout title="Upload Data">
       <div className="flex gap-1 p-1 bg-muted rounded-md w-fit mb-5">
-        {(["delivery","attendance"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 text-sm rounded ${tab === t ? "bg-card shadow-sm font-medium" : "text-muted-foreground"}`}>
+        {(["delivery", "attendance"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-1.5 text-sm rounded ${tab === t ? "bg-card shadow-sm font-medium" : "text-muted-foreground"}`}
+          >
             {t === "delivery" ? "Upload Delivery" : "Upload Attendance"}
           </button>
         ))}
@@ -42,7 +54,23 @@ function UploadPage() {
   );
 }
 
-const DELIVERY_FIELDS = ["driver_code","driver_name","client_name","status","dash_delivery_id","provider_order_id","delivery_date","awb","district","distance_km","weight_kg","destination_address","sender_name","receiver_name","service_type"];
+const DELIVERY_FIELDS = [
+  "driver_code",
+  "driver_name",
+  "client_name",
+  "status",
+  "dash_delivery_id",
+  "provider_order_id",
+  "delivery_date",
+  "awb",
+  "district",
+  "distance_km",
+  "weight_kg",
+  "destination_address",
+  "sender_name",
+  "receiver_name",
+  "service_type",
+];
 
 interface DeliveryPreview {
   records: Record<string, unknown>[]; // baru + yang mau ditimpa, siap insert
@@ -59,6 +87,7 @@ interface DeliveryPreview {
 }
 
 function DeliveryUpload() {
+  const posthog = usePostHog();
   const [clients, setClients] = useState<Client[]>([]);
   const [clientId, setClientId] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -72,19 +101,33 @@ function DeliveryUpload() {
   const [cleaning, setCleaning] = useState(false);
 
   useEffect(() => {
-    supabase.from("clients").select("id, name").then(({ data }) => setClients(data ?? []));
+    supabase
+      .from("clients")
+      .select("id, name")
+      .then(({ data }) => setClients(data ?? []));
   }, []);
 
   // Buat data lama yang udah keupload SEBELUM fitur klasifikasi Delivery/Return
   // ini ada — hitung ulang semua client, bukan cuma yang baru diupload.
   const reclassifyAll = async () => {
-    if (!(await confirmDialog({ title: "Hitung ulang Delivery/Return?", description: `Untuk semua ${clients.length} client. Ini bisa makan waktu kalau datanya banyak.`, confirmText: "Hitung ulang", danger: false }))) return;
+    if (
+      !(await confirmDialog({
+        title: "Hitung ulang Delivery/Return?",
+        description: `Untuk semua ${clients.length} client. Ini bisa makan waktu kalau datanya banyak.`,
+        confirmText: "Hitung ulang",
+        danger: false,
+      }))
+    )
+      return;
     setReclassifying(true);
     try {
       const results = await classifyAllClients(clients.map((c) => c.id));
       const totalUnclassified = results.reduce((s, r) => s + r.unclassifiedCount, 0);
       toast.success(`Klasifikasi ulang selesai buat ${results.length} client.`);
-      if (totalUnclassified > 0) toast.warning(`${totalUnclassified} baris ga bisa ditandain (kemungkinan outlet-ke-outlet) — cek data Sender/Receiver Name.`);
+      if (totalUnclassified > 0)
+        toast.warning(
+          `${totalUnclassified} baris ga bisa ditandain (kemungkinan outlet-ke-outlet) — cek data Sender/Receiver Name.`,
+        );
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -95,16 +138,25 @@ function DeliveryUpload() {
   // Bersihin data yang terlanjur dobel di DB (dari upload-upload lama sebelum
   // fitur timpa ada). Sisain 1 per order (yang terbaru), buang salinannya.
   const cleanDupes = async () => {
-    if (!(await confirmDialog({
-      title: "Bersihkan data duplikat?",
-      description: "Sistem nyisir semua data pengiriman, cari yang Dash ID + Provider ID kembar, lalu hapus salinannya (sisain 1 yang paling baru). Data yang tidak dobel aman.",
-      confirmText: "Bersihkan", danger: false,
-    }))) return;
+    if (
+      !(await confirmDialog({
+        title: "Bersihkan data duplikat?",
+        description:
+          "Sistem nyisir semua data pengiriman, cari yang Dash ID + Provider ID kembar, lalu hapus salinannya (sisain 1 yang paling baru). Data yang tidak dobel aman.",
+        confirmText: "Bersihkan",
+        danger: false,
+      }))
+    )
+      return;
     setCleaning(true);
     try {
       const r = await cleanDuplicateDeliveries();
-      if (r.deleted === 0) toast.success(`Bersih — ga ada duplikat dari ${r.scanned.toLocaleString("id-ID")} baris.`);
-      else toast.success(`${r.deleted.toLocaleString("id-ID")} baris dobel dihapus (dari ${r.duplicateGroups} order). Total dicek: ${r.scanned.toLocaleString("id-ID")}.`);
+      if (r.deleted === 0)
+        toast.success(`Bersih — ga ada duplikat dari ${r.scanned.toLocaleString("id-ID")} baris.`);
+      else
+        toast.success(
+          `${r.deleted.toLocaleString("id-ID")} baris dobel dihapus (dari ${r.duplicateGroups} order). Total dicek: ${r.scanned.toLocaleString("id-ID")}.`,
+        );
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -117,21 +169,27 @@ function DeliveryUpload() {
     const text = await f.text();
     const parsed = parseCSV(text);
     if (!parsed.length) return toast.error("CSV kosong");
-    setHeaders(parsed[0]); setRows(parsed.slice(1));
+    setHeaders(parsed[0]);
+    setRows(parsed.slice(1));
     const m: Record<string, string> = {};
     DELIVERY_FIELDS.forEach((field) => {
-      let found = parsed[0].find((h) => h.toLowerCase().replace(/[^a-z]/g, "") === field.replace(/_/g, ""));
+      let found = parsed[0].find(
+        (h) => h.toLowerCase().replace(/[^a-z]/g, "") === field.replace(/_/g, ""),
+      );
       // Fallback buat nama kolom yang lebih verbose di data mentah operasional
       // (mis. "Total Distance In KM" alih-alih "distance_km").
       if (!found) {
         if (field === "client_name") found = parsed[0].find((h) => /provider|client/i.test(h));
         else if (field === "distance_km") found = parsed[0].find((h) => /distance/i.test(h));
         else if (field === "weight_kg") found = parsed[0].find((h) => /weight/i.test(h));
-        else if (field === "destination_address") found = parsed[0].find((h) => /destination/i.test(h) && !/lat|long/i.test(h));
+        else if (field === "destination_address")
+          found = parsed[0].find((h) => /destination/i.test(h) && !/lat|long/i.test(h));
         // Tanggal patokan fee = tanggal barang DIKIRIM. Nama kolomnya beda-beda di data mentah.
-        else if (field === "delivery_date") found = parsed[0].find((h) => /tanggal\s*delivery|tgl\s*kirim|tanggal\s*kirim/i.test(h))
-          ?? parsed[0].find((h) => /tanggal\s*pickup/i.test(h))
-          ?? parsed[0].find((h) => /tanggal\s*status/i.test(h));
+        else if (field === "delivery_date")
+          found =
+            parsed[0].find((h) => /tanggal\s*delivery|tgl\s*kirim|tanggal\s*kirim/i.test(h)) ??
+            parsed[0].find((h) => /tanggal\s*pickup/i.test(h)) ??
+            parsed[0].find((h) => /tanggal\s*status/i.test(h));
       }
       if (found) m[field] = found;
     });
@@ -144,7 +202,8 @@ function DeliveryUpload() {
   // Tahap 1: baca file, cocokkan rider/client, cek duplikat — TAMPILIN dulu
   // hasilnya sebelum beneran nulis ke database.
   const analyze = async () => {
-    if (!clientId && !hasClientColumn) return toast.error("Pilih client, atau map kolom client di file");
+    if (!clientId && !hasClientColumn)
+      return toast.error("Pilih client, atau map kolom client di file");
     if (!file || rows.length === 0) return toast.error("Upload CSV dulu");
     setAnalyzing(true);
 
@@ -211,14 +270,15 @@ function DeliveryUpload() {
     const records = rows.map((r) => {
       const driverCode = get(r, "driver_code");
       return {
-        client_id: hasClientColumn ? resolveClientId(get(r, "client_name")) : (clientId || null),
-        rider_id: driverCode ? riderMap.get(driverCode) ?? null : null,
+        client_id: hasClientColumn ? resolveClientId(get(r, "client_name")) : clientId || null,
+        rider_id: driverCode ? (riderMap.get(driverCode) ?? null) : null,
         driver_code: driverCode,
         status: get(r, "status"),
         dash_delivery_id: get(r, "dash_delivery_id"),
         provider_order_id: get(r, "provider_order_id"),
         delivery_date: pickDeliveryDate(r),
-        awb: get(r, "awb"), district: get(r, "district"),
+        awb: get(r, "awb"),
+        district: get(r, "district"),
         distance_km: parseFloat(get(r, "distance_km") || "0") || null,
         weight_kg: parseFloat(get(r, "weight_kg") || "0") || null,
         destination_address: get(r, "destination_address"),
@@ -241,19 +301,37 @@ function DeliveryUpload() {
       const dashIds = records.map((r) => r.dash_delivery_id).filter((v): v is string => !!v);
       const providerIds = records.map((r) => r.provider_order_id).filter((v): v is string => !!v);
       const [byDash, byProvider] = await Promise.all([
-        inChunks<{ dash_delivery_id: string; provider_order_id: string }>("delivery_records", "dash_delivery_id", dashIds, "dash_delivery_id, provider_order_id"),
-        inChunks<{ dash_delivery_id: string; provider_order_id: string }>("delivery_records", "provider_order_id", providerIds, "dash_delivery_id, provider_order_id"),
+        inChunks<{ dash_delivery_id: string; provider_order_id: string }>(
+          "delivery_records",
+          "dash_delivery_id",
+          dashIds,
+          "dash_delivery_id, provider_order_id",
+        ),
+        inChunks<{ dash_delivery_id: string; provider_order_id: string }>(
+          "delivery_records",
+          "provider_order_id",
+          providerIds,
+          "dash_delivery_id, provider_order_id",
+        ),
       ]);
       const dbByDash = new Map<string, Set<string>>();
       const dbByProvider = new Map<string, Set<string>>();
       [...byDash, ...byProvider].forEach((e) => {
-        if (e.dash_delivery_id) (dbByDash.get(e.dash_delivery_id) ?? dbByDash.set(e.dash_delivery_id, new Set()).get(e.dash_delivery_id)!).add(e.provider_order_id);
-        if (e.provider_order_id) (dbByProvider.get(e.provider_order_id) ?? dbByProvider.set(e.provider_order_id, new Set()).get(e.provider_order_id)!).add(e.dash_delivery_id);
+        if (e.dash_delivery_id)
+          (
+            dbByDash.get(e.dash_delivery_id) ??
+            dbByDash.set(e.dash_delivery_id, new Set()).get(e.dash_delivery_id)!
+          ).add(e.provider_order_id);
+        if (e.provider_order_id)
+          (
+            dbByProvider.get(e.provider_order_id) ??
+            dbByProvider.set(e.provider_order_id, new Set()).get(e.provider_order_id)!
+          ).add(e.dash_delivery_id);
       });
 
       const seenInFile = new Map<string, number>(); // key -> index kemunculan pertama
       const isFileRepeat: boolean[] = new Array(records.length).fill(false); // dobel PERSIS di dalam file → skip
-      const isDbDup: boolean[] = new Array(records.length).fill(false);      // udah ada di DB → ditimpa
+      const isDbDup: boolean[] = new Array(records.length).fill(false); // udah ada di DB → ditimpa
       const anomalies: DeliveryPreview["anomalySamples"] = [];
 
       records.forEach((rec, i) => {
@@ -274,11 +352,16 @@ function DeliveryUpload() {
       });
 
       finalRecords = records.filter((_, i) => !isFileRepeat[i]); // baru + yang ditimpa
-      overwriteDashIds = records.filter((_, i) => isDbDup[i]).map((r) => r.dash_delivery_id as string);
+      overwriteDashIds = records
+        .filter((_, i) => isDbDup[i])
+        .map((r) => r.dash_delivery_id as string);
       overwriteSamples = records
         .filter((_, i) => isDbDup[i])
         .slice(0, 50)
-        .map((r) => ({ dash: r.dash_delivery_id as string, provider: r.provider_order_id as string }));
+        .map((r) => ({
+          dash: r.dash_delivery_id as string,
+          provider: r.provider_order_id as string,
+        }));
       fileRepeatCount = isFileRepeat.filter(Boolean).length;
       anomalySamples = anomalies;
     }
@@ -303,10 +386,20 @@ function DeliveryUpload() {
   const confirmUpload = async () => {
     if (!preview || !file) return;
     setBusy(true);
-    const { data: batch, error: bErr } = await supabase.from("upload_batches")
-      .insert({ kind: "delivery", client_id: clientId || null, filename: file.name, row_count: preview.records.length })
-      .select().single();
-    if (bErr) { setBusy(false); return toast.error(bErr.message); }
+    const { data: batch, error: bErr } = await supabase
+      .from("upload_batches")
+      .insert({
+        kind: "delivery",
+        client_id: clientId || null,
+        filename: file.name,
+        row_count: preview.records.length,
+      })
+      .select()
+      .single();
+    if (bErr) {
+      setBusy(false);
+      return toast.error(bErr.message);
+    }
 
     const records = preview.records.map((r) => ({ ...r, batch_id: batch.id }));
 
@@ -315,8 +408,14 @@ function DeliveryUpload() {
     if (preview.overwriteDashIds.length) {
       for (let i = 0; i < preview.overwriteDashIds.length; i += 200) {
         const chunk = preview.overwriteDashIds.slice(i, i + 200);
-        const { error: delErr } = await (supabase as any).from("delivery_records").delete().in("dash_delivery_id", chunk);
-        if (delErr) { setBusy(false); return toast.error(`Gagal hapus data lama: ${delErr.message}`); }
+        const { error: delErr } = await (supabase as any)
+          .from("delivery_records")
+          .delete()
+          .in("dash_delivery_id", chunk);
+        if (delErr) {
+          setBusy(false);
+          return toast.error(`Gagal hapus data lama: ${delErr.message}`);
+        }
       }
     }
 
@@ -330,12 +429,19 @@ function DeliveryUpload() {
     for (let i = 0; i < records.length; i += 500) {
       const chunk = records.slice(i, i + 500);
       const { error } = await (supabase as any).from("delivery_records").insert(chunk);
-      if (!error) { inserted += chunk.length; continue; }
+      if (!error) {
+        inserted += chunk.length;
+        continue;
+      }
 
       // gelombang ini gagal → retry satu-satu buat isolasi baris yang bermasalah
       for (const row of chunk) {
         const { error: rowErr } = await (supabase as any).from("delivery_records").insert([row]);
-        if (rowErr) failedRows.push({ dash: (row as { dash_delivery_id?: string | null }).dash_delivery_id ?? null, error: rowErr.message });
+        if (rowErr)
+          failedRows.push({
+            dash: (row as { dash_delivery_id?: string | null }).dash_delivery_id ?? null,
+            error: rowErr.message,
+          });
         else inserted++;
       }
     }
@@ -343,13 +449,22 @@ function DeliveryUpload() {
     if (failedRows.length > 0) {
       toast.error(
         `${inserted} baris berhasil masuk, TAPI ${failedRows.length} baris gagal (dilewati): ` +
-        failedRows.slice(0, 5).map((f) => `${f.dash ?? "(tanpa dash id)"} — ${f.error}`).join(" | ") +
-        (failedRows.length > 5 ? ` · +${failedRows.length - 5} lainnya` : "")
+          failedRows
+            .slice(0, 5)
+            .map((f) => `${f.dash ?? "(tanpa dash id)"} — ${f.error}`)
+            .join(" | ") +
+          (failedRows.length > 5 ? ` · +${failedRows.length - 5} lainnya` : ""),
       );
     }
 
     // Klasifikasi Delivery/Return otomatis buat tiap client yang kena upload ini
-    const affectedClientIds = Array.from(new Set(records.map((r) => (r as { client_id?: string | null }).client_id).filter((v): v is string => !!v)));
+    const affectedClientIds = Array.from(
+      new Set(
+        records
+          .map((r) => (r as { client_id?: string | null }).client_id)
+          .filter((v): v is string => !!v),
+      ),
+    );
     let unclassifiedTotal = 0;
     if (affectedClientIds.length > 0) {
       try {
@@ -360,45 +475,97 @@ function DeliveryUpload() {
       }
     }
 
+    posthog.capture("delivery_data_uploaded", {
+      inserted_count: inserted,
+      overwrite_count: preview.overwriteCount,
+      new_count: preview.newCount,
+      file_rows: preview.totalRows,
+      anomaly_count: preview.anomalyCount,
+    });
     setBusy(false);
     toast.success(
       `Berhasil upload ${inserted} record` +
-      (preview.overwriteCount ? ` · ${preview.overwriteCount} data lama ditimpa (diperbarui)` : "") +
-      (preview.fileRepeatCount ? ` · ${preview.fileRepeatCount} baris dobel di file di-skip` : "") +
-      (preview.createdRiderCodes.length ? ` · ${preview.createdRiderCodes.length} rider baru otomatis terdaftar` : "")
+        (preview.overwriteCount
+          ? ` · ${preview.overwriteCount} data lama ditimpa (diperbarui)`
+          : "") +
+        (preview.fileRepeatCount
+          ? ` · ${preview.fileRepeatCount} baris dobel di file di-skip`
+          : "") +
+        (preview.createdRiderCodes.length
+          ? ` · ${preview.createdRiderCodes.length} rider baru otomatis terdaftar`
+          : ""),
     );
     if (preview.unmatchedClients.length > 0) {
-      toast.warning(`Nama client tidak dikenal (baris ini ke-skip dari perhitungan sampai dibetulkan): ${preview.unmatchedClients.join(", ")}`);
+      toast.warning(
+        `Nama client tidak dikenal (baris ini ke-skip dari perhitungan sampai dibetulkan): ${preview.unmatchedClients.join(", ")}`,
+      );
     }
     if (preview.anomalyCount > 0) {
-      toast.warning(`${preview.anomalyCount} baris anomali (cuma salah satu ID cocok) — tetap terupload, tapi cek manual.`);
+      toast.warning(
+        `${preview.anomalyCount} baris anomali (cuma salah satu ID cocok) — tetap terupload, tapi cek manual.`,
+      );
     }
     if (unclassifiedTotal > 0) {
-      toast.warning(`${unclassifiedTotal} baris ga bisa ditandain Delivery/Return (sender & receiver dua-duanya bukan titik pusat — kemungkinan kiriman outlet-ke-outlet). Cek & lengkapi data Sender/Receiver Name kalau ini seharusnya bukan kasus itu.`);
+      toast.warning(
+        `${unclassifiedTotal} baris ga bisa ditandain Delivery/Return (sender & receiver dua-duanya bukan titik pusat — kemungkinan kiriman outlet-ke-outlet). Cek & lengkapi data Sender/Receiver Name kalau ini seharusnya bukan kasus itu.`,
+      );
     }
-    setFile(null); setHeaders([]); setRows([]); setMapping({}); setPreview(null);
+    setFile(null);
+    setHeaders([]);
+    setRows([]);
+    setMapping({});
+    setPreview(null);
   };
 
   return (
     <div className="space-y-4">
       <div className="flex justify-end gap-4">
-        <button onClick={cleanDupes} disabled={cleaning}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">
-          {cleaning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+        <button
+          onClick={cleanDupes}
+          disabled={cleaning}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+        >
+          {cleaning ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Trash2 className="w-3.5 h-3.5" />
+          )}
           Bersihkan Duplikat (data lama)
         </button>
-        <button onClick={reclassifyAll} disabled={reclassifying || clients.length === 0}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">
-          {reclassifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+        <button
+          onClick={reclassifyAll}
+          disabled={reclassifying || clients.length === 0}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+        >
+          {reclassifying ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="w-3.5 h-3.5" />
+          )}
           Hitung Ulang Delivery/Return (semua data lama)
         </button>
       </div>
       <div>
-        <label className="text-sm font-medium">Client {hasClientColumn && <span className="font-normal text-muted-foreground">(diabaikan — file sudah punya kolom client sendiri, per baris auto-detect)</span>}</label>
-        <select value={clientId} onChange={(e) => setClientId(e.target.value)} disabled={hasClientColumn}
-          className="mt-1 w-full max-w-sm rounded-md border border-border bg-background px-3 py-2 text-sm disabled:opacity-50">
+        <label className="text-sm font-medium">
+          Client{" "}
+          {hasClientColumn && (
+            <span className="font-normal text-muted-foreground">
+              (diabaikan — file sudah punya kolom client sendiri, per baris auto-detect)
+            </span>
+          )}
+        </label>
+        <select
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          disabled={hasClientColumn}
+          className="mt-1 w-full max-w-sm rounded-md border border-border bg-background px-3 py-2 text-sm disabled:opacity-50"
+        >
           <option value="">— pilih client —</option>
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {clients.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
         </select>
         <p className="text-xs text-muted-foreground mt-1">
           {hasClientColumn
@@ -407,10 +574,17 @@ function DeliveryUpload() {
         </p>
       </div>
       <label className="block">
-        <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} className="hidden" />
+        <input
+          type="file"
+          accept=".csv,text/csv"
+          onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+          className="hidden"
+        />
         <div className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:bg-muted/30">
           <Upload className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
-          <p className="text-sm">{file ? <span className="font-medium">{file.name}</span> : "Klik untuk upload CSV"}</p>
+          <p className="text-sm">
+            {file ? <span className="font-medium">{file.name}</span> : "Klik untuk upload CSV"}
+          </p>
         </div>
       </label>
       {headers.length > 0 && (
@@ -420,10 +594,17 @@ function DeliveryUpload() {
             {DELIVERY_FIELDS.map((f) => (
               <div key={f} className="flex items-center gap-2">
                 <span className="font-mono text-xs w-44">{f}</span>
-                <select value={mapping[f] ?? ""} onChange={(e) => setMapping({ ...mapping, [f]: e.target.value })}
-                  className="flex-1 rounded border border-border bg-background px-2 py-1 text-xs">
+                <select
+                  value={mapping[f] ?? ""}
+                  onChange={(e) => setMapping({ ...mapping, [f]: e.target.value })}
+                  className="flex-1 rounded border border-border bg-background px-2 py-1 text-xs"
+                >
                   <option value="">—</option>
-                  {headers.map((h, i) => <option key={`${h}-${i}`} value={h}>{h}</option>)}
+                  {headers.map((h, i) => (
+                    <option key={`${h}-${i}`} value={h}>
+                      {h}
+                    </option>
+                  ))}
                 </select>
               </div>
             ))}
@@ -431,11 +612,22 @@ function DeliveryUpload() {
         </div>
       )}
       {!hasDedupKeys && rows.length > 0 && (
-        <p className="text-xs text-warning">Kolom Dash Delivery ID / Provider Order ID ga ke-map — deteksi duplikat ga bisa jalan buat upload ini.</p>
+        <p className="text-xs text-warning">
+          Kolom Dash Delivery ID / Provider Order ID ga ke-map — deteksi duplikat ga bisa jalan buat
+          upload ini.
+        </p>
       )}
-      <button onClick={analyze} disabled={analyzing || rows.length === 0 || (!clientId && !hasClientColumn)}
-        className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm disabled:opacity-50">
-        {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />} {analyzing ? "Menganalisa…" : "Analisa & Preview"}
+      <button
+        onClick={analyze}
+        disabled={analyzing || rows.length === 0 || (!clientId && !hasClientColumn)}
+        className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm disabled:opacity-50"
+      >
+        {analyzing ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <FileText className="w-4 h-4" />
+        )}{" "}
+        {analyzing ? "Menganalisa…" : "Analisa & Preview"}
       </button>
       {preview && (
         <DeliveryPreviewModal
@@ -449,7 +641,12 @@ function DeliveryUpload() {
   );
 }
 
-function DeliveryPreviewModal({ preview, busy, onCancel, onConfirm }: {
+function DeliveryPreviewModal({
+  preview,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
   preview: DeliveryPreview;
   busy: boolean;
   onCancel: () => void;
@@ -457,35 +654,64 @@ function DeliveryPreviewModal({ preview, busy, onCancel, onConfirm }: {
 }) {
   return (
     <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4" onClick={onCancel}>
-      <div className="bg-card rounded-lg w-full max-w-lg p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="bg-card rounded-lg w-full max-w-lg p-5 max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Preview Upload</h2>
-          <button onClick={onCancel} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+          <button onClick={onCancel} className="p-1 text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-sm mb-3">
-          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Total baris di file</div><div className="font-semibold">{preview.totalRows}</div></div>
-          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Baru (belum ada)</div><div className="font-semibold text-success">{preview.newCount}</div></div>
-          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Ditimpa (data lama diperbarui)</div><div className="font-semibold text-primary">{preview.overwriteCount}</div></div>
-          <div className="rounded-md border border-border p-2.5"><div className="text-xs text-muted-foreground">Anomali (cek manual)</div><div className="font-semibold text-warning">{preview.anomalyCount}</div></div>
+          <div className="rounded-md border border-border p-2.5">
+            <div className="text-xs text-muted-foreground">Total baris di file</div>
+            <div className="font-semibold">{preview.totalRows}</div>
+          </div>
+          <div className="rounded-md border border-border p-2.5">
+            <div className="text-xs text-muted-foreground">Baru (belum ada)</div>
+            <div className="font-semibold text-success">{preview.newCount}</div>
+          </div>
+          <div className="rounded-md border border-border p-2.5">
+            <div className="text-xs text-muted-foreground">Ditimpa (data lama diperbarui)</div>
+            <div className="font-semibold text-primary">{preview.overwriteCount}</div>
+          </div>
+          <div className="rounded-md border border-border p-2.5">
+            <div className="text-xs text-muted-foreground">Anomali (cek manual)</div>
+            <div className="font-semibold text-warning">{preview.anomalyCount}</div>
+          </div>
         </div>
         <p className="text-xs text-muted-foreground mb-4">
-          Order yang Dash ID + Provider ID-nya sudah ada bakal <b className="text-primary">diperbarui</b> (data lama diganti yang baru), bukan digandakan.
-          {preview.fileRepeatCount > 0 && ` ${preview.fileRepeatCount} baris kembar di dalam file ini di-skip.`}
+          Order yang Dash ID + Provider ID-nya sudah ada bakal{" "}
+          <b className="text-primary">diperbarui</b> (data lama diganti yang baru), bukan
+          digandakan.
+          {preview.fileRepeatCount > 0 &&
+            ` ${preview.fileRepeatCount} baris kembar di dalam file ini di-skip.`}
         </p>
 
         {preview.overwriteSamples.length > 0 && (
           <div className="mb-3">
-            <p className="text-xs font-medium mb-1">Contoh yang bakal diperbarui (data lama ditimpa):</p>
+            <p className="text-xs font-medium mb-1">
+              Contoh yang bakal diperbarui (data lama ditimpa):
+            </p>
             <div className="rounded-md border border-border max-h-32 overflow-y-auto text-xs font-mono">
               {preview.overwriteSamples.map((d, i) => (
-                <div key={i} className="px-2 py-1 border-t border-border first:border-t-0 flex justify-between gap-2">
-                  <span className="truncate">{d.dash} / {d.provider}</span>
+                <div
+                  key={i}
+                  className="px-2 py-1 border-t border-border first:border-t-0 flex justify-between gap-2"
+                >
+                  <span className="truncate">
+                    {d.dash} / {d.provider}
+                  </span>
                   <span className="text-primary flex-shrink-0">→ diperbarui</span>
                 </div>
               ))}
               {preview.overwriteCount > preview.overwriteSamples.length && (
-                <div className="px-2 py-1 border-t border-border text-muted-foreground">+{preview.overwriteCount - preview.overwriteSamples.length} lainnya</div>
+                <div className="px-2 py-1 border-t border-border text-muted-foreground">
+                  +{preview.overwriteCount - preview.overwriteSamples.length} lainnya
+                </div>
               )}
             </div>
           </div>
@@ -493,13 +719,20 @@ function DeliveryPreviewModal({ preview, busy, onCancel, onConfirm }: {
 
         {preview.anomalySamples.length > 0 && (
           <div className="mb-3">
-            <div className="flex items-center gap-1.5 text-warning text-xs font-medium mb-1"><AlertTriangle className="w-3.5 h-3.5" /> Cuma SALAH SATU ID yang cocok — bukan duplikat pasti, tetap terupload:</div>
+            <div className="flex items-center gap-1.5 text-warning text-xs font-medium mb-1">
+              <AlertTriangle className="w-3.5 h-3.5" /> Cuma SALAH SATU ID yang cocok — bukan
+              duplikat pasti, tetap terupload:
+            </div>
             <div className="rounded-md border border-border max-h-32 overflow-y-auto text-xs font-mono">
               {preview.anomalySamples.map((d, i) => (
-                <div key={i} className="px-2 py-1 border-t border-border first:border-t-0">{d.dash} / {d.provider}</div>
+                <div key={i} className="px-2 py-1 border-t border-border first:border-t-0">
+                  {d.dash} / {d.provider}
+                </div>
               ))}
               {preview.anomalyCount > preview.anomalySamples.length && (
-                <div className="px-2 py-1 border-t border-border text-muted-foreground">+{preview.anomalyCount - preview.anomalySamples.length} lainnya</div>
+                <div className="px-2 py-1 border-t border-border text-muted-foreground">
+                  +{preview.anomalyCount - preview.anomalySamples.length} lainnya
+                </div>
               )}
             </div>
           </div>
@@ -511,13 +744,20 @@ function DeliveryPreviewModal({ preview, busy, onCancel, onConfirm }: {
           </div>
         )}
         {preview.createdRiderCodes.length > 0 && (
-          <div className="mb-3 text-xs text-muted-foreground">{preview.createdRiderCodes.length} rider baru bakal otomatis terdaftar.</div>
+          <div className="mb-3 text-xs text-muted-foreground">
+            {preview.createdRiderCodes.length} rider baru bakal otomatis terdaftar.
+          </div>
         )}
 
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onCancel} className="px-3 py-1.5 text-sm rounded border border-border">Batal</button>
-          <button onClick={onConfirm} disabled={busy || preview.records.length === 0}
-            className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50">
+          <button onClick={onCancel} className="px-3 py-1.5 text-sm rounded border border-border">
+            Batal
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy || preview.records.length === 0}
+            className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50"
+          >
             {busy ? "Mengupload…" : `Lanjutkan Upload (${preview.records.length})`}
           </button>
         </div>
@@ -527,6 +767,7 @@ function DeliveryPreviewModal({ preview, busy, onCancel, onConfirm }: {
 }
 
 function AttendanceUpload() {
+  const posthog = usePostHog();
   const [clients, setClients] = useState<Client[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<string[][]>([]);
@@ -534,7 +775,10 @@ function AttendanceUpload() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    supabase.from("clients").select("id, name").then(({ data }) => setClients(data ?? []));
+    supabase
+      .from("clients")
+      .select("id, name")
+      .then(({ data }) => setClients(data ?? []));
   }, []);
 
   const onFile = async (f: File) => {
@@ -542,31 +786,50 @@ function AttendanceUpload() {
     const text = await f.text();
     const parsed = parseCSV(text);
     if (!parsed.length) return toast.error("CSV kosong");
-    setHeaders(parsed[0]); setRows(parsed.slice(1));
+    setHeaders(parsed[0]);
+    setRows(parsed.slice(1));
   };
 
   const parseDur = (s: string): number | null => {
     if (!s) return null;
     const m = s.match(/(\d+):(\d+)/);
     if (m) return parseInt(m[1]) * 60 + parseInt(m[2]);
-    const n = parseInt(s); return isNaN(n) ? null : n;
+    const n = parseInt(s);
+    return isNaN(n) ? null : n;
   };
 
   const process = async () => {
     if (!file || rows.length === 0) return toast.error("Upload CSV dulu");
     setBusy(true);
-    const { data: batch, error: bErr } = await supabase.from("upload_batches")
-      .insert({ kind: "attendance", filename: file.name, row_count: rows.length }).select().single();
-    if (bErr) { setBusy(false); return toast.error(bErr.message); }
+    const { data: batch, error: bErr } = await supabase
+      .from("upload_batches")
+      .insert({ kind: "attendance", filename: file.name, row_count: rows.length })
+      .select()
+      .single();
+    if (bErr) {
+      setBusy(false);
+      return toast.error(bErr.message);
+    }
 
-    const idx = (name: string) => headers.findIndex((h) => h.toLowerCase().includes(name.toLowerCase()));
-    const iCode = idx("kode"), iName = idx("name"), iClient = idx("client"), iDate = idx("date"), iIn = idx("clock-in"), iOut = idx("clock-out"), iDur = idx("duration"), iOtp = idx("otp");
+    const idx = (name: string) =>
+      headers.findIndex((h) => h.toLowerCase().includes(name.toLowerCase()));
+    const iCode = idx("kode"),
+      iName = idx("name"),
+      iClient = idx("client"),
+      iDate = idx("date"),
+      iIn = idx("clock-in"),
+      iOut = idx("clock-out"),
+      iDur = idx("duration"),
+      iOtp = idx("otp");
 
     // Rider berdiri sendiri dari kode MTR — sama seperti upload delivery,
     // kode yang belum terdaftar otomatis dibikinkan rider baru.
     const codes = rows.map((r) => r[iCode]);
     const namesByCode: Record<string, string> = {};
-    if (iName >= 0) rows.forEach((r) => { if (r[iCode] && r[iName]) namesByCode[r[iCode]] = r[iName]; });
+    if (iName >= 0)
+      rows.forEach((r) => {
+        if (r[iCode] && r[iName]) namesByCode[r[iCode]] = r[iName];
+      });
     let riderMap: Map<string, string>;
     let createdCodes: string[];
     try {
@@ -594,10 +857,14 @@ function AttendanceUpload() {
       }
       const otpRaw = iOtp >= 0 ? (r[iOtp] ?? "").trim().toLowerCase() : "";
       return {
-        batch_id: batch.id, rider_id: code ? riderMap.get(code) ?? null : null, driver_code: code,
-        client_name: clientNameRaw, client_id,
+        batch_id: batch.id,
+        rider_id: code ? (riderMap.get(code) ?? null) : null,
+        driver_code: code,
+        client_name: clientNameRaw,
+        client_id,
         log_date: r[iDate] || new Date().toISOString().slice(0, 10),
-        clock_in: r[iIn] || null, clock_out: r[iOut] || null,
+        clock_in: r[iIn] || null,
+        clock_out: r[iOut] || null,
         duration_minutes: duration,
         is_absent: !r[iIn],
         is_late: otpRaw === "late",
@@ -608,33 +875,62 @@ function AttendanceUpload() {
     for (let i = 0; i < logs.length; i += 500) {
       const chunk = logs.slice(i, i + 500);
       const { error } = await (supabase as any).from("attendance_logs").insert(chunk);
-      if (error) { setBusy(false); return toast.error(error.message); }
+      if (error) {
+        setBusy(false);
+        return toast.error(error.message);
+      }
       inserted += chunk.length;
     }
+    posthog.capture("attendance_data_uploaded", {
+      inserted_count: inserted,
+      file_rows: rows.length,
+      unmatched_clients: unmatchedClients.size,
+    });
     setBusy(false);
-    toast.success(`Berhasil upload ${inserted} log absensi` + (createdCodes.length ? ` · ${createdCodes.length} rider baru otomatis terdaftar` : ""));
+    toast.success(
+      `Berhasil upload ${inserted} log absensi` +
+        (createdCodes.length ? ` · ${createdCodes.length} rider baru otomatis terdaftar` : ""),
+    );
     if (unmatchedClients.size > 0) {
-      toast.warning(`Nama client tidak dikenal (aturan absensi mungkin salah pilih): ${Array.from(unmatchedClients).join(", ")}`);
+      toast.warning(
+        `Nama client tidak dikenal (aturan absensi mungkin salah pilih): ${Array.from(unmatchedClients).join(", ")}`,
+      );
     }
-    setFile(null); setHeaders([]); setRows([]);
+    setFile(null);
+    setHeaders([]);
+    setRows([]);
   };
 
   return (
     <div className="space-y-4">
       <div className="text-xs text-muted-foreground">
-        Format kolom: <code>Kode Mitra, Client Name, Date, Clock-in, Clock-out, Duration, OTP</code> (OTP: ONTIME/LATE — dipakai buat insentif ontime di Type E)
+        Format kolom: <code>Kode Mitra, Client Name, Date, Clock-in, Clock-out, Duration, OTP</code>{" "}
+        (OTP: ONTIME/LATE — dipakai buat insentif ontime di Type E)
       </div>
       <label className="block">
-        <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} className="hidden" />
+        <input
+          type="file"
+          accept=".csv,text/csv"
+          onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+          className="hidden"
+        />
         <div className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:bg-muted/30">
           <Upload className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
-          <p className="text-sm">{file ? <span className="font-medium">{file.name}</span> : "Klik untuk upload CSV"}</p>
+          <p className="text-sm">
+            {file ? <span className="font-medium">{file.name}</span> : "Klik untuk upload CSV"}
+          </p>
         </div>
       </label>
-      {rows.length > 0 && <p className="text-sm text-muted-foreground">{rows.length} baris siap diimport.</p>}
-      <button onClick={process} disabled={busy || rows.length === 0}
-        className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm disabled:opacity-50">
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />} Proses Upload
+      {rows.length > 0 && (
+        <p className="text-sm text-muted-foreground">{rows.length} baris siap diimport.</p>
+      )}
+      <button
+        onClick={process}
+        disabled={busy || rows.length === 0}
+        className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm disabled:opacity-50"
+      >
+        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}{" "}
+        Proses Upload
       </button>
     </div>
   );
