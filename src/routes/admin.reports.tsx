@@ -7,12 +7,9 @@ import { usePagination } from "@/lib/use-pagination";
 import { toCSV, downloadCSV } from "@/lib/csv";
 import { toast } from "sonner";
 import { Download, Loader2 } from "lucide-react";
-import { fetchAllRows } from "@/lib/fetch-all";
+import { FinanceWorksheet } from "@/components/finance-worksheet";
 
 export const Route = createFileRoute("/admin/reports")({ component: ReportsPage });
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const sb = supabase as any;
 
 type Run = { id: string; name: string; period_start: string; period_end: string; status: string };
 
@@ -48,168 +45,9 @@ function ReportsPage() {
         </div>
       </div>
       {!runId ? <p className="text-sm text-muted-foreground">Belum ada payroll run. Buat & generate dulu di menu Payroll.</p>
-        : mode === "rider" ? <RiderFinanceReport runId={runId} run={run} />
+        : mode === "rider" ? <FinanceWorksheet runId={runId} run={run} />
         : <ClientReport runId={runId} run={run} />}
     </AdminLayout>
-  );
-}
-
-// ============ MODE 1: Per Rider (format finance) ============
-type RiderRow = {
-  rider_id: string; name: string; employeeId: string;
-  orderCount: number; feeRider: number; activeDates: number;
-  ded: Record<string, number>; // per jenis potongan
-  total: number;
-};
-
-
-function RiderFinanceReport({ runId, run }: { runId: string; run?: Run }) {
-  const [rows, setRows] = useState<RiderRow[]>([]);
-  const [dedTypes, setDedTypes] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!run) return;
-    (async () => {
-      setLoading(true);
-      try {
-        const { data: details, error: e1 } = await sb.from("payroll_details")
-          .select("id, rider_id, delivery_count, gross_earning, net_pay, riders(full_name, employee_id)")
-          .eq("run_id", runId);
-        if (e1) throw e1;
-
-        const detailIds = (details ?? []).map((d: { id: string }) => d.id);
-        const dedByDetail = new Map<string, Record<string, number>>();
-        const typeSet = new Set<string>();
-        for (let i = 0; i < detailIds.length; i += 200) {
-          const chunk = detailIds.slice(i, i + 200);
-          const { data: deds, error: e2 } = await sb.from("payroll_deductions")
-            .select("detail_id, amount, deduction_types(name)").in("detail_id", chunk);
-          if (e2) throw e2;
-          for (const d of deds ?? []) {
-            const name = d.deduction_types?.name ?? "Potongan";
-            typeSet.add(name);
-            const m = dedByDetail.get(d.detail_id) ?? {};
-            m[name] = (m[name] ?? 0) + Number(d.amount || 0);
-            dedByDetail.set(d.detail_id, m);
-          }
-        }
-
-        // hari aktif = jumlah tanggal beda per rider di periode run
-        const delivs = await fetchAllRows<{ rider_id: string | null; delivery_date: string }>(
-          (client, from, to) => client.from("delivery_records" as any)
-            .select("rider_id, delivery_date")
-            .gte("delivery_date", run.period_start).lte("delivery_date", run.period_end)
-            .range(from, to)
-        );
-        const datesByRider = new Map<string, Set<string>>();
-        for (const r of delivs) {
-          if (!r.rider_id) continue;
-          const s = datesByRider.get(r.rider_id) ?? new Set<string>();
-          s.add(r.delivery_date); datesByRider.set(r.rider_id, s);
-        }
-
-        const built: RiderRow[] = (details ?? []).map((d: {
-          id: string; rider_id: string; delivery_count: number; gross_earning: number; net_pay: number;
-          riders?: { full_name?: string; employee_id?: string };
-        }) => ({
-          rider_id: d.rider_id,
-          name: d.riders?.full_name ?? "(tanpa nama)",
-          employeeId: d.riders?.employee_id ?? "",
-          orderCount: d.delivery_count,
-          feeRider: Number(d.gross_earning),
-          activeDates: datesByRider.get(d.rider_id)?.size ?? 0,
-          ded: dedByDetail.get(d.id) ?? {},
-          total: Number(d.net_pay),
-        })).sort((a: RiderRow, b: RiderRow) => b.total - a.total);
-
-        setDedTypes([...typeSet].sort());
-        setRows(built);
-      } catch (e) {
-        toast.error((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [runId, run]);
-
-  const exportCSV = () => {
-    const header = ["Driver Name", "Employee ID", "COUNTA of Order", "Fee Rider", "Active Date", ...dedTypes, "Total Fee Order", "Remarks"];
-    const data = rows.map((r) => [
-      r.name, r.employeeId, r.orderCount, r.feeRider, r.activeDates,
-      ...dedTypes.map((t) => r.ded[t] ?? 0),
-      r.total, "",
-    ]);
-    downloadCSV(`finance-${run?.name ?? runId}.csv`, toCSV([header, ...data]));
-  };
-
-  const t = rows.reduce((s, r) => ({
-    order: s.order + r.orderCount, fee: s.fee + r.feeRider, total: s.total + r.total,
-    ded: dedTypes.reduce((m, ty) => ({ ...m, [ty]: (m[ty] ?? 0) + (r.ded[ty] ?? 0) }), s.ded),
-  }), { order: 0, fee: 0, total: 0, ded: {} as Record<string, number> });
-
-  const { pageSize, setPageSize, page, setPage, totalPages, paged, from, to, total } = usePagination(rows, 20);
-
-  if (loading) return <Loader2 className="w-4 h-4 animate-spin" />;
-
-  return (
-    <>
-      <div className="flex justify-end items-center gap-3 mb-3">
-        {rows.length > 0 && <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />}
-        <button onClick={exportCSV} disabled={!rows.length}
-          className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm disabled:opacity-50">
-          <Download className="w-4 h-4" /> Export CSV (Finance)
-        </button>
-      </div>
-      <div className="rounded-lg border border-border overflow-x-auto">
-        <table className="w-full text-sm whitespace-nowrap">
-          <thead className="bg-muted text-left">
-            <tr>
-              <th className="p-2 sticky left-0 bg-muted">Driver Name</th>
-              <th className="text-right px-3">Order</th>
-              <th className="text-right px-3">Fee Rider</th>
-              <th className="text-right px-3">Active Date</th>
-              {dedTypes.map((ty) => <th key={ty} className="text-right px-3">{ty}</th>)}
-              <th className="text-right px-3">Total Fee Order</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? <tr><td colSpan={5 + dedTypes.length} className="p-6 text-center text-muted-foreground">Tidak ada data — pastikan payroll run ini sudah di-Generate.</td></tr> :
-              paged.map((r) => (
-                <tr key={r.rider_id} className="border-t border-border">
-                  <td className="p-2 sticky left-0 bg-background">
-                    <div className="font-medium">{r.name}</div>
-                    <div className="text-xs text-muted-foreground">{r.employeeId}</div>
-                  </td>
-                  <td className="text-right px-3 tabular-nums">{r.orderCount}</td>
-                  <td className="text-right px-3 tabular-nums">Rp{r.feeRider.toLocaleString("id-ID")}</td>
-                  <td className="text-right px-3 tabular-nums">{r.activeDates}</td>
-                  {dedTypes.map((ty) => (
-                    <td key={ty} className="text-right px-3 tabular-nums text-destructive">{r.ded[ty] ? `Rp${r.ded[ty].toLocaleString("id-ID")}` : "—"}</td>
-                  ))}
-                  <td className="text-right px-3 font-semibold tabular-nums">Rp{r.total.toLocaleString("id-ID")}</td>
-                </tr>
-              ))}
-          </tbody>
-          {rows.length > 0 && (
-            <tfoot className="bg-muted font-semibold">
-              <tr>
-                <td className="p-2 sticky left-0 bg-muted">GRAND TOTAL</td>
-                <td className="text-right px-3 tabular-nums">{t.order}</td>
-                <td className="text-right px-3 tabular-nums">Rp{t.fee.toLocaleString("id-ID")}</td>
-                <td className="text-right px-3">—</td>
-                {dedTypes.map((ty) => <td key={ty} className="text-right px-3 tabular-nums">Rp{(t.ded[ty] ?? 0).toLocaleString("id-ID")}</td>)}
-                <td className="text-right px-3 tabular-nums">Rp{t.total.toLocaleString("id-ID")}</td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-      {rows.length > 0 && <PaginationBar page={page} totalPages={totalPages} setPage={setPage} from={from} to={to} total={total} />}
-      <p className="text-xs text-muted-foreground mt-2">
-        Kolom potongan (Sewa Molis, Admin Fee, dll) muncul otomatis dari jenis potongan yang kepakai. "Remarks" kosong di sini — diisi manual di sheet finance setelah export. Total GRAND TOTAL di atas tetap menghitung SEMUA rider, bukan cuma yang tampil di halaman ini.
-      </p>
-    </>
   );
 }
 
