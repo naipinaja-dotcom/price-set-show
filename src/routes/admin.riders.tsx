@@ -6,7 +6,7 @@ import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
 import { parseCSV, toCSV, downloadCSV } from "@/lib/csv";
 import { toast } from "sonner";
-import { Plus, Pencil, Loader2, AlertCircle, Upload, Download, X, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, AlertCircle, Upload, Download, X, Search } from "lucide-react";
 
 export const Route = createFileRoute("/admin/riders")({ component: RidersPage });
 
@@ -20,6 +20,7 @@ type Rider = {
   id: string; employee_id: string; full_name: string; phone: string | null; email: string | null;
   client_id: string | null; status: string; join_date: string | null;
   bank_name: string | null; bank_account: string | null; notes: string | null;
+  nik?: string | null; bank_account_holder?: string | null; birth_date?: string | null; birth_place?: string | null;
 };
 type Client = { id: string; name: string };
 
@@ -32,6 +33,7 @@ function RidersPage() {
   const [edit, setEdit] = useState<Rider | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -44,6 +46,19 @@ function RidersPage() {
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
+
+  const handleDelete = async (r: Rider) => {
+    if (!confirm(`Yakin mau hapus rider "${r.full_name}" (${r.employee_id})?\n\nData delivery & attendance tetap aman, cuma profil rider yang dihapus.`)) return;
+    setDeletingId(r.id);
+    const { error } = await supabase.from("riders").delete().eq("id", r.id);
+    setDeletingId(null);
+    if (error) {
+      toast.error("Gagal hapus: " + error.message);
+    } else {
+      toast.success("Rider berhasil dihapus");
+      load();
+    }
+  };
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const toggleStatus = async (r: Rider) => {
@@ -110,27 +125,46 @@ function RidersPage() {
           </button>
         </div>
       </div>
-      <div className="rounded-lg border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-muted text-left">
-            <tr><th className="p-3">Employee ID</th><th>Nama</th><th>Client</th><th>Telepon</th><th>Status</th><th className="text-right pr-3">Aksi</th></tr>
+      <div className="rounded-lg border border-border overflow-auto">
+        <table className="w-full text-sm whitespace-nowrap">
+          <thead className="bg-muted text-left sticky top-0">
+            <tr>
+              <th className="p-3">Kode Mitra</th>
+              <th className="p-3">NIK</th>
+              <th className="p-3">Nama</th>
+              <th className="p-3">Nomor WhatsApp</th>
+              <th className="p-3">Email</th>
+              <th className="p-3">Nomor Rekening</th>
+              <th className="p-3">Nama Bank</th>
+              <th className="p-3">Nama Pemilik Rekening</th>
+              <th className="p-3">Tanggal Lahir</th>
+              <th className="p-3">Tempat Lahir</th>
+              <th className="p-3">Status</th>
+              <th className="text-right pr-3">Aksi</th>
+            </tr>
           </thead>
           <tbody>
-            {loading ? <tr><td colSpan={6} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
-            : filtered.length === 0 ? <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">Tidak ada rider</td></tr>
+            {loading ? <tr><td colSpan={12} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
+            : filtered.length === 0 ? <tr><td colSpan={12} className="p-6 text-center text-muted-foreground">Tidak ada rider</td></tr>
             : paged.map((r) => (
-              <tr key={r.id} className="border-t border-border">
+              <tr key={r.id} className="border-t border-border hover:bg-muted/30">
                 <td className="p-3 font-mono text-xs">{r.employee_id}</td>
-                <td>{r.full_name}</td>
-                <td>{clients.find((c) => c.id === r.client_id)?.name ?? "—"}</td>
-                <td>{r.phone ?? "—"}</td>
-                <td>{statusBadge(r.status)}</td>
+                <td className="p-3">{r.nik ?? "—"}</td>
+                <td className="p-3 font-medium">{r.full_name}</td>
+                <td className="p-3">{r.phone ?? "—"}</td>
+                <td className="p-3">{r.email ?? "—"}</td>
+                <td className="p-3 font-mono text-xs">{r.bank_account ?? "—"}</td>
+                <td className="p-3">{r.bank_name ?? "—"}</td>
+                <td className="p-3">{r.bank_account_holder ?? "—"}</td>
+                <td className="p-3">{r.birth_date ?? "—"}</td>
+                <td className="p-3">{r.birth_place ?? "—"}</td>
+                <td className="p-3">{statusBadge(r.status)}</td>
                 <td className="text-right pr-3">
-                  <button onClick={() => toggleStatus(r)} disabled={togglingId === r.id} title={r.status === "active" ? "Nonaktifkan rider" : "Aktifkan rider"}
-                    className="text-xs px-2.5 py-1 rounded-md border border-border hover:bg-muted disabled:opacity-50 mr-1">
-                    {togglingId === r.id ? "…" : r.status === "active" ? "Nonaktifkan" : "Aktifkan"}
+                  <button onClick={() => { setEdit(r); setOpen(true); }} className="p-1.5 hover:bg-muted rounded mr-1" title="Edit"><Pencil className="w-4 h-4" /></button>
+                  <button onClick={() => handleDelete(r)} disabled={deletingId === r.id} title="Hapus rider permanen"
+                    className="p-1.5 hover:bg-destructive/10 text-destructive hover:text-destructive rounded disabled:opacity-50">
+                    {deletingId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                   </button>
-                  <button onClick={() => { setEdit(r); setOpen(true); }} className="p-1.5 hover:bg-muted rounded" title="Edit"><Pencil className="w-4 h-4" /></button>
                 </td>
               </tr>
             ))}
@@ -154,14 +188,18 @@ function RiderImportModal({ clients, onClose, onDone }:
 
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const FIELD_ALIASES: Record<string, string[]> = {
-    employee_id: ["employeeid", "employee", "idkaryawan", "kodekaryawan", "kodemitra", "kodemtr", "mtrcode"],
+    employee_id: ["employeeid", "employee", "id", "mtr", "kodemitra", "kodemtr", "mtrcode", "idkaryawan", "kodekaryawan"],
+    nik: ["nik", "nomorinduk", "noktp"],
     full_name: ["fullname", "name", "nama", "namalengkap"],
-    phone: ["phone", "telepon", "telp", "hp", "nohp", "notelp", "nomorwhatsapp", "whatsapp"],
+    phone: ["phone", "telepon", "telp", "hp", "nohp", "notelp", "nowa", "whatsapp", "wa", "nomorwhatsapp"],
     email: ["email"],
     client: ["client", "klien", "clientpitstop"],
     status: ["status"],
     bank_name: ["bankname", "bank", "namabank"],
     bank_account: ["bankaccount", "norekening", "nomorrekening", "rekening", "norek", "account"],
+    bank_account_holder: ["bankaccountholder", "namapemilikrekening", "pemilikrekening", "namarekening"],
+    birth_date: ["birthdate", "tanggallahir", "ttl", "lahir"],
+    birth_place: ["birthplace", "tempatlahir"],
     notes: ["notes", "catatan", "note"],
   };
 
@@ -191,8 +229,8 @@ function RiderImportModal({ clients, onClose, onDone }:
 
   const template = () => {
     downloadCSV("template-rider.csv", toCSV([
-      ["employee_id", "full_name", "phone", "email", "client", "status", "bank_name", "bank_account", "notes"],
-      ["RD001", "Budi Santoso", "08123456789", "budi@mail.com", "Alfagift", "active", "BCA", "1234567890", ""],
+      ["employee_id", "nik", "full_name", "phone", "email", "client", "status", "bank_name", "bank_account", "bank_account_holder", "birth_date", "birth_place", "notes"],
+      ["MTR001", "3201234567890001", "Budi Santoso", "08123456789", "budi@mail.com", "Alfagift", "active", "BCA", "1234567890", "Budi Santoso", "1990-01-01", "Jakarta", ""],
     ]));
   };
 
@@ -203,12 +241,12 @@ function RiderImportModal({ clients, onClose, onDone }:
     const clientByName = new Map(clients.map((c) => [c.name.trim().toLowerCase(), c.id]));
     const validStatus: string[] = STATUS_ORDER;
     const STATUS_ALIASES: Record<string, RiderStatus> = {
-      ready_to_work: "ready_to_work", ready: "ready_to_work",
-      active: "active",
+      ready_to_work: "ready_to_work", ready: "ready_to_work", available: "ready_to_work", hire: "ready_to_work",
+      active: "active", probation: "active", contract: "active",
       resign: "resign", resigned: "resign", mengundurkandiri: "resign",
       blacklisted: "blacklisted", blacklist: "blacklisted", banned: "blacklisted",
-      withdrawn: "withdrawn",
-      suspended: "suspended", suspend: "suspended",
+      withdrawn: "withdrawn", inactive: "withdrawn",
+      suspended: "suspended", suspend: "suspended", pending_review: "ready_to_work",
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const payload: any[] = [];
@@ -226,8 +264,9 @@ function RiderImportModal({ clients, onClose, onDone }:
       if (!validStatus.includes(status)) { warnings.push(`Baris ${line}: status "${o.status}" tidak dikenal — pakai "active"`); status = "active"; }
       payload.push({
         employee_id: o.employee_id, full_name: o.full_name,
-        phone: o.phone || null, email: o.email || null, client_id, status,
-        bank_name: o.bank_name || null, bank_account: o.bank_account || null, notes: o.notes || null,
+        nik: o.nik || null, phone: o.phone || null, email: o.email || null, client_id, status,
+        bank_name: o.bank_name || null, bank_account: o.bank_account || null, bank_account_holder: o.bank_account_holder || null,
+        birth_date: o.birth_date || null, birth_place: o.birth_place || null, notes: o.notes || null,
       });
     });
     if (payload.length === 0) { setImporting(false); return toast.error("Tidak ada baris valid untuk diimpor"); }
@@ -306,22 +345,25 @@ function RiderModal({ initial, clients, onClose, onSaved }:
   { initial: Rider | null; clients: Client[]; onClose: () => void; onSaved: () => void }) {
   const [f, setF] = useState({
     employee_id: initial?.employee_id ?? "",
+    nik: initial?.nik ?? "",
     full_name: initial?.full_name ?? "",
     phone: initial?.phone ?? "",
     email: initial?.email ?? "",
-    client_id: initial?.client_id ?? "",
     status: (initial?.status ?? "active") as RiderStatus,
     bank_name: initial?.bank_name ?? "",
     bank_account: initial?.bank_account ?? "",
+    bank_account_holder: initial?.bank_account_holder ?? "",
+    birth_date: initial?.birth_date ?? "",
+    birth_place: initial?.birth_place ?? "",
     notes: initial?.notes ?? "",
   });
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
-    if (!f.employee_id || !f.full_name) return toast.error("Employee ID & nama wajib");
+    if (!f.employee_id || !f.full_name) return toast.error("Employee ID (MTR) & nama wajib");
     setSaving(true);
-    const payload: any = { ...f, client_id: f.client_id || null };
-    ["phone","email","bank_name","bank_account","notes"].forEach((k) => { if (!payload[k]) payload[k] = null; });
+    const payload: any = { ...f };
+    ["phone","email","bank_name","bank_account","bank_account_holder","birth_date","birth_place","nik","notes"].forEach((k) => { if (!payload[k]) payload[k] = null; });
     const { error } = initial
       ? await supabase.from("riders").update(payload).eq("id", initial.id)
       : await supabase.from("riders").insert(payload);
@@ -332,33 +374,32 @@ function RiderModal({ initial, clients, onClose, onSaved }:
 
   return (
     <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4" onClick={onClose}>
-      <div className="bg-card rounded-lg w-full max-w-lg p-5 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-card rounded-lg w-full max-w-2xl p-5 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold mb-4">{initial ? "Edit" : "Tambah"} Rider</h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          Catatan: rider TIDAK terikat 1 client — dia bisa jalan untuk banyak client. Client-nya nempel di tiap data pengiriman/absensi, bukan di profil rider.
+        </p>
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <Field label="Employee ID" value={f.employee_id} onChange={(v) => setF({ ...f, employee_id: v })} />
+          <Field label="Employee ID (MTR)" placeholder="MTR001" value={f.employee_id} onChange={(v) => setF({ ...f, employee_id: v })} />
+          <Field label="NIK" placeholder="3201..." value={f.nik} onChange={(v) => setF({ ...f, nik: v })} />
           <Field label="Nama Lengkap" value={f.full_name} onChange={(v) => setF({ ...f, full_name: v })} />
-          <Field label="Telepon" value={f.phone} onChange={(v) => setF({ ...f, phone: v })} />
+          <Field label="Nomor WhatsApp" placeholder="0812..." value={f.phone} onChange={(v) => setF({ ...f, phone: v })} />
           <Field label="Email" value={f.email} onChange={(v) => setF({ ...f, email: v })} />
-          <div>
-            <label className="font-medium">Client</label>
-            <select value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })}
-              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
-              <option value="">—</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
           <div>
             <label className="font-medium">Status</label>
             <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value as RiderStatus })}
               className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
-              {!STATUS_ORDER.includes(f.status) && (
+              {!STATUS_ORDER.includes(f.status as RiderStatus) && (
                 <option value={f.status}>{f.status} (status lama, pilih yang baru)</option>
               )}
               {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
             </select>
           </div>
-          <Field label="Bank" value={f.bank_name} onChange={(v) => setF({ ...f, bank_name: v })} />
-          <Field label="No. Rekening" value={f.bank_account} onChange={(v) => setF({ ...f, bank_account: v })} />
+          <Field label="Tanggal Lahir" type="date" value={f.birth_date} onChange={(v) => setF({ ...f, birth_date: v })} />
+          <Field label="Tempat Lahir" value={f.birth_place} onChange={(v) => setF({ ...f, birth_place: v })} />
+          <Field label="Nama Bank" value={f.bank_name} onChange={(v) => setF({ ...f, bank_name: v })} />
+          <Field label="Nomor Rekening" value={f.bank_account} onChange={(v) => setF({ ...f, bank_account: v })} />
+          <Field label="Nama Pemilik Rekening" value={f.bank_account_holder} onChange={(v) => setF({ ...f, bank_account_holder: v })} />
           <div className="col-span-2">
             <label className="font-medium">Catatan</label>
             <textarea value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })}
@@ -376,11 +417,11 @@ function RiderModal({ initial, clients, onClose, onSaved }:
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function Field({ label, value, onChange, placeholder, type }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string }) {
   return (
     <div>
       <label className="font-medium">{label}</label>
-      <input value={value} onChange={(e) => onChange(e.target.value)}
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} type={type}
         className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
     </div>
   );
