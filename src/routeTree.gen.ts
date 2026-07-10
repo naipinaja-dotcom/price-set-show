@@ -23,6 +23,7 @@ import { Route as AdminRidersRouteImport } from './routes/admin.riders'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
 import { Route as AdminPnlRouteImport } from './routes/admin.pnl'
 import { Route as AdminPayrollRouteImport } from './routes/admin.payroll'
+import { Route as AdminInvoicesRouteImport } from './routes/admin.invoices'
 import { Route as AdminDeductionsRouteImport } from './routes/admin.deductions'
 import { Route as AdminDataCheckRouteImport } from './routes/admin.data-check'
 import { Route as AdminDashboardRouteImport } from './routes/admin.dashboard'
@@ -102,6 +103,11 @@ const AdminPayrollRoute = AdminPayrollRouteImport.update({
   path: '/payroll',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminInvoicesRoute = AdminInvoicesRouteImport.update({
+  id: '/invoices',
+  path: '/invoices',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminDeductionsRoute = AdminDeductionsRouteImport.update({
   id: '/deductions',
   path: '/deductions',
@@ -154,6 +160,7 @@ export interface FileRoutesByFullPath {
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
+  '/admin/invoices': typeof AdminInvoicesRoute
   '/admin/payroll': typeof AdminPayrollRoute
   '/admin/pnl': typeof AdminPnlRoute
   '/admin/reports': typeof AdminReportsRoute
@@ -178,6 +185,7 @@ export interface FileRoutesByTo {
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
+  '/admin/invoices': typeof AdminInvoicesRoute
   '/admin/payroll': typeof AdminPayrollRoute
   '/admin/pnl': typeof AdminPnlRoute
   '/admin/reports': typeof AdminReportsRoute
@@ -203,6 +211,7 @@ export interface FileRoutesById {
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
+  '/admin/invoices': typeof AdminInvoicesRoute
   '/admin/payroll': typeof AdminPayrollRoute
   '/admin/pnl': typeof AdminPnlRoute
   '/admin/reports': typeof AdminReportsRoute
@@ -229,6 +238,7 @@ export interface FileRouteTypes {
     | '/admin/dashboard'
     | '/admin/data-check'
     | '/admin/deductions'
+    | '/admin/invoices'
     | '/admin/payroll'
     | '/admin/pnl'
     | '/admin/reports'
@@ -253,6 +263,7 @@ export interface FileRouteTypes {
     | '/admin/dashboard'
     | '/admin/data-check'
     | '/admin/deductions'
+    | '/admin/invoices'
     | '/admin/payroll'
     | '/admin/pnl'
     | '/admin/reports'
@@ -277,6 +288,7 @@ export interface FileRouteTypes {
     | '/admin/dashboard'
     | '/admin/data-check'
     | '/admin/deductions'
+    | '/admin/invoices'
     | '/admin/payroll'
     | '/admin/pnl'
     | '/admin/reports'
@@ -399,6 +411,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminPayrollRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/invoices': {
+      id: '/admin/invoices'
+      path: '/invoices'
+      fullPath: '/admin/invoices'
+      preLoaderRoute: typeof AdminInvoicesRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/deductions': {
       id: '/admin/deductions'
       path: '/deductions'
@@ -464,6 +483,7 @@ interface AdminRouteChildren {
   AdminDashboardRoute: typeof AdminDashboardRoute
   AdminDataCheckRoute: typeof AdminDataCheckRoute
   AdminDeductionsRoute: typeof AdminDeductionsRoute
+  AdminInvoicesRoute: typeof AdminInvoicesRoute
   AdminPayrollRoute: typeof AdminPayrollRoute
   AdminPnlRoute: typeof AdminPnlRoute
   AdminReportsRoute: typeof AdminReportsRoute
@@ -481,6 +501,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminDashboardRoute: AdminDashboardRoute,
   AdminDataCheckRoute: AdminDataCheckRoute,
   AdminDeductionsRoute: AdminDeductionsRoute,
+  AdminInvoicesRoute: AdminInvoicesRoute,
   AdminPayrollRoute: AdminPayrollRoute,
   AdminPnlRoute: AdminPnlRoute,
   AdminReportsRoute: AdminReportsRoute,

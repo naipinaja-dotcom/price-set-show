@@ -188,6 +188,45 @@ function CalculatePage() {
     }
   };
 
+  const commitInvoice = async () => {
+    if (!ranScheme || ranScheme.scheme_for !== "client" || !clientId) return;
+    const isAttendance = ranScheme.calc_type === "attendance";
+    const r = isAttendance ? attResult : result;
+    if (!r) return;
+    const total = !isAttendance && result?.billing ? result.billing.final : r.subtotal;
+    if (!(await confirmDialog({
+      title: "Simpan sebagai invoice?",
+      description: `Invoice client periode ${from} → ${to} sebesar ${formatRupiah(total)} akan disimpan. Bisa dilihat & di-export di halaman Invoices.`,
+      confirmText: "Simpan", danger: false,
+    }))) return;
+    setCommitting(true);
+    try {
+      const { error } = await (supabase as any).from("invoice_details").insert({
+        client_id: clientId,
+        invoice_date: to,
+        period_start: from,
+        period_end: to,
+        calculation_type: ranScheme.calc_type,
+        scheme_name: ranScheme.name ?? null,
+        base_amount: r.subtotal,
+        surcharge_amount: total - r.subtotal,
+        total_amount: total,
+        status: "draft",
+        detail_breakdown: {
+          per_rider: r.perRider,
+          billing: !isAttendance ? result?.billing ?? null : null,
+          warnings: r.warnings,
+        },
+      });
+      if (error) throw error;
+      toast.success("Invoice tersimpan. Lihat di halaman Invoices.");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setCommitting(false);
+    }
+  };
+
   return (
     <AdminLayout title="Hitung Fee" subtitle="Hitung fee dari data pengiriman pakai skema pricing (preview sebelum simpan)">
       {/* Kontrol */}
@@ -360,9 +399,16 @@ function CalculatePage() {
               </button>
             </div>
           ) : (
-            <div className="rounded-md border border-border bg-muted/40 px-3.5 py-2.5 flex items-start gap-2.5 text-xs text-muted-foreground">
-              <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-              <span>Skema ini <strong>Client (revenue)</strong> — angkanya buat tagihan/invoice, bukan payroll. Commit ke invoice menyusul (belum tersedia). Sekarang preview aja dulu.</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card px-4 py-3">
+              <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <span>Skema ini <strong>Client (revenue)</strong>. Cek dulu angkanya di atas, lalu <strong>Commit</strong> untuk simpan sebagai invoice periode ini — bisa dilihat & di-export di halaman <strong>Invoices</strong>.</span>
+              </div>
+              <button onClick={commitInvoice} disabled={committing}
+                className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50">
+                {committing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {committing ? "Menyimpan…" : "Commit ke Invoice"}
+              </button>
             </div>
           )}
         </>
@@ -439,9 +485,16 @@ function CalculatePage() {
               </button>
             </div>
           ) : (
-            <div className="rounded-md border border-border bg-muted/40 px-3.5 py-2.5 flex items-start gap-2.5 text-xs text-muted-foreground">
-              <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-              <span>Skema ini <strong>Client (revenue)</strong> — belum ada sisi invoice buat attendance. Sekarang preview aja dulu.</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card px-4 py-3">
+              <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <span>Skema ini <strong>Client (revenue)</strong>. Cek dulu angkanya di atas, lalu <strong>Commit</strong> untuk simpan sebagai invoice periode ini — bisa dilihat & di-export di halaman <strong>Invoices</strong>.</span>
+              </div>
+              <button onClick={commitInvoice} disabled={committing}
+                className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50">
+                {committing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {committing ? "Menyimpan…" : "Commit ke Invoice"}
+              </button>
             </div>
           )}
         </>
