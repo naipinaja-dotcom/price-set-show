@@ -2,16 +2,23 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
+import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
+import { usePagination } from "@/lib/use-pagination";
 import { parseCSV, toCSV, downloadCSV } from "@/lib/csv";
 import { toast } from "sonner";
 import { Plus, Pencil, Loader2, AlertCircle, Upload, Download, X, Search } from "lucide-react";
 
 export const Route = createFileRoute("/admin/riders")({ component: RidersPage });
 
-type RiderStatus = "active" | "inactive" | "pending_review" | "suspended";
+type RiderStatus = "ready_to_work" | "active" | "resign" | "blacklisted" | "withdrawn" | "suspended";
+const STATUS_LABEL: Record<RiderStatus, string> = {
+  ready_to_work: "Ready to Work", active: "Active", resign: "Resign",
+  blacklisted: "Blacklisted", withdrawn: "Withdrawn", suspended: "Suspend",
+};
+const STATUS_ORDER: RiderStatus[] = ["ready_to_work", "active", "resign", "blacklisted", "withdrawn", "suspended"];
 type Rider = {
   id: string; employee_id: string; full_name: string; phone: string | null; email: string | null;
-  client_id: string | null; status: RiderStatus; join_date: string | null;
+  client_id: string | null; status: string; join_date: string | null;
   bank_name: string | null; bank_account: string | null; notes: string | null;
 };
 type Client = { id: string; name: string };
@@ -40,12 +47,12 @@ function RidersPage() {
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const toggleStatus = async (r: Rider) => {
-    const next: RiderStatus = r.status === "active" ? "inactive" : "active";
+    const next: RiderStatus = r.status === "active" ? "withdrawn" : "active";
     setTogglingId(r.id);
     const { error } = await supabase.from("riders").update({ status: next }).eq("id", r.id);
     setTogglingId(null);
     if (error) return toast.error(error.message);
-    toast.success(`${r.full_name} → ${next === "active" ? "Aktif" : "Nonaktif"}`);
+    toast.success(`${r.full_name} → ${STATUS_LABEL[next]}`);
     load();
   };
 
@@ -54,15 +61,20 @@ function RidersPage() {
     (filter === "all" || r.status === filter) &&
     (!q || r.full_name.toLowerCase().includes(q) || r.employee_id.toLowerCase().includes(q))
   );
-  const statusBadge = (s: RiderStatus) => {
+  const { pageSize, setPageSize, page, setPage, totalPages, paged, from, to, total } = usePagination(filtered, 10);
+  const statusBadge = (s: string) => {
     const map: Record<RiderStatus, string> = {
+      ready_to_work: "bg-primary/10 text-primary",
       active: "bg-success/10 text-success",
-      inactive: "bg-muted text-muted-foreground",
-      pending_review: "bg-warning/10 text-warning",
+      resign: "bg-muted text-muted-foreground",
+      withdrawn: "bg-warning/10 text-warning",
+      blacklisted: "bg-destructive/10 text-destructive",
       suspended: "bg-destructive/10 text-destructive",
     };
-    return <span className={`px-2 py-0.5 rounded-full text-xs inline-flex items-center gap-1 ${map[s]}`}>
-      {s === "pending_review" && <AlertCircle className="w-3 h-3" />}{s.replace("_", " ")}
+    const cls = map[s as RiderStatus] ?? "bg-muted text-muted-foreground";
+    const label = STATUS_LABEL[s as RiderStatus] ?? s.replace(/_/g, " ");
+    return <span className={`px-2 py-0.5 rounded-full text-xs inline-flex items-center gap-1 ${cls}`}>
+      {(s === "blacklisted" || s === "suspended") && <AlertCircle className="w-3 h-3" />}{label}
     </span>;
   };
 
@@ -78,15 +90,16 @@ function RidersPage() {
         />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex gap-2">
-          {(["all","active","pending_review","inactive","suspended"] as const).map((s) => (
+        <div className="flex gap-2 flex-wrap">
+          {(["all", ...STATUS_ORDER] as const).map((s) => (
             <button key={s} onClick={() => setFilter(s)}
               className={`px-3 py-1 text-xs rounded-full border ${filter === s ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>
-              {s === "all" ? "Semua" : s.replace("_", " ")}
+              {s === "all" ? "Semua" : STATUS_LABEL[s]}
             </button>
           ))}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />
           <button onClick={() => setImportOpen(true)}
             className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">
             <Upload className="w-4 h-4" /> Import CSV
@@ -105,7 +118,7 @@ function RidersPage() {
           <tbody>
             {loading ? <tr><td colSpan={6} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
             : filtered.length === 0 ? <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">Tidak ada rider</td></tr>
-            : filtered.map((r) => (
+            : paged.map((r) => (
               <tr key={r.id} className="border-t border-border">
                 <td className="p-3 font-mono text-xs">{r.employee_id}</td>
                 <td>{r.full_name}</td>
@@ -124,6 +137,7 @@ function RidersPage() {
           </tbody>
         </table>
       </div>
+      {!loading && <PaginationBar page={page} totalPages={totalPages} setPage={setPage} from={from} to={to} total={total} />}
       {open && <RiderModal initial={edit} clients={clients} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); load(); }} />}
       {importOpen && <RiderImportModal clients={clients} onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />}
     </AdminLayout>
@@ -140,14 +154,14 @@ function RiderImportModal({ clients, onClose, onDone }:
 
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const FIELD_ALIASES: Record<string, string[]> = {
-    employee_id: ["employeeid", "employee", "id", "nik", "idkaryawan", "kodekaryawan"],
+    employee_id: ["employeeid", "employee", "idkaryawan", "kodekaryawan", "kodemitra", "kodemtr", "mtrcode"],
     full_name: ["fullname", "name", "nama", "namalengkap"],
-    phone: ["phone", "telepon", "telp", "hp", "nohp", "notelp"],
+    phone: ["phone", "telepon", "telp", "hp", "nohp", "notelp", "nomorwhatsapp", "whatsapp"],
     email: ["email"],
-    client: ["client", "klien"],
+    client: ["client", "klien", "clientpitstop"],
     status: ["status"],
     bank_name: ["bankname", "bank", "namabank"],
-    bank_account: ["bankaccount", "norekening", "rekening", "norek", "account"],
+    bank_account: ["bankaccount", "norekening", "nomorrekening", "rekening", "norek", "account"],
     notes: ["notes", "catatan", "note"],
   };
 
@@ -187,7 +201,15 @@ function RiderImportModal({ clients, onClose, onDone }:
     setImporting(true);
     const warnings: string[] = [];
     const clientByName = new Map(clients.map((c) => [c.name.trim().toLowerCase(), c.id]));
-    const validStatus = ["active", "inactive", "pending_review", "suspended"];
+    const validStatus: string[] = STATUS_ORDER;
+    const STATUS_ALIASES: Record<string, RiderStatus> = {
+      ready_to_work: "ready_to_work", ready: "ready_to_work",
+      active: "active",
+      resign: "resign", resigned: "resign", mengundurkandiri: "resign",
+      blacklisted: "blacklisted", blacklist: "blacklisted", banned: "blacklisted",
+      withdrawn: "withdrawn",
+      suspended: "suspended", suspend: "suspended",
+    };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const payload: any[] = [];
     rows.forEach((o, idx) => {
@@ -199,8 +221,9 @@ function RiderImportModal({ clients, onClose, onDone }:
         if (hit) client_id = hit;
         else warnings.push(`Baris ${line}: client "${o.client}" tidak ditemukan — dikosongkan`);
       }
-      let status = (o.status || "active").toLowerCase().replace(/\s+/g, "_");
-      if (!validStatus.includes(status)) { warnings.push(`Baris ${line}: status "${o.status}" tidak valid — pakai "active"`); status = "active"; }
+      const rawStatus = (o.status || "active").toLowerCase().replace(/\s+/g, "_");
+      let status: string = STATUS_ALIASES[rawStatus] ?? rawStatus;
+      if (!validStatus.includes(status)) { warnings.push(`Baris ${line}: status "${o.status}" tidak dikenal — pakai "active"`); status = "active"; }
       payload.push({
         employee_id: o.employee_id, full_name: o.full_name,
         phone: o.phone || null, email: o.email || null, client_id, status,
@@ -328,7 +351,10 @@ function RiderModal({ initial, clients, onClose, onSaved }:
             <label className="font-medium">Status</label>
             <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value as RiderStatus })}
               className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
-              {["active","pending_review","inactive","suspended"].map((s) => <option key={s} value={s}>{s.replace("_"," ")}</option>)}
+              {!STATUS_ORDER.includes(f.status) && (
+                <option value={f.status}>{f.status} (status lama, pilih yang baru)</option>
+              )}
+              {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
             </select>
           </div>
           <Field label="Bank" value={f.bank_name} onChange={(v) => setF({ ...f, bank_name: v })} />

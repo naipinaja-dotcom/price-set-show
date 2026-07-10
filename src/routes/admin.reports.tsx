@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
+import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
+import { usePagination } from "@/lib/use-pagination";
 import { toCSV, downloadCSV } from "@/lib/csv";
 import { toast } from "sonner";
 import { Download, Loader2 } from "lucide-react";
@@ -156,11 +158,14 @@ function RiderFinanceReport({ runId, run }: { runId: string; run?: Run }) {
     ded: dedTypes.reduce((m, ty) => ({ ...m, [ty]: (m[ty] ?? 0) + (r.ded[ty] ?? 0) }), s.ded),
   }), { order: 0, fee: 0, total: 0, ded: {} as Record<string, number> });
 
+  const { pageSize, setPageSize, page, setPage, totalPages, paged, from, to, total } = usePagination(rows, 20);
+
   if (loading) return <Loader2 className="w-4 h-4 animate-spin" />;
 
   return (
     <>
-      <div className="flex justify-end mb-3">
+      <div className="flex justify-end items-center gap-3 mb-3">
+        {rows.length > 0 && <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />}
         <button onClick={exportCSV} disabled={!rows.length}
           className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm disabled:opacity-50">
           <Download className="w-4 h-4" /> Export CSV (Finance)
@@ -180,7 +185,7 @@ function RiderFinanceReport({ runId, run }: { runId: string; run?: Run }) {
           </thead>
           <tbody>
             {rows.length === 0 ? <tr><td colSpan={5 + dedTypes.length} className="p-6 text-center text-muted-foreground">Tidak ada data — pastikan payroll run ini sudah di-Generate.</td></tr> :
-              rows.map((r) => (
+              paged.map((r) => (
                 <tr key={r.rider_id} className="border-t border-border">
                   <td className="p-2 sticky left-0 bg-background">
                     <div className="font-medium">{r.name}</div>
@@ -210,8 +215,9 @@ function RiderFinanceReport({ runId, run }: { runId: string; run?: Run }) {
           )}
         </table>
       </div>
+      {rows.length > 0 && <PaginationBar page={page} totalPages={totalPages} setPage={setPage} from={from} to={to} total={total} />}
       <p className="text-xs text-muted-foreground mt-2">
-        Kolom potongan (Sewa Molis, Admin Fee, dll) muncul otomatis dari jenis potongan yang kepakai. "Remarks" kosong di sini — diisi manual di sheet finance setelah export.
+        Kolom potongan (Sewa Molis, Admin Fee, dll) muncul otomatis dari jenis potongan yang kepakai. "Remarks" kosong di sini — diisi manual di sheet finance setelah export. Total GRAND TOTAL di atas tetap menghitung SEMUA rider, bukan cuma yang tampil di halaman ini.
       </p>
     </>
   );
@@ -274,11 +280,14 @@ function ClientReport({ runId, run }: { runId: string; run?: Run }) {
     gross: s.gross + r.gross, ded: s.ded + r.deduction, net: s.net + r.net,
   }), { rider: 0, deliv: 0, gross: 0, ded: 0, net: 0 });
 
+  const { pageSize, setPageSize, page, setPage, totalPages, paged, from, to, total } = usePagination(rows, 20);
+
   if (loading) return <Loader2 className="w-4 h-4 animate-spin" />;
 
   return (
     <>
-      <div className="flex justify-end mb-3">
+      <div className="flex justify-end items-center gap-3 mb-3">
+        {rows.length > 0 && <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />}
         <button onClick={exportCSV} disabled={!rows.length}
           className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm disabled:opacity-50">
           <Download className="w-4 h-4" /> Export CSV
@@ -291,7 +300,7 @@ function ClientReport({ runId, run }: { runId: string; run?: Run }) {
           </thead>
           <tbody>
             {rows.length === 0 ? <tr><td colSpan={10} className="p-6 text-center text-muted-foreground">Tidak ada data</td></tr> :
-              rows.map((r) => (
+              paged.map((r) => (
                 <tr key={r.client_id ?? "_"} className="border-t border-border">
                   <td className="p-2 font-medium">{r.client_name}</td>
                   <td>{r.rider_count}</td>
@@ -313,6 +322,7 @@ function ClientReport({ runId, run }: { runId: string; run?: Run }) {
           )}
         </table>
       </div>
+      {rows.length > 0 && <PaginationBar page={page} totalPages={totalPages} setPage={setPage} from={from} to={to} total={total} />}
     </>
   );
 }

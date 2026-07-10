@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
+import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
+import { usePagination } from "@/lib/use-pagination";
 import { toast } from "sonner";
 import { Loader2, Search } from "lucide-react";
 
@@ -64,6 +66,7 @@ function DataCheckPage() {
 
   const clientName = (id: string | null) => (id ? clients.find((c) => c.id === id)?.name ?? "(client tak dikenal)" : "(client KOSONG)");
   const completed = rows.filter((r) => String(r.status ?? "").trim().toLowerCase() === "completed").length;
+  const { pageSize, setPageSize, page, setPage, totalPages, paged, from: pFrom, to: pTo, total } = usePagination(rows, 50);
 
   return (
     <AdminLayout title="Cek Data" subtitle="Lihat data pengiriman yang BENERAN tersimpan di database (mentah, apa adanya).">
@@ -107,33 +110,38 @@ function DataCheckPage() {
       )}
 
       {rows.length > 0 && (
-        <div className="rounded-lg border border-border overflow-x-auto">
-          <table className="w-full text-sm whitespace-nowrap">
-            <thead className="bg-muted text-left">
-              <tr>
-                <th className="p-2">Kode Rider</th><th className="px-3">Nama</th><th className="px-3">Tgl Delivery</th>
-                <th className="px-3">Status</th><th className="px-3">Delivery Type</th><th className="px-3">Client</th>
-                <th className="px-3">Dash ID</th><th className="px-3 text-right">Jarak</th><th className="px-3 text-right">Berat</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, 500).map((r, i) => (
-                <tr key={i} className="border-t border-border">
-                  <td className="p-2 font-mono text-xs">{r.driver_code ?? "—"}</td>
-                  <td className="px-3">{r.riders?.full_name ?? "—"}</td>
-                  <td className="px-3 tabular-nums">{r.delivery_date}</td>
-                  <td className="px-3">{r.status ?? "—"}</td>
-                  <td className="px-3">{r.delivery_type ?? "—"}</td>
-                  <td className={"px-3 " + (r.client_id ? "" : "text-destructive font-medium")}>{clientName(r.client_id)}</td>
-                  <td className="px-3 font-mono text-xs">{r.dash_delivery_id ?? "—"}</td>
-                  <td className="px-3 text-right tabular-nums">{r.distance_km ?? "—"}</td>
-                  <td className="px-3 text-right tabular-nums">{r.weight_kg ?? "—"}</td>
+        <>
+          <div className="flex justify-end mb-2">
+            <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />
+          </div>
+          <div className="rounded-lg border border-border overflow-x-auto">
+            <table className="w-full text-sm whitespace-nowrap">
+              <thead className="bg-muted text-left">
+                <tr>
+                  <th className="p-2">Kode Rider</th><th className="px-3">Nama</th><th className="px-3">Tgl Delivery</th>
+                  <th className="px-3">Status</th><th className="px-3">Delivery Type</th><th className="px-3">Client</th>
+                  <th className="px-3">Dash ID</th><th className="px-3 text-right">Jarak</th><th className="px-3 text-right">Berat</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {rows.length > 500 && <p className="text-xs text-muted-foreground p-2">Nampilin 500 baris pertama dari {rows.length}.</p>}
-        </div>
+              </thead>
+              <tbody>
+                {paged.map((r, i) => (
+                  <tr key={i} className="border-t border-border">
+                    <td className="p-2 font-mono text-xs">{r.driver_code ?? "—"}</td>
+                    <td className="px-3">{r.riders?.full_name ?? "—"}</td>
+                    <td className="px-3 tabular-nums">{r.delivery_date}</td>
+                    <td className="px-3">{r.status ?? "—"}</td>
+                    <td className="px-3">{r.delivery_type ?? "—"}</td>
+                    <td className={"px-3 " + (r.client_id ? "" : "text-destructive font-medium")}>{clientName(r.client_id)}</td>
+                    <td className="px-3 font-mono text-xs">{r.dash_delivery_id ?? "—"}</td>
+                    <td className="px-3 text-right tabular-nums">{r.distance_km ?? "—"}</td>
+                    <td className="px-3 text-right tabular-nums">{r.weight_kg ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <PaginationBar page={page} totalPages={totalPages} setPage={setPage} from={pFrom} to={pTo} total={total} />
+        </>
       )}
     </AdminLayout>
   );

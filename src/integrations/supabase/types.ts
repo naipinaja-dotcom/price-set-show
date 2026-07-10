@@ -812,7 +812,7 @@ export type Database = {
       app_role: "admin" | "rider"
       payroll_status: "draft" | "finalized" | "published"
       period_type: "weekly" | "biweekly" | "monthly"
-      rider_status: "active" | "inactive" | "pending_review" | "suspended"
+      rider_status: "active" | "inactive" | "pending_review" | "suspended" | "ready_to_work" | "resign" | "blacklisted" | "withdrawn"
       upload_kind: "delivery" | "attendance"
     }
     CompositeTypes: {
@@ -944,7 +944,7 @@ export const Constants = {
       app_role: ["admin", "rider"],
       payroll_status: ["draft", "finalized", "published"],
       period_type: ["weekly", "biweekly", "monthly"],
-      rider_status: ["active", "inactive", "pending_review", "suspended"],
+      rider_status: ["active", "inactive", "pending_review", "suspended", "ready_to_work", "resign", "blacklisted", "withdrawn"],
       upload_kind: ["delivery", "attendance"],
     },
   },

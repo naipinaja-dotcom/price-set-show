@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
+import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
+import { usePagination } from "@/lib/use-pagination";
 import { listPricingSchemes } from "@/lib/pricing-store";
 import type { PricingScheme } from "@/lib/pricing-types";
 import { PRICING_TYPES } from "@/lib/pricing-types";
@@ -36,6 +38,8 @@ function CalculatePage() {
   const [attResult, setAttResult] = useState<AttendanceCalcResult | null>(null);
   const [riderNames, setRiderNames] = useState<Record<string, string>>({});
   const [ranScheme, setRanScheme] = useState<PricingScheme | null>(null);
+  const deliveryPager = usePagination(result?.perRider ?? [], 20);
+  const attPager = usePagination(attResult?.perRider ?? [], 20);
 
   useEffect(() => {
     supabase.from("clients").select("id, name").order("name").then(({ data }) => setClients(data ?? []));
@@ -249,7 +253,10 @@ function CalculatePage() {
           )}
 
           {/* Rincian per rider */}
-          <div className="rounded-lg border border-border overflow-hidden mb-4">
+          {result.perRider.length > 0 && (
+            <div className="flex justify-end mb-2"><PageSizeSelect pageSize={deliveryPager.pageSize} setPageSize={deliveryPager.setPageSize} /></div>
+          )}
+          <div className="rounded-lg border border-border overflow-hidden mb-2">
             <table className="w-full text-sm">
               <thead className="bg-muted text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>
@@ -265,7 +272,7 @@ function CalculatePage() {
                 {result.perRider.length === 0 ? (
                   <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">Tidak ada hasil.</td></tr>
                 ) : (
-                  result.perRider.map((l) => (
+                  deliveryPager.paged.map((l) => (
                     <tr key={l.rider} className="border-t border-border">
                       <td className="p-3 font-medium">{riderNames[l.rider] ?? l.rider}</td>
                       <td className="p-3 text-right text-muted-foreground">{l.units}</td>
@@ -279,6 +286,11 @@ function CalculatePage() {
               </tbody>
             </table>
           </div>
+          {result.perRider.length > 0 && (
+            <div className="mb-4">
+              <PaginationBar page={deliveryPager.page} totalPages={deliveryPager.totalPages} setPage={deliveryPager.setPage} from={deliveryPager.from} to={deliveryPager.to} total={deliveryPager.total} />
+            </div>
+          )}
 
           {/* Billing breakdown (client) */}
           {result.billing && (
@@ -334,7 +346,10 @@ function CalculatePage() {
           )}
 
           {/* Rincian per rider */}
-          <div className="rounded-lg border border-border overflow-hidden mb-4">
+          {attResult.perRider.length > 0 && (
+            <div className="flex justify-end mb-2"><PageSizeSelect pageSize={attPager.pageSize} setPageSize={attPager.setPageSize} /></div>
+          )}
+          <div className="rounded-lg border border-border overflow-hidden mb-2">
             <table className="w-full text-sm">
               <thead className="bg-muted text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>
@@ -350,7 +365,7 @@ function CalculatePage() {
                 {attResult.perRider.length === 0 ? (
                   <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">Tidak ada hasil.</td></tr>
                 ) : (
-                  attResult.perRider.map((l) => (
+                  attPager.paged.map((l) => (
                     <tr key={l.rider} className="border-t border-border">
                       <td className="p-3 font-medium">{riderNames[l.rider] ?? l.rider}</td>
                       <td className="p-3 text-right text-muted-foreground">{l.daysWorked}</td>
@@ -364,6 +379,11 @@ function CalculatePage() {
               </tbody>
             </table>
           </div>
+          {attResult.perRider.length > 0 && (
+            <div className="mb-4">
+              <PaginationBar page={attPager.page} totalPages={attPager.totalPages} setPage={attPager.setPage} from={attPager.from} to={attPager.to} total={attPager.total} />
+            </div>
+          )}
 
           {/* Commit */}
           {ranScheme.scheme_for === "rider" ? (

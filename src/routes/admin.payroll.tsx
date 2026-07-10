@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
+import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
+import { usePagination } from "@/lib/use-pagination";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { Plus, Loader2, CheckCircle2, Send, X } from "lucide-react";
@@ -25,6 +27,10 @@ function PayrollPage() {
   const [newRunOpen, setNewRunOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const {
+    pageSize: detailPageSize, setPageSize: setDetailPageSize, page: detailPage, setPage: setDetailPage,
+    totalPages: detailTotalPages, paged: pagedDetails, from: detailFrom, to: detailTo, total: detailTotal,
+  } = usePagination(details, 20);
 
   const loadRuns = async () => {
     setLoading(true);
@@ -224,6 +230,9 @@ function PayrollPage() {
                   </button>
                 </div>
               </div>
+              {details.length > 0 && (
+                <div className="flex justify-end mb-2"><PageSizeSelect pageSize={detailPageSize} setPageSize={setDetailPageSize} /></div>
+              )}
               <div className="rounded-lg border border-border overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-muted text-left">
@@ -231,7 +240,7 @@ function PayrollPage() {
                   </thead>
                   <tbody>
                     {details.length === 0 ? <tr><td colSpan={9} className="p-6 text-center text-muted-foreground">Belum ada detail — klik Generate Detail</td></tr> :
-                      details.map((d) => (
+                      pagedDetails.map((d) => (
                         <tr key={d.id} className="border-t border-border">
                           <td className="p-2"><div className="font-medium">{d.riders?.full_name}</div><div className="text-xs text-muted-foreground">{d.riders?.employee_id}</div></td>
                           <td>{d.delivery_count}</td>
@@ -247,6 +256,9 @@ function PayrollPage() {
                   </tbody>
                 </table>
               </div>
+              {details.length > 0 && (
+                <PaginationBar page={detailPage} totalPages={detailTotalPages} setPage={setDetailPage} from={detailFrom} to={detailTo} total={detailTotal} />
+              )}
             </>
           )}
         </section>

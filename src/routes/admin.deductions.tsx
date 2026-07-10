@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
+import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
+import { usePagination } from "@/lib/use-pagination";
 import { parseRupiah } from "@/lib/format";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { toast } from "sonner";
@@ -340,33 +342,41 @@ function ActiveTab() {
     load();
   };
 
+  const { pageSize, setPageSize, page, setPage, totalPages, paged, from, to, total } = usePagination(rows, 10);
+
   return (
-    <div className="rounded-lg border border-border overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-muted text-left">
-          <tr><th className="p-3">Rider</th><th>Jenis</th><th>Total</th><th>Per Periode</th><th>Progress</th><th>Potong Berikutnya</th><th></th></tr>
-        </thead>
-        <tbody>
-          {loading ? <tr><td colSpan={7} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
-          : rows.length === 0 ? <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">Tidak ada cicilan aktif</td></tr>
-          : rows.map((r) => (
-            <tr key={r.id} className="border-t border-border">
-              <td className="p-3"><div className="font-medium">{r.rider?.full_name}</div><div className="text-xs text-muted-foreground">{r.rider?.employee_id}</div></td>
-              <td>{r.type?.name}</td>
-              <td>Rp{Number(r.total_amount).toLocaleString("id-ID")}</td>
-              <td>Rp{Number(r.per_period_amount).toLocaleString("id-ID")}</td>
-              <td>{r.installments_paid}/{r.installment_count}</td>
-              <td>{r.next_deduction_date ?? "—"}</td>
-              <td className="text-right pr-3">
-                <button onClick={() => remove(r)} disabled={deletingId === r.id}
-                  className="p-1.5 hover:bg-muted rounded text-destructive disabled:opacity-50" title="Hapus cicilan">
-                  {deletingId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div>
+      {!loading && rows.length > 0 && (
+        <div className="flex justify-end mb-2"><PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} /></div>
+      )}
+      <div className="rounded-lg border border-border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted text-left">
+            <tr><th className="p-3">Rider</th><th>Jenis</th><th>Total</th><th>Per Periode</th><th>Progress</th><th>Potong Berikutnya</th><th></th></tr>
+          </thead>
+          <tbody>
+            {loading ? <tr><td colSpan={7} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
+            : rows.length === 0 ? <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">Tidak ada cicilan aktif</td></tr>
+            : paged.map((r) => (
+              <tr key={r.id} className="border-t border-border">
+                <td className="p-3"><div className="font-medium">{r.rider?.full_name}</div><div className="text-xs text-muted-foreground">{r.rider?.employee_id}</div></td>
+                <td>{r.type?.name}</td>
+                <td>Rp{Number(r.total_amount).toLocaleString("id-ID")}</td>
+                <td>Rp{Number(r.per_period_amount).toLocaleString("id-ID")}</td>
+                <td>{r.installments_paid}/{r.installment_count}</td>
+                <td>{r.next_deduction_date ?? "—"}</td>
+                <td className="text-right pr-3">
+                  <button onClick={() => remove(r)} disabled={deletingId === r.id}
+                    className="p-1.5 hover:bg-muted rounded text-destructive disabled:opacity-50" title="Hapus cicilan">
+                    {deletingId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!loading && <PaginationBar page={page} totalPages={totalPages} setPage={setPage} from={from} to={to} total={total} />}
     </div>
   );
 }
