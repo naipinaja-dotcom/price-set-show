@@ -30,11 +30,12 @@ import {
   Plus,
   Save,
   Trash2,
+  Layers,
 } from "lucide-react";
 import { calcAttendanceScheme } from "@/lib/pricing-calc";
 import { toast } from "sonner";
 
-const ICONS = { MapPin, Truck, Ruler, Route: RouteIcon, Home, Package, CalendarDays } as const;
+const ICONS = { MapPin, Truck, Ruler, Route: RouteIcon, Home, Package, CalendarDays, Layers } as const;
 
 // -------------------- Bentuk state form (semua string, di-parse saat simpan) --------------------
 interface StepTierState {
@@ -69,6 +70,13 @@ interface AttendanceState {
   overtime_rate_per_hour: string;
   incentives: { label: string; amount: string; condition: "always" | "ontime_only" }[];
 }
+interface CombinedState {
+  daily_fee: string;
+  standard_hours: string;
+  ontime_bonus: string;
+  order_by: "distance" | "weight";
+  order_tier: StepTierState;
+}
 
 const emptyStepTier = (): StepTierState => ({ base_fee: "", base_until: "", tiers: [] });
 
@@ -78,6 +86,7 @@ interface FormState {
   threshold: ThresholdState;
   attendance: AttendanceState;
   // modifiers
+  combined: CombinedState;
   addKgOn: boolean;
   addKg: StepTierState;
   multiDropOn: boolean;
@@ -118,6 +127,13 @@ function emptyForm(): FormState {
       overtimeOn: false,
       overtime_rate_per_hour: "0",
       incentives: [{ label: "Insentif Ontime", amount: "40000", condition: "ontime_only" }],
+    },
+    combined: {
+      daily_fee: "100000",
+      standard_hours: "8",
+      ontime_bonus: "20000",
+      order_by: "distance",
+      order_tier: { base_fee: "5000", base_until: "5", tiers: [{ from: "5", to: "", step: "1", add_per_step: "1000" }] },
     },
     addKgOn: false,
     addKg: emptyStepTier(),
@@ -180,6 +196,14 @@ function buildConfig(type: PricingCalcType, f: FormState): Record<string, unknow
           .filter((c) => c.label.trim())
           .map((c) => ({ label: c.label.trim(), amount: parseRupiah(c.amount), condition: c.condition })),
       };
+    case "combined":
+      return {
+        full_fee: parseRupiah(f.combined.daily_fee),
+        standard_minutes: (Number(f.combined.standard_hours) || 0) * 60,
+        ontime_bonus: parseRupiah(f.combined.ontime_bonus),
+        order_by: f.combined.order_by,
+        order_tier: buildStepTier(f.combined.order_tier),
+      };
   }
 }
 
@@ -201,21 +225,10 @@ function buildEnvelope(type: PricingCalcType, schemeFor: SchemeFor, f: FormState
   };
 }
 
-// -------------------- Contoh perhitungan otomatis (buat orang awam) --------------------
-// Bikin skenario contoh + rincian langkah, dihitung pakai LOGIKA yang SAMA
-// persis dengan mesin asli (pricing-calc.ts) supaya contoh di layar = hasil beneran.
-interface ExStep {
-  text: string;
-  amount?: number;
-}
-interface WorkedExample {
-  scenario: string;
-  steps: ExStep[];
-  total: { label: string; amount: number };
-  notes: string[];
-}
+// -------------------- Kalkulator interaktif --------------------
+interface ExStep { text: string; amount?: number }
+interface WorkedExample { steps: ExStep[]; total: { label: string; amount: number }; notes: string[] }
 
-// Cermin dari stepTierFee() di pricing-calc, tapi keluarin rincian tiap jenjang.
 function stepTierBreakdown(s: StepTierState, value: number, unit: string): { steps: ExStep[]; total: number } {
   const base = parseRupiah(s.base_fee);
   const baseUntil = Number(s.base_until) || 0;
@@ -238,100 +251,270 @@ function stepTierBreakdown(s: StepTierState, value: number, unit: string): { ste
   return { steps, total: fee };
 }
 
-function buildExample(calcType: PricingCalcType, f: FormState, schemeFor: SchemeFor): WorkedExample | null {
+interface CalcInputs {
+  units: string;
+  area: string;
+  distance: string;
+  weight: string;
+  totalKg: string;
+  hours: string;
+  isLate: boolean;
+  orders: { val: string }[];
+}
+
+function defaultCalcInputs(calcType: PricingCalcType, f: FormState): CalcInputs {
+  return {
+    units: "3",
+    area: f.flatUnit.rates.find((r) => r.key.trim())?.key ?? "",
+    distance: String((Number(f.tier.distance.base_until) || 0) + 3),
+    weight: String((Number(f.tier.weight.base_until) || 0) + 3),
+    totalKg: String((Number(f.threshold.default_threshold) || 10) * 2 + 1),
+    hours: calcType === "combined" ? (f.combined.standard_hours || "8") : (f.attendance.standard_hours || "8"),
+    isLate: false,
+    orders: [{ val: String((Number(f.combined.order_tier.base_until) || 0) + 3) }],
+  };
+}
+
+function computeInteractive(calcType: PricingCalcType, f: FormState, schemeFor: SchemeFor, inp: CalcInputs): WorkedExample {
   const notes: string[] = [];
-  const addModifierNotes = () => {
+  const modNotes = () => {
     if ((calcType === "flat_unit" || calcType === "threshold_multiple") && f.addKgOn)
-      notes.push("Add-KG nyala: biaya berat ditambah DI ATAS hasil ini, sesuai berat tiap kiriman.");
+      notes.push("Add-KG nyala: biaya berat ditambah DI ATAS hasil ini.");
     if (f.multiDropOn)
-      notes.push(`Multi-drop nyala: kiriman ke-2 dst di hari yang sama +${formatRupiah(parseRupiah(f.multiDropFee))} per kiriman.`);
+      notes.push(`Multi-drop nyala: kiriman ke-2 dst +${formatRupiah(parseRupiah(f.multiDropFee))} per kiriman.`);
     if (schemeFor === "client" && f.billingOn)
-      notes.push("Billing client nyala: total tagihan masih ditambah min charge / admin fee & PPN di akhir.");
+      notes.push("Billing add-ons belum termasuk di sini (min charge / admin fee / PPN).");
   };
 
   switch (calcType) {
     case "flat_unit": {
+      const n = Math.max(1, Number(inp.units) || 1);
+      const unitWord = f.flatUnit.unit === "unique_address" ? "alamat" : "kiriman";
       if (f.flatUnit.rate_by === "flat") {
         const rate = parseRupiah(f.flatUnit.flat_rate);
-        const unitWord = f.flatUnit.unit === "unique_address" ? "alamat" : "kiriman";
-        const steps: ExStep[] = [
-          { text: `Tarif per ${unitWord}`, amount: rate },
-          { text: `Misal 3 ${unitWord} → 3 × ${formatRupiah(rate)}`, amount: rate * 3 },
-        ];
-        if (f.flatUnit.unit === "unique_address")
-          notes.push("Per alamat unik: 3 paket ke 1 alamat yang sama dihitung 1× saja.");
-        addModifierNotes();
-        return { scenario: `Contoh: 3 ${unitWord}.`, steps, total: { label: `Total 3 ${unitWord}`, amount: rate * 3 }, notes };
+        modNotes();
+        return { steps: [{ text: `Tarif per ${unitWord}`, amount: rate }, { text: `${n} × ${formatRupiah(rate)}`, amount: rate * n }], total: { label: `Total ${n} ${unitWord}`, amount: rate * n }, notes };
       }
-      const first = f.flatUnit.rates.find((r) => r.key.trim());
-      const col = f.flatUnit.match_column || "Area";
-      const rate = first ? parseRupiah(first.rate) : parseRupiah(f.flatUnit.default_rate);
-      const def = parseRupiah(f.flatUnit.default_rate);
-      const steps: ExStep[] = [
-        { text: `${col} = "${first?.key ?? "(isi dulu)"}" → tarif`, amount: rate },
-        { text: `${col} lain (tidak ada di daftar) → default`, amount: def },
-      ];
-      addModifierNotes();
-      return { scenario: `Contoh: 1 kiriman, tarif ikut kolom "${col}".`, steps, total: { label: `Fee 1 kiriman ke "${first?.key ?? "-"}"`, amount: rate }, notes };
+      const hit = f.flatUnit.rates.find((r) => r.key.trim().toLowerCase() === (inp.area || "").toLowerCase());
+      const rate = parseRupiah(hit ? hit.rate : f.flatUnit.default_rate);
+      const label = hit ? hit.key : "(default)";
+      modNotes();
+      return { steps: [{ text: `${f.flatUnit.match_column || "Area"}: "${label}" → tarif`, amount: rate }, { text: `${n} kiriman × ${formatRupiah(rate)}`, amount: rate * n }], total: { label: `Total ${n} kiriman`, amount: rate * n }, notes };
     }
     case "tier":
     case "tier_daily": {
-      const useDist = f.tier.distanceOn || !f.tier.weightOn;
-      const unit = useDist ? "km" : "kg";
-      const src = useDist ? f.tier.distance : f.tier.weight;
-      const sample = (Number(src.base_until) || 0) + 3;
-      const { steps, total } = stepTierBreakdown(src, sample, unit);
-      const scenario =
-        calcType === "tier"
-          ? `Contoh: 1 kiriman dengan ${useDist ? "jarak" : "berat"} ${sample} ${unit}.`
-          : `Contoh: 1 rider, total ${useDist ? "jarak" : "berat"} sehari ${sample} ${unit}.`;
-      if (f.tier.distanceOn && f.tier.weightOn)
-        notes.push("Jarak & berat dua-duanya nyala → hasil berat dihitung dengan cara yang sama, lalu DIJUMLAH ke hasil ini.");
-      addModifierNotes();
-      return { scenario, steps, total: { label: "Total", amount: total }, notes };
+      const steps: ExStep[] = [];
+      let total = 0;
+      if (f.tier.distanceOn) {
+        const { steps: s, total: t } = stepTierBreakdown(f.tier.distance, Number(inp.distance) || 0, "km");
+        steps.push(...s);
+        total += t;
+      }
+      if (f.tier.weightOn) {
+        const { steps: s, total: t } = stepTierBreakdown(f.tier.weight, Number(inp.weight) || 0, "kg");
+        steps.push(...s.map((x) => ({ ...x, text: `[Berat] ${x.text}` })));
+        total += t;
+      }
+      if (f.tier.distanceOn && f.tier.weightOn) notes.push("Jarak + berat dijumlah.");
+      modNotes();
+      return { steps, total: { label: "Total", amount: total }, notes };
     }
     case "threshold_multiple": {
-      const rule = f.threshold.rules.find((r) => r.key.trim());
-      const th = Number(rule?.threshold ?? f.threshold.default_threshold) || 0;
-      const rate = parseRupiah(rule?.rate ?? f.threshold.default_rate);
-      const sampleKg = th > 0 ? th * 2 + 1 : 0;
-      const mult = th > 0 ? Math.ceil(sampleKg / th) : 0;
+      const kg = Number(inp.totalKg) || 0;
+      const th = Number(f.threshold.default_threshold) || 0;
+      const rate = parseRupiah(f.threshold.default_rate);
+      const mult = th > 0 ? Math.ceil(kg / th) : 0;
       const fee = mult * rate;
-      const label = rule?.key ?? "(store default)";
-      const steps: ExStep[] = [
-        { text: `Aturan: tiap ${th} kg dihitung 1× (@ ${formatRupiah(rate)})` },
-        { text: `${sampleKg} kg ÷ ${th} = ${th > 0 ? (sampleKg / th).toFixed(2) : "-"} → dibulatkan ke ATAS: ${mult}×` },
-        { text: `${mult} × ${formatRupiah(rate)}`, amount: fee },
-      ];
-      addModifierNotes();
-      return { scenario: `Contoh: store "${label}" total ${sampleKg} kg dalam sehari.`, steps, total: { label: "Fee store hari itu", amount: fee }, notes };
+      modNotes();
+      return {
+        steps: [
+          { text: `${kg} kg ÷ ${th} = ${th > 0 ? (kg / th).toFixed(2) : "-"} → dibulatkan ke atas: ${mult}×` },
+          { text: `${mult} × ${formatRupiah(rate)}`, amount: fee },
+        ],
+        total: { label: "Fee", amount: fee },
+        notes,
+      };
     }
     case "attendance": {
       const env = buildEnvelope("attendance", schemeFor, f);
       const std = Number(f.attendance.standard_hours) || 0;
-      const worked = std > 1 ? std - 1 : std; // kerja kurang 1 jam biar keliatan prorata-nya
-      const res = calcAttendanceScheme(env, [
-        { log_date: "2026-01-01", duration_minutes: Math.round(worked * 60), is_late: false, is_absent: false },
-      ]);
+      const actualMin = Math.round((Number(inp.hours) || 0) * 60);
+      const res = calcAttendanceScheme(env, [{ log_date: "2026-01-01", duration_minutes: actualMin, is_late: inp.isLate, is_absent: false }]);
       const row = res.perRow[0];
       const full = parseRupiah(f.attendance.full_fee);
-      const pct = std > 0 ? Math.round((worked / std) * 100) : 0;
+      const pct = std > 0 ? Math.min(100, Math.round(((Number(inp.hours) || 0) / std) * 100)) : 100;
       const steps: ExStep[] = [
-        { text: "Fee penuh per shift", amount: full },
-        { text: `Kerja ${worked} dari ${std} jam (${pct}%) → fee dasar`, amount: row?.base ?? 0 },
+        { text: `Fee penuh per shift`, amount: full },
+        { text: `Kerja ${inp.hours} dari ${std} jam (${pct}%) → fee dasar`, amount: row?.base ?? 0 },
       ];
       if ((row?.overtime ?? 0) > 0) steps.push({ text: "Lembur", amount: row.overtime });
-      f.attendance.incentives
-        .filter((c) => c.label.trim())
-        .forEach((c) => {
-          const amt = parseRupiah(c.amount);
-          steps.push({ text: `+ ${c.label} ${c.condition === "always" ? "(selalu)" : "(status ONTIME ✓)"}`, amount: amt });
-        });
-      notes.push('Kalau statusnya LATE, insentif bersyarat "ONTIME" jadi Rp0 (biner, tidak setengah).');
-      return { scenario: `Contoh: 1 hari kerja ${worked} jam, status ONTIME.`, steps, total: { label: "Fee hari itu", amount: row?.fee ?? 0 }, notes };
+      f.attendance.incentives.filter((c) => c.label.trim()).forEach((c) => {
+        const amt = parseRupiah(c.amount);
+        const cair = c.condition === "always" || (c.condition === "ontime_only" && !inp.isLate);
+        steps.push({ text: `+ ${c.label} ${c.condition === "always" ? "(selalu)" : inp.isLate ? "(LATE — tidak cair)" : "(ONTIME ✓)"}`, amount: cair ? amt : 0 });
+      });
+      return { steps, total: { label: "Fee hari itu", amount: row?.fee ?? 0 }, notes };
     }
+    case "combined": {
+      const std = Number(f.combined.standard_hours) || 0;
+      const fullFee = parseRupiah(f.combined.daily_fee);
+      const proportion = std > 0 ? Math.min(1, (Number(inp.hours) || 0) / std) : ((Number(inp.hours) || 0) > 0 ? 1 : 0);
+      const daily_base = Math.round(fullFee * proportion);
+      const bonus = !inp.isLate ? parseRupiah(f.combined.ontime_bonus) : 0;
+      const unit = f.combined.order_by === "weight" ? "kg" : "km";
+      const steps: ExStep[] = [
+        { text: `Fee harian (${inp.hours} dari ${std} jam)`, amount: daily_base },
+        { text: `Bonus ontime${inp.isLate ? " (LATE — tidak cair)" : ""}`, amount: bonus },
+      ];
+      let orderTotal = 0;
+      inp.orders.forEach((o, i) => {
+        const { total: fee } = stepTierBreakdown(f.combined.order_tier, Number(o.val) || 0, unit);
+        steps.push({ text: `Kiriman ${i + 1}: ${o.val || 0} ${unit}`, amount: fee });
+        orderTotal += fee;
+      });
+      if (inp.orders.length > 1) notes.push(`${inp.orders.length} kiriman — daily fee tetap 1× per hari.`);
+      notes.push("Daily fee & bonus ontime diambil dari data absensi saat hitung real.");
+      return { steps, total: { label: "Total hari itu", amount: daily_base + bonus + orderTotal }, notes };
+    }
+    default:
+      return { steps: [], total: { label: "Total", amount: 0 }, notes: [] };
   }
-  return null;
+}
+
+function InteractiveCalc({ calcType, f, schemeFor }: { calcType: PricingCalcType; f: FormState; schemeFor: SchemeFor }) {
+  const [inp, setInp] = useState<CalcInputs>(() => defaultCalcInputs(calcType, f));
+  useEffect(() => { setInp(defaultCalcInputs(calcType, f)); }, [calcType]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const p = (patch: Partial<CalcInputs>) => setInp((prev) => ({ ...prev, ...patch }));
+  const result = useMemo(() => computeInteractive(calcType, f, schemeFor, inp), [calcType, f, schemeFor, inp]);
+  const orderUnit = f.combined.order_by === "weight" ? "kg" : "km";
+
+  return (
+    <div className="rounded-lg border border-primary-border/60 bg-primary-soft/40 px-4 py-3.5 mt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Calculator className="w-4 h-4 text-primary" />
+        <p className="text-xs font-semibold text-primary-soft-foreground">Kalkulator</p>
+        <span className="text-[10px] text-muted-foreground">(ubah input → hasil update otomatis)</span>
+      </div>
+
+      {/* ── Inputs per tipe ── */}
+      <div className="mb-3.5 space-y-2">
+        {calcType === "flat_unit" && (
+          <div className="flex flex-wrap gap-3 items-end">
+            {f.flatUnit.rate_by === "column" && f.flatUnit.rates.some((r) => r.key.trim()) && (
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{f.flatUnit.match_column || "Area"}</span>
+                <select value={inp.area} onChange={(e) => p({ area: e.target.value })}
+                  className="text-xs rounded border border-border bg-card px-2 py-1.5">
+                  {f.flatUnit.rates.filter((r) => r.key.trim()).map((r, i) => <option key={i} value={r.key}>{r.key}</option>)}
+                  <option value="">lainnya (default)</option>
+                </select>
+              </div>
+            )}
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">{f.flatUnit.unit === "unique_address" ? "Jumlah alamat unik" : "Jumlah kiriman"}</span>
+              <input type="number" min="1" value={inp.units} onChange={(e) => p({ units: e.target.value })}
+                className="w-20 text-xs rounded border border-border bg-card px-2 py-1.5" />
+            </div>
+          </div>
+        )}
+
+        {(calcType === "tier" || calcType === "tier_daily") && (
+          <div className="flex flex-wrap gap-3">
+            {f.tier.distanceOn && (
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{calcType === "tier_daily" ? "Total jarak hari ini (km)" : "Jarak (km)"}</span>
+                <input type="number" min="0" step="0.1" value={inp.distance} onChange={(e) => p({ distance: e.target.value })}
+                  className="w-24 text-xs rounded border border-border bg-card px-2 py-1.5" />
+              </div>
+            )}
+            {f.tier.weightOn && (
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{calcType === "tier_daily" ? "Total berat hari ini (kg)" : "Berat (kg)"}</span>
+                <input type="number" min="0" step="0.1" value={inp.weight} onChange={(e) => p({ weight: e.target.value })}
+                  className="w-24 text-xs rounded border border-border bg-card px-2 py-1.5" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {calcType === "threshold_multiple" && (
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-muted-foreground">Total berat (kg)</span>
+            <input type="number" min="0" step="0.1" value={inp.totalKg} onChange={(e) => p({ totalKg: e.target.value })}
+              className="w-28 text-xs rounded border border-border bg-card px-2 py-1.5" />
+          </div>
+        )}
+
+        {(calcType === "attendance" || calcType === "combined") && (
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">Jam kerja</span>
+              <input type="number" min="0" step="0.5" value={inp.hours} onChange={(e) => p({ hours: e.target.value })}
+                className="w-20 text-xs rounded border border-border bg-card px-2 py-1.5" />
+            </div>
+            <div className="flex gap-1 pb-0.5">
+              {([{ v: false, l: "Ontime" }, { v: true, l: "Late" }] as const).map((opt) => (
+                <button key={String(opt.v)} type="button" onClick={() => p({ isLate: opt.v })}
+                  className={"text-xs px-2.5 py-1.5 rounded border transition-colors " +
+                    (inp.isLate === opt.v ? "bg-primary-soft border-primary-border text-primary-soft-foreground font-medium" : "bg-card border-border text-muted-foreground hover:bg-muted")}>
+                  {opt.l}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {calcType === "combined" && (
+          <div>
+            <p className="text-[11px] text-muted-foreground mb-1">Kiriman ({orderUnit} masing-masing)</p>
+            <div className="space-y-1.5">
+              {inp.orders.map((o, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground w-14">Order {i + 1}</span>
+                  <input type="number" min="0" step="0.1" value={o.val}
+                    onChange={(e) => p({ orders: inp.orders.map((x, idx) => idx === i ? { val: e.target.value } : x) })}
+                    className="w-24 text-xs rounded border border-border bg-card px-2 py-1.5" />
+                  <span className="text-[11px] text-muted-foreground">{orderUnit}</span>
+                  {inp.orders.length > 1 && (
+                    <button type="button" onClick={() => p({ orders: inp.orders.filter((_, idx) => idx !== i) })}
+                      className="text-muted-foreground hover:text-destructive"><Trash2 className="w-3 h-3" /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={() => p({ orders: [...inp.orders, { val: inp.orders[0]?.val ?? "5" }] })}
+              className="mt-1.5 text-[11px] text-primary flex items-center gap-1 hover:underline">
+              <Plus className="w-3 h-3" /> Tambah kiriman
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Result ── */}
+      <div className="border-t border-primary-border/40 pt-2.5 space-y-1">
+        {result.steps.map((s, i) => (
+          <div key={i} className="flex items-baseline justify-between gap-3 text-xs">
+            <span className="text-muted-foreground">{s.text}</span>
+            {s.amount !== undefined && <span className="font-medium tabular-nums whitespace-nowrap">{formatRupiah(s.amount)}</span>}
+          </div>
+        ))}
+        <div className="flex items-center justify-between gap-3 mt-2 pt-2 border-t border-primary-border/50">
+          <span className="text-xs font-semibold">{result.total.label}</span>
+          <span className="text-base font-bold text-primary tabular-nums">{formatRupiah(result.total.amount)}</span>
+        </div>
+        {result.notes.length > 0 && (
+          <ul className="mt-2 space-y-0.5">
+            {result.notes.map((n, i) => (
+              <li key={i} className="text-[11px] text-muted-foreground flex gap-1.5">
+                <span className="text-primary flex-shrink-0">•</span><span>{n}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // -------------------- load envelope -> state (best-effort saat edit) --------------------
@@ -395,6 +578,14 @@ function loadForm(scheme: PricingScheme | undefined): { form: FormState; calcTyp
       overtime_rate_per_hour: String(c.overtime?.rate_per_hour ?? "0"),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       incentives: (c.incentives ?? []).map((x: any) => ({ label: x.label ?? "", amount: String(x.amount ?? ""), condition: x.condition === "ontime_only" ? "ontime_only" : "always" })),
+    };
+  } else if (type === "combined") {
+    form.combined = {
+      daily_fee: String(c.full_fee ?? ""),
+      standard_hours: String((Number(c.standard_minutes) || 0) / 60 || ""),
+      ontime_bonus: String(c.ontime_bonus ?? "0"),
+      order_by: c.order_by === "weight" ? "weight" : "distance",
+      order_tier: stepTierToState(c.order_tier),
     };
   }
 
@@ -620,9 +811,6 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
     }
   };
 
-  // contoh perhitungan otomatis (live, pakai mesin asli)
-  const example = useMemo(() => buildExample(calcType, f, schemeFor), [calcType, f, schemeFor]);
-
   return (
     <AdminLayout
       title={mode === "create" ? "Tambah Skema Pricing" : "Edit Skema Pricing"}
@@ -637,7 +825,7 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
       </button>
 
       {/* Info card */}
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+      <div className="rounded-xl border border-border bg-card p-5 mb-4 shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div className="flex flex-col gap-1.5">
             <FieldLabel>Nama Skema <span className="font-normal text-muted-foreground">(opsional)</span></FieldLabel>
@@ -691,8 +879,8 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
       </div>
 
       {/* Type chooser + dynamic params */}
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
-        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-3">Pilih tipe kalkulasi</p>
+      <div className="rounded-xl border border-border bg-card p-5 mb-4 shadow-sm">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest mb-3">Pilih tipe kalkulasi</p>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
           {PRICING_TYPES.map((t) => {
             const Icon = ICONS[t.icon as keyof typeof ICONS] ?? MapPin;
@@ -703,8 +891,10 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
                 type="button"
                 onClick={() => setCalcType(t.key)}
                 className={
-                  "text-left rounded-md px-3 py-2.5 flex flex-col gap-0.5 transition-colors border " +
-                  (active ? "border-2 border-primary bg-primary-soft" : "border-border hover:border-primary-border hover:bg-primary-soft/40")
+                  "text-left rounded-lg px-3 py-3 flex flex-col gap-1 transition-all duration-150 border " +
+                  (active
+                    ? "border-2 border-primary bg-primary-soft shadow-sm shadow-primary/10"
+                    : "border-border hover:border-primary-border/60 hover:bg-primary-soft/20 hover:shadow-sm")
                 }
               >
                 <Icon className="w-4 h-4 text-primary" />
@@ -721,10 +911,15 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
           <p className="text-xs text-primary-soft-foreground leading-relaxed">{activeType.callout}</p>
         </div>
 
-        <p className="text-sm font-medium pb-2 mb-3 border-b border-border flex items-center gap-2">
-          <ActiveIcon className="w-4 h-4 text-primary" />
-          Parameter: {activeType.name.toLowerCase()}
-        </p>
+        <div className="flex items-center gap-2 mb-4 mt-1">
+          <div className="w-6 h-6 rounded-md bg-primary-soft grid place-items-center flex-shrink-0">
+            <ActiveIcon className="w-3.5 h-3.5 text-primary" />
+          </div>
+          <span className="text-[13px] font-semibold tracking-tight" style={{fontFamily:"'Plus Jakarta Sans',sans-serif"}}>
+            Parameter: <span className="text-muted-foreground font-medium">{activeType.name.toLowerCase()}</span>
+          </span>
+          <div className="flex-1 h-px bg-border ml-1" />
+        </div>
 
         {/* ===== FLAT UNIT ===== */}
         {calcType === "flat_unit" && (
@@ -941,46 +1136,64 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
           </div>
         )}
 
-        {/* Contoh perhitungan otomatis */}
-        {example && (
-          <div className="rounded-lg border border-primary-border/60 bg-primary-soft/40 px-4 py-3.5 mt-4">
-            <div className="flex items-center gap-2 mb-1.5">
-              <Calculator className="w-4 h-4 text-primary" />
-              <p className="text-xs font-semibold text-primary-soft-foreground">Contoh Perhitungan</p>
-              <span className="text-[10px] text-muted-foreground">(otomatis dari angka di atas)</span>
+        {/* ===== COMBINED ===== */}
+        {calcType === "combined" && (
+          <div className="space-y-4">
+            <div className="rounded-md border border-primary-border bg-primary-soft px-3.5 py-2.5 text-xs text-primary-soft-foreground">
+              Tiga komponen: <strong>fee harian</strong> (proporsional jam kerja dari absensi) + <strong>bonus ontime</strong> (kalau tidak terlambat) + <strong>fee per kiriman</strong> berdasarkan {f.combined.order_by === "weight" ? "berat (kg)" : "jarak (km)"} berjenjang.
             </div>
-            <p className="text-[11px] text-muted-foreground mb-2.5">{example.scenario}</p>
-            <div className="space-y-1">
-              {example.steps.map((s, i) => (
-                <div key={i} className="flex items-baseline justify-between gap-3 text-xs">
-                  <span className="text-muted-foreground">{s.text}</span>
-                  {s.amount !== undefined && (
-                    <span className="font-medium tabular-nums whitespace-nowrap">{formatRupiah(s.amount)}</span>
-                  )}
+
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2">Komponen Harian (dari data absensi)</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <FieldLabel>Fee Penuh per Hari (Rp)</FieldLabel>
+                  <RupiahInput value={f.combined.daily_fee} onChange={(v) => patch({ combined: { ...f.combined, daily_fee: v } })} />
                 </div>
-              ))}
+                <div className="flex flex-col gap-1.5">
+                  <FieldLabel>Jam Standar per Shift</FieldLabel>
+                  <TextInput type="number" value={f.combined.standard_hours} onChange={(e) => patch({ combined: { ...f.combined, standard_hours: e.target.value } })} placeholder="8" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <FieldLabel>Bonus Ontime (Rp)</FieldLabel>
+                  <RupiahInput value={f.combined.ontime_bonus} onChange={(v) => patch({ combined: { ...f.combined, ontime_bonus: v } })} />
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1.5">Fee harian proporsional jam kerja. Bonus ontime cair kalau rider tidak terlambat. Kalau tidak ada data absensi hari itu, kedua komponen ini = Rp0.</p>
             </div>
-            <div className="flex items-center justify-between gap-3 mt-2.5 pt-2.5 border-t border-primary-border/50">
-              <span className="text-xs font-semibold">{example.total.label}</span>
-              <span className="text-base font-bold text-primary tabular-nums">{formatRupiah(example.total.amount)}</span>
-            </div>
-            {example.notes.length > 0 && (
-              <ul className="mt-2.5 space-y-1">
-                {example.notes.map((n, i) => (
-                  <li key={i} className="text-[11px] text-muted-foreground flex gap-1.5">
-                    <span className="text-primary flex-shrink-0">•</span>
-                    <span>{n}</span>
-                  </li>
+
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2">Komponen Per Kiriman (dari data pengiriman)</p>
+              <div className="flex gap-1.5 mb-3">
+                {([{ k: "distance", l: "Jarak (km)" }, { k: "weight", l: "Berat (kg)" }] as const).map((t) => (
+                  <button
+                    key={t.k}
+                    type="button"
+                    onClick={() => patch({ combined: { ...f.combined, order_by: t.k } })}
+                    className={
+                      "text-xs px-3 py-1.5 rounded-md border transition-colors " +
+                      (f.combined.order_by === t.k ? "bg-primary-soft text-primary-soft-foreground border-primary-border font-medium" : "bg-card border-border text-muted-foreground hover:bg-muted")
+                    }
+                  >
+                    {t.l}
+                  </button>
                 ))}
-              </ul>
-            )}
+              </div>
+              <StepTierEditor
+                unit={f.combined.order_by === "weight" ? "kg" : "km"}
+                value={f.combined.order_tier}
+                onChange={(v) => patch({ combined: { ...f.combined, order_tier: v } })}
+              />
+            </div>
           </div>
         )}
+
+        <InteractiveCalc calcType={calcType} f={f} schemeFor={schemeFor} />
       </div>
 
       {/* ===== MODIFIERS ===== */}
-      <div className="rounded-lg border border-border bg-card p-5 mb-4 space-y-3">
-        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Modifier (opsional)</p>
+      <div className="rounded-xl border border-border bg-card p-5 mb-4 space-y-3 shadow-sm">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">Modifier (opsional)</p>
 
         {(calcType === "flat_unit" || calcType === "threshold_multiple") && (
           <ToggleBlock

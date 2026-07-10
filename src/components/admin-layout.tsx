@@ -50,17 +50,17 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
   return (
     <div className="flex min-h-screen w-full bg-background">
       {/* Sidebar desktop */}
-      <aside className="hidden lg:flex w-60 flex-col border-r border-border bg-sidebar">
-        <div className="flex items-center gap-2 px-5 py-4 border-b border-border">
-          <div className="w-8 h-8 rounded-md bg-primary text-primary-foreground grid place-items-center font-bold text-sm">
+      <aside className="hidden lg:flex w-60 flex-col border-r border-border bg-sidebar shadow-[1px_0_0_0_var(--color-border)]">
+        <div className="flex items-center gap-3 px-5 py-[18px] border-b border-border">
+          <div className="w-8 h-8 rounded-lg bg-primary text-primary-foreground grid place-items-center text-sm font-black tracking-tight shadow-sm select-none" style={{fontFamily:"'Plus Jakarta Sans',sans-serif"}}>
             D
           </div>
           <div>
-            <div className="text-sm font-semibold leading-tight">DASH Payroll</div>
-            <div className="text-[11px] text-muted-foreground">PT. Dash Elektrik</div>
+            <div className="text-[13px] font-bold leading-tight tracking-tight" style={{fontFamily:"'Plus Jakarta Sans',sans-serif"}}>DASH Payroll</div>
+            <div className="text-[10px] text-muted-foreground tracking-widest uppercase mt-0.5">PT. Dash Elektrik</div>
           </div>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
+        <nav className="flex-1 px-2.5 py-3 space-y-0.5">
           {NAV.map((it) => {
             const Icon = it.icon;
             const active = pathname === it.to || pathname.startsWith(it.to + "/");
@@ -69,34 +69,35 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
                 key={it.to}
                 to={it.to}
                 className={
-                  "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors " +
+                  "flex items-center gap-2.5 px-3 py-[7px] rounded-md text-[13px] transition-all duration-150 " +
                   (active
-                    ? "bg-primary-soft text-primary-soft-foreground font-medium"
-                    : "text-foreground/80 hover:bg-muted hover:text-foreground")
+                    ? "bg-primary-soft text-primary-soft-foreground font-semibold shadow-sm"
+                    : "text-foreground/65 hover:bg-muted/80 hover:text-foreground")
                 }
               >
-                <Icon className="w-4 h-4" />
+                {active && <span className="absolute left-2.5 w-0.5 h-4 bg-primary rounded-full" style={{position:"relative",marginRight:"-2px",flexShrink:0}} />}
+                <Icon className={`w-4 h-4 flex-shrink-0 ${active ? "text-primary" : ""}`} />
                 <span>{it.label}</span>
               </Link>
             );
           })}
         </nav>
         <div className="border-t border-border p-3">
-          <div className="flex items-center gap-2 px-2 py-2">
-            <div className="w-8 h-8 rounded-full bg-primary-soft text-primary-soft-foreground grid place-items-center text-xs font-semibold">
+          <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-muted/60 transition-colors">
+            <div className="w-7 h-7 rounded-full bg-primary text-primary-foreground grid place-items-center text-[11px] font-bold flex-shrink-0">
               {user?.fullName?.charAt(0) ?? "A"}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium truncate">{user?.fullName}</div>
-              <div className="text-[11px] text-muted-foreground truncate">Admin</div>
+              <div className="text-[12px] font-semibold truncate leading-tight">{user?.fullName ?? "Admin"}</div>
+              <div className="text-[10px] text-muted-foreground truncate">Administrator</div>
             </div>
             <button
               onClick={handleLogout}
-              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"
+              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-destructive transition-colors"
               title="Logout"
               aria-label="Logout"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -146,7 +147,7 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
       )}
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 border-b border-border bg-card flex items-center px-4 lg:px-8 gap-3">
+        <header className="sticky top-0 z-10 h-14 border-b border-border bg-card/85 backdrop-blur-md flex items-center px-4 lg:px-8 gap-3">
           <button
             className="lg:hidden p-1.5 -ml-1 rounded-md hover:bg-muted"
             onClick={() => setMobileOpen(true)}
@@ -154,9 +155,9 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
           >
             <Menu className="w-5 h-5" />
           </button>
-          <div className="min-w-0">
-            <h1 className="text-base font-semibold leading-tight truncate">{title}</h1>
-            {subtitle && <p className="text-xs text-muted-foreground truncate">{subtitle}</p>}
+          <div className="min-w-0 flex-1">
+            <h1 className="text-[15px] font-bold leading-tight truncate tracking-tight" style={{fontFamily:"'Plus Jakarta Sans',sans-serif"}}>{title}</h1>
+            {subtitle && <p className="text-[11px] text-muted-foreground truncate mt-0.5">{subtitle}</p>}
           </div>
         </header>
         <main className="flex-1 px-4 lg:px-8 py-6 overflow-x-hidden">{children}</main>

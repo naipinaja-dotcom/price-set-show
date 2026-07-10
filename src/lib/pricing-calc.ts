@@ -332,6 +332,157 @@ export interface AttendanceCalcResult {
   warnings: string[];
 }
 
+export interface CombinedRiderLine {
+  rider: string;
+  daysWorked: number;
+  units: number;
+  daily_base: number;
+  ontime_bonus: number;
+  per_order: number;
+  total: number;
+}
+
+export interface CombinedCalcResult {
+  perRow: RowFee[];
+  perRider: CombinedRiderLine[];
+  subtotal: number;
+  completedRows: number;
+  skippedRows: number;
+  skippedPerRider: SkippedRiderLine[];
+  warnings: string[];
+  anomalies: RowAnomaly[];
+}
+
+export function calcCombinedScheme(
+  env: PricingEnvelope,
+  deliveries: DeliveryRow[],
+  attendanceLogs: AttendanceLogRow[],
+): CombinedCalcResult {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cfg = env.config as any;
+  const fullFee = Number(cfg.full_fee) || 0;
+  const standardMin = Number(cfg.standard_minutes) || 0;
+  const ontimeBonus = Number(cfg.ontime_bonus) || 0;
+  const orderBy: "distance" | "weight" = cfg.order_by === "weight" ? "weight" : "distance";
+  const orderTier = cfg.order_tier ?? null;
+
+  const warnings: string[] = [];
+
+  // attendance lookup: riderKey+date -> log
+  const attMap = new Map<string, AttendanceLogRow>();
+  for (const log of attendanceLogs) {
+    const k = (log.rider_id || log.driver_code || "") + "|" + log.log_date;
+    attMap.set(k, log);
+  }
+
+  const completed = deliveries.filter(isCompleted);
+  const skipped = deliveries.length - completed.length;
+
+  const skipMap = new Map<string, SkippedRiderLine>();
+  for (const r of deliveries) {
+    if (isCompleted(r)) continue;
+    const k = riderKey(r);
+    const line = skipMap.get(k) ?? { rider: k, count: 0, statuses: {} };
+    line.count++;
+    const st = String(r.status ?? "").trim().toUpperCase() || "(KOSONG)";
+    line.statuses[st] = (line.statuses[st] ?? 0) + 1;
+    skipMap.set(k, line);
+  }
+  const skippedPerRider = [...skipMap.values()].sort((a, b) => b.count - a.count);
+
+  const idxOf = new Map<DeliveryRow, number>();
+  completed.forEach((r, i) => idxOf.set(r, i));
+
+  // per-order fee per row
+  const perOrderByRow = completed.map((r) => {
+    const val = orderBy === "weight" ? (r.weight_kg ?? 0) : (r.distance_km ?? 0);
+    return stepTierFee(orderTier, val);
+  });
+
+  // daily fee per rider+day
+  const byRider = groupBy(completed, riderKey);
+  const dailyMap = new Map<string, { daily_base: number; ontime_bonus: number }>();
+  for (const [rider, rrows] of byRider) {
+    const byDay = groupBy(rrows, (r) => r.delivery_date);
+    for (const [date] of byDay) {
+      const log = attMap.get(rider + "|" + date);
+      let daily_base = 0;
+      let bonus = 0;
+      if (log && !log.is_absent) {
+        const actualMin = Number(log.duration_minutes) || 0;
+        const proportion = standardMin > 0 ? Math.min(1, actualMin / standardMin) : (actualMin > 0 ? 1 : 0);
+        daily_base = Math.round(fullFee * proportion);
+        if (!log.is_late) bonus = ontimeBonus;
+      }
+      dailyMap.set(rider + "|" + date, { daily_base, ontime_bonus: bonus });
+    }
+  }
+
+  // allocate daily fee across deliveries of that day (proportional by distance/weight)
+  const dailyAllocByRow = new Array(completed.length).fill(0);
+  for (const [rider, rrows] of byRider) {
+    const byDay = groupBy(rrows, (r) => r.delivery_date);
+    for (const [date, drows] of byDay) {
+      const day = dailyMap.get(rider + "|" + date);
+      const totalDaily = (day?.daily_base ?? 0) + (day?.ontime_bonus ?? 0);
+      const rawWeights = drows.map((r) => orderBy === "weight" ? (Number(r.weight_kg) || 0) : (Number(r.distance_km) || 0));
+      const weights = rawWeights.some((w) => w > 0) ? rawWeights : drows.map(() => 1);
+      const parts = allocInt(totalDaily, weights);
+      drows.forEach((r, i) => (dailyAllocByRow[idxOf.get(r)!] = parts[i]));
+    }
+  }
+
+  const perRow: RowFee[] = completed.map((r, i) => ({
+    id: r.id ?? null,
+    rider: riderKey(r),
+    date: r.delivery_date,
+    base: perOrderByRow[i] + dailyAllocByRow[i],
+    add_kg: 0,
+    multi_drop: 0,
+    fee: perOrderByRow[i] + dailyAllocByRow[i],
+  }));
+
+  const anomalies: RowAnomaly[] = [];
+  completed.forEach((r, i) => {
+    if (orderBy === "distance" && (!r.distance_km || Number(r.distance_km) === 0))
+      anomalies.push({ rider: riderKey(r), date: r.delivery_date, awb: r.awb, kind: "zero_distance_paid", detail: "Jarak 0/kosong padahal skema pakai jarak" });
+    if (orderBy === "weight" && (r.weight_kg === null || r.weight_kg === undefined))
+      anomalies.push({ rider: riderKey(r), date: r.delivery_date, awb: r.awb, kind: "missing_weight", detail: "Berat kosong padahal skema pakai berat" });
+    if (perRow[i].fee === 0)
+      anomalies.push({ rider: riderKey(r), date: r.delivery_date, awb: r.awb, kind: "zero_fee", detail: "Fee 0 — cek data jarak/berat & tarif" });
+  });
+
+  // perRider summary (breakdown 3 komponen)
+  const riderSummary = new Map<string, CombinedRiderLine>();
+  for (const [rider, rrows] of byRider) {
+    const byDay = groupBy(rrows, (r) => r.delivery_date);
+    let daily_base_total = 0;
+    let ontime_bonus_total = 0;
+    for (const [date] of byDay) {
+      const d = dailyMap.get(rider + "|" + date);
+      daily_base_total += d?.daily_base ?? 0;
+      ontime_bonus_total += d?.ontime_bonus ?? 0;
+    }
+    const per_order_total = rrows.reduce((s, r) => s + perOrderByRow[idxOf.get(r)!], 0);
+    riderSummary.set(rider, {
+      rider,
+      daysWorked: byDay.size,
+      units: rrows.length,
+      daily_base: daily_base_total,
+      ontime_bonus: ontime_bonus_total,
+      per_order: per_order_total,
+      total: daily_base_total + ontime_bonus_total + per_order_total,
+    });
+  }
+  const perRider = [...riderSummary.values()].sort((a, b) => b.total - a.total);
+  const subtotal = perRider.reduce((s, r) => s + r.total, 0);
+
+  if (skipped > 0) warnings.push(`${skipped} baris di-skip (status bukan COMPLETED).`);
+  if (attendanceLogs.length === 0) warnings.push("Tidak ada data absensi — daily fee & bonus ontime tidak dihitung.");
+
+  return { perRow, perRider, subtotal, completedRows: completed.length, skippedRows: skipped, skippedPerRider, warnings, anomalies };
+}
+
 export function calcAttendanceScheme(env: PricingEnvelope, logs: AttendanceLogRow[]): AttendanceCalcResult {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cfg = env.config as any;

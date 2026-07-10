@@ -48,8 +48,8 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.99 0.003 280);
-  --foreground: oklch(0.22 0.04 280);
+  --background: oklch(0.962 0.006 280);
+  --foreground: oklch(0.20 0.04 280);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.22 0.04 280);
   --popover: oklch(1 0 0);
@@ -79,8 +79,8 @@
   --border-strong: oklch(0.85 0.012 280);
   --input: oklch(0.92 0.008 280);
   --ring: oklch(0.54 0.24 295);
-  --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.22 0.04 280);
+  --sidebar: oklch(0.99 0.012 285);
+  --sidebar-foreground: oklch(0.20 0.04 280);
   --sidebar-primary: oklch(0.54 0.24 295);
   --sidebar-primary-foreground: oklch(0.99 0 0);
   --sidebar-accent: oklch(0.96 0.025 290);
@@ -134,6 +134,14 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    font-family: 'Inter', system-ui, sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, [data-display] {
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+    font-feature-settings: normal;
   }
 }

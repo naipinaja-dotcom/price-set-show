@@ -3,7 +3,8 @@ export type PricingCalcType =
   | "tier"
   | "tier_daily"
   | "threshold_multiple"
-  | "attendance";
+  | "attendance"
+  | "combined";
 
 export type SchemeFor = "rider" | "client";
 
@@ -55,6 +56,14 @@ export const PRICING_TYPES: PricingTypeOption[] = [
     icon: "CalendarDays",
     callout:
       "Bukan berdasarkan kiriman. Ada base fee harian + komponen tambahan (dinamai sendiri), sebagian bisa conditional. Fase terpisah — kriteria conditional belum final.",
+  },
+  {
+    key: "combined",
+    name: "Combined (Daily + Per Order)",
+    desc: "Harian + ontime + per km/kg",
+    icon: "Layers",
+    callout:
+      "Rider dapat tiga komponen: (1) fee harian proporsional jam kerja dari data absensi, (2) bonus ontime kalau tidak terlambat, (3) fee per kiriman berdasarkan jarak (km) atau berat (kg) berjenjang.",
   },
 ];
 

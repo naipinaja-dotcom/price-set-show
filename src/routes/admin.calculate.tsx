@@ -7,7 +7,7 @@ import { usePagination } from "@/lib/use-pagination";
 import { listPricingSchemes } from "@/lib/pricing-store";
 import type { PricingScheme } from "@/lib/pricing-types";
 import { PRICING_TYPES } from "@/lib/pricing-types";
-import { calcScheme, type DeliveryRow, type CalcResult, calcAttendanceScheme, type AttendanceLogRow, type AttendanceCalcResult } from "@/lib/pricing-calc";
+import { calcScheme, type DeliveryRow, type CalcResult, calcAttendanceScheme, type AttendanceLogRow, type AttendanceCalcResult, calcCombinedScheme, type CombinedCalcResult } from "@/lib/pricing-calc";
 import { formatRupiah } from "@/lib/format";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
@@ -36,10 +36,12 @@ function CalculatePage() {
   const [committing, setCommitting] = useState(false);
   const [result, setResult] = useState<CalcResult | null>(null);
   const [attResult, setAttResult] = useState<AttendanceCalcResult | null>(null);
+  const [combinedResult, setCombinedResult] = useState<CombinedCalcResult | null>(null);
   const [riderNames, setRiderNames] = useState<Record<string, string>>({});
   const [ranScheme, setRanScheme] = useState<PricingScheme | null>(null);
   const deliveryPager = usePagination(result?.perRider ?? [], 20);
   const attPager = usePagination(attResult?.perRider ?? [], 20);
+  const combinedPager = usePagination(combinedResult?.perRider ?? [], 20);
 
   useEffect(() => {
     supabase.from("clients").select("id, name").order("name").then(({ data }) => setClients(data ?? []));
@@ -64,8 +66,54 @@ function CalculatePage() {
     setRunning(true);
     setResult(null);
     setAttResult(null);
+    setCombinedResult(null);
     try {
-      if (scheme.calc_type === "attendance") {
+      if (scheme.calc_type === "combined") {
+        // Fetch delivery records
+        let dq = supabase
+          .from("delivery_records")
+          .select("id, rider_id, driver_code, delivery_date, awb, district, distance_km, weight_kg, destination_address, service_type, status, delivery_type")
+          .gte("delivery_date", from)
+          .lte("delivery_date", to);
+        if (clientId) dq = dq.eq("client_id", clientId);
+        const { data: deliveryData, error: deliveryErr } = await dq;
+        if (deliveryErr) throw deliveryErr;
+
+        // Fetch attendance logs for same range
+        let aq = (supabase as any)
+          .from("attendance_logs")
+          .select("id, rider_id, driver_code, log_date, duration_minutes, is_late, is_absent")
+          .gte("log_date", from)
+          .lte("log_date", to);
+        if (clientId) aq = aq.eq("client_id", clientId);
+        const { data: attData, error: attErr } = await aq;
+        if (attErr) throw attErr;
+
+        const deliveryRows = (deliveryData ?? []) as unknown as DeliveryRow[];
+        const attRows = (attData ?? []) as AttendanceLogRow[];
+        if (deliveryRows.length === 0) toast.message("Tidak ada data pengiriman di rentang & client ini.");
+        if (attRows.length === 0) toast.message("Tidak ada data absensi — daily fee & bonus ontime tidak dihitung.");
+
+        const riderIds = [...new Set([
+          ...deliveryRows.map((r) => r.rider_id),
+          ...attRows.map((r) => r.rider_id),
+        ].filter((id): id is string => Boolean(id)))];
+        let riderMap: Record<string, { full_name: string; employee_id: string }> = {};
+        if (riderIds.length > 0) {
+          const { data: riderData } = await supabase.from("riders").select("id, full_name, employee_id").in("id", riderIds);
+          riderMap = Object.fromEntries((riderData ?? []).map((r) => [r.id, { full_name: r.full_name, employee_id: r.employee_id }]));
+        }
+        const names: Record<string, string> = {};
+        for (const r of [...deliveryRows, ...attRows]) {
+          const key = r.rider_id || r.driver_code || "(tanpa rider)";
+          if (!names[key]) names[key] = riderMap[r.rider_id ?? ""]?.full_name || r.driver_code || key;
+        }
+        setRiderNames(names);
+
+        const res = calcCombinedScheme(scheme.params, deliveryRows, attRows);
+        setCombinedResult(res);
+        setRanScheme(scheme);
+      } else if (scheme.calc_type === "attendance") {
         // STEP 1: Fetch semua attendance_logs di rentang tanggal & client ini (tanpa join riders)
         let q = (supabase as any)
           .from("attendance_logs")
@@ -165,7 +213,12 @@ function CalculatePage() {
   const commit = async () => {
     if (!ranScheme || ranScheme.scheme_for !== "rider") return;
     const isAttendance = ranScheme.calc_type === "attendance";
-    const rows = isAttendance ? (attResult?.perRow.filter((r) => r.id) ?? []) : (result?.perRow.filter((r) => r.id) ?? []);
+    const isCombined = ranScheme.calc_type === "combined";
+    const rows = isAttendance
+      ? (attResult?.perRow.filter((r) => r.id) ?? [])
+      : isCombined
+        ? (combinedResult?.perRow.filter((r) => r.id) ?? [])
+        : (result?.perRow.filter((r) => r.id) ?? []);
     if (rows.length === 0) return toast.error("Tidak ada baris untuk disimpan.");
     const table = isAttendance ? "attendance_logs" : "delivery_records";
     if (!(await confirmDialog({ title: "Simpan hasil fee?", description: `Fee akan disimpan ke ${rows.length} baris ${isAttendance ? "absensi" : "pengiriman"}. Angka ini yang akan dipakai Payroll Run.`, confirmText: "Simpan", danger: false }))) return;
@@ -191,7 +244,8 @@ function CalculatePage() {
   const commitInvoice = async () => {
     if (!ranScheme || ranScheme.scheme_for !== "client" || !clientId) return;
     const isAttendance = ranScheme.calc_type === "attendance";
-    const r = isAttendance ? attResult : result;
+    const isCombined = ranScheme.calc_type === "combined";
+    const r = isAttendance ? attResult : isCombined ? combinedResult : result;
     if (!r) return;
     const total = !isAttendance && result?.billing ? result.billing.final : r.subtotal;
     if (!(await confirmDialog({
@@ -403,6 +457,125 @@ function CalculatePage() {
               <div className="flex items-start gap-2 text-xs text-muted-foreground">
                 <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
                 <span>Skema ini <strong>Client (revenue)</strong>. Cek dulu angkanya di atas, lalu <strong>Commit</strong> untuk simpan sebagai invoice periode ini — bisa dilihat & di-export di halaman <strong>Invoices</strong>.</span>
+              </div>
+              <button onClick={commitInvoice} disabled={committing}
+                className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50">
+                {committing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {committing ? "Menyimpan…" : "Commit ke Invoice"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {combinedResult && ranScheme && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <SummaryCard label="Baris dihitung" value={String(combinedResult.completedRows)} />
+            <SummaryCard label="Baris di-skip" value={String(combinedResult.skippedRows)} />
+            <SummaryCard label="Subtotal" value={formatRupiah(combinedResult.subtotal)} />
+            <SummaryCard label="Total Fee Rider" value={formatRupiah(combinedResult.subtotal)} highlight />
+          </div>
+
+          {combinedResult.warnings.length > 0 && (
+            <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 mb-4 flex items-start gap-2.5 text-xs text-warning">
+              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div>{combinedResult.warnings.map((w, i) => <div key={i}>{w}</div>)}</div>
+            </div>
+          )}
+
+          {combinedResult.skippedPerRider.length > 0 && (
+            <div className="rounded-md border border-border bg-card px-3.5 py-2.5 mb-4 text-xs">
+              <div className="flex items-center gap-2 font-medium mb-1.5 text-muted-foreground">
+                <Info className="w-4 h-4 flex-shrink-0" />
+                Rider dengan order belum COMPLETED:
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-0.5">
+                {combinedResult.skippedPerRider.map((s, i) => (
+                  <div key={i} className="flex justify-between gap-3">
+                    <span className="font-medium">{riderNames[s.rider] ?? s.rider}</span>
+                    <span className="text-muted-foreground tabular-nums whitespace-nowrap">
+                      {s.count} order · {Object.entries(s.statuses).map(([st, n]) => `${st} ${n}×`).join(", ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {combinedResult.anomalies.length > 0 && (
+            <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 mb-4 text-xs text-warning">
+              <div className="flex items-center gap-2 font-medium mb-1.5">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" /> {combinedResult.anomalies.length} baris anomali
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-0.5">
+                {combinedResult.anomalies.slice(0, 50).map((a, i) => (
+                  <div key={i} className="font-mono">
+                    {riderNames[a.rider] ?? a.rider} · {a.date}{a.awb ? ` · ${a.awb}` : ""} — {a.detail}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {combinedResult.perRider.length > 0 && (
+            <div className="flex justify-end mb-2"><PageSizeSelect pageSize={combinedPager.pageSize} setPageSize={combinedPager.setPageSize} /></div>
+          )}
+          <div className="rounded-lg border border-border overflow-hidden mb-2">
+            <table className="w-full text-sm">
+              <thead className="bg-muted text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="p-3">Rider</th>
+                  <th className="p-3 text-right">Hari</th>
+                  <th className="p-3 text-right">Kiriman</th>
+                  <th className="p-3 text-right">Daily Fee</th>
+                  <th className="p-3 text-right">Bonus Ontime</th>
+                  <th className="p-3 text-right">Per Kiriman</th>
+                  <th className="p-3 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {combinedResult.perRider.length === 0 ? (
+                  <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">Tidak ada hasil.</td></tr>
+                ) : (
+                  combinedPager.paged.map((l) => (
+                    <tr key={l.rider} className="border-t border-border">
+                      <td className="p-3 font-medium">{riderNames[l.rider] ?? l.rider}</td>
+                      <td className="p-3 text-right text-muted-foreground">{l.daysWorked}</td>
+                      <td className="p-3 text-right text-muted-foreground">{l.units}</td>
+                      <td className="p-3 text-right">{formatRupiah(l.daily_base)}</td>
+                      <td className="p-3 text-right">{l.ontime_bonus ? formatRupiah(l.ontime_bonus) : "—"}</td>
+                      <td className="p-3 text-right">{formatRupiah(l.per_order)}</td>
+                      <td className="p-3 text-right font-semibold">{formatRupiah(l.total)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          {combinedResult.perRider.length > 0 && (
+            <div className="mb-4">
+              <PaginationBar page={combinedPager.page} totalPages={combinedPager.totalPages} setPage={combinedPager.setPage} from={combinedPager.from} to={combinedPager.to} total={combinedPager.total} />
+            </div>
+          )}
+
+          {ranScheme.scheme_for === "rider" ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card px-4 py-3">
+              <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <span>Cek dulu angkanya di atas. Kalau udah bener, <strong>Commit</strong> untuk simpan fee ke data pengiriman — angka ini yang dipungut <strong>Payroll Run</strong>.</span>
+              </div>
+              <button onClick={commit} disabled={committing}
+                className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50">
+                {committing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {committing ? "Menyimpan…" : "Commit ke Payroll"}
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card px-4 py-3">
+              <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <span>Skema ini <strong>Client (revenue)</strong>. Commit untuk simpan sebagai invoice.</span>
               </div>
               <button onClick={commitInvoice} disabled={committing}
                 className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50">
