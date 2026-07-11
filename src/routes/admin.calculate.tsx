@@ -6,8 +6,8 @@ import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
 import { listPricingSchemes } from "@/lib/pricing-store";
 import type { PricingScheme } from "@/lib/pricing-types";
-import { PRICING_TYPES } from "@/lib/pricing-types";
-import { calcScheme, type DeliveryRow, type CalcResult, calcAttendanceScheme, type AttendanceLogRow, type AttendanceCalcResult, calcCombinedScheme, type CombinedCalcResult } from "@/lib/pricing-calc";
+import { pricingLabel } from "@/lib/pricing-types";
+import { calcScheme, type DeliveryRow, type CalcResult, calcAttendanceScheme, type AttendanceLogRow, type AttendanceCalcResult, calcHybridScheme, type CombinedCalcResult } from "@/lib/pricing-calc";
 import { formatRupiah } from "@/lib/format";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
@@ -55,7 +55,6 @@ function CalculatePage() {
     () => schemes.filter((s) => !clientId || s.client_id === clientId || s.client_id === null),
     [schemes, clientId],
   );
-  const typeLabel = (t: string) => PRICING_TYPES.find((x) => x.key === t)?.name ?? t;
 
   const run = async () => {
     const scheme = schemes.find((s) => s.id === schemeId);
@@ -70,7 +69,7 @@ function CalculatePage() {
     setAttResult(null);
     setCombinedResult(null);
     try {
-      if (scheme.calc_type === "combined") {
+      if (scheme.category === "hybrid") {
         // Fetch delivery records
         let dq = supabase
           .from("delivery_records")
@@ -109,10 +108,10 @@ function CalculatePage() {
         }
         setRiderNames(names);
 
-        const res = calcCombinedScheme(scheme.params, deliveryRows, attRows);
+        const res = calcHybridScheme(scheme.params, deliveryRows, attRows);
         setCombinedResult(res);
         setRanScheme(scheme);
-      } else if (scheme.calc_type === "attendance") {
+      } else if (scheme.category === "attendance") {
         // STEP 1: Fetch semua attendance_logs di rentang tanggal & client ini (tanpa join riders)
         let q = (supabase as any)
           .from("attendance_logs")
@@ -183,8 +182,8 @@ function CalculatePage() {
 
   const commit = async () => {
     if (!ranScheme || ranScheme.scheme_for !== "rider") return;
-    const isAttendance = ranScheme.calc_type === "attendance";
-    const isCombined = ranScheme.calc_type === "combined";
+    const isAttendance = ranScheme.category === "attendance";
+    const isCombined = ranScheme.category === "hybrid";
     const rows = isAttendance
       ? (attResult?.perRow.filter((r) => r.id) ?? [])
       : isCombined
@@ -220,8 +219,8 @@ function CalculatePage() {
 
   const commitInvoice = async () => {
     if (!ranScheme || ranScheme.scheme_for !== "client" || !clientId) return;
-    const isAttendance = ranScheme.calc_type === "attendance";
-    const isCombined = ranScheme.calc_type === "combined";
+    const isAttendance = ranScheme.category === "attendance";
+    const isCombined = ranScheme.category === "hybrid";
     const r = isAttendance ? attResult : isCombined ? combinedResult : result;
     if (!r) return;
     const total = !isAttendance && result?.billing ? result.billing.final : r.subtotal;
@@ -237,7 +236,7 @@ function CalculatePage() {
         invoice_date: to,
         period_start: from,
         period_end: to,
-        calculation_type: ranScheme.calc_type,
+        calculation_type: ranScheme.params.type,
         scheme_name: ranScheme.name ?? null,
         base_amount: r.subtotal,
         surcharge_amount: total - r.subtotal,
@@ -277,7 +276,7 @@ function CalculatePage() {
             <option value="">— pilih skema —</option>
             {matchingSchemes.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name} · {s.scheme_for === "client" ? "Client" : "Rider"} · {typeLabel(s.calc_type)}
+                {s.name} · {s.scheme_for === "client" ? "Client" : "Rider"} · {pricingLabel(s.category, s.subtype)}
               </option>
             ))}
           </select>

@@ -127,6 +127,99 @@ function allocInt(total: number, weights: number[]): number[] {
   return floors;
 }
 
+// ---------------- pure components (Kategori 1 — Per Pengiriman) ----------------
+// Terima baris (index-aligned dengan output), kembaliin FEE PER BARIS.
+// Murni: tanpa skip/anomaly/modifier logic — itu tetap tanggung jawab
+// wrapper (calcScheme). Lihat docs/pricing-engine-v2-design.md §5.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function calcFlatComponent(rows: DeliveryRow[], cfg: any): number[] {
+  const out = new Array(rows.length).fill(0);
+  const idxOf = new Map<DeliveryRow, number>();
+  rows.forEach((r, i) => idxOf.set(r, i));
+
+  const byRider = groupBy(rows, riderKey);
+  for (const [, rrows] of byRider) {
+    const seen = new Set<string>();
+    for (const r of rrows) {
+      let rate = 0;
+      let billable = true;
+      if (cfg.unit === "unique_address") {
+        const key = r.delivery_date + "|" + norm(r.destination_address);
+        if (seen.has(key)) billable = false;
+        else seen.add(key);
+      }
+      if (billable) {
+        if (cfg.rate_by === "flat") rate = Number(cfg.flat_rate) || 0;
+        else {
+          const hit = (cfg.rates || []).find((x: { key: string }) => norm(x.key) === norm(resolveField(r, cfg.match_column)));
+          rate = hit ? Number(hit.rate) || 0 : Number(cfg.default_rate) || 0;
+        }
+      }
+      out[idxOf.get(r)!] = rate;
+    }
+  }
+  return out;
+}
+
+// `accumulate: "per_order"` = tarif tier dihitung per baris (dulunya `tier`).
+// `accumulate: "daily"` = jarak/berat 1 rider 1 hari dijumlah dulu, baru
+// dihitung tarifnya lalu dialokasikan ke tiap baris hari itu (dulunya `tier_daily`).
+// Keputusan konsolidasi: docs/pricing-engine-v2-design.md §3 & §9.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function calcTierComponent(rows: DeliveryRow[], cfg: any, accumulate: "daily" | "per_order" = "per_order"): number[] {
+  const out = new Array(rows.length).fill(0);
+  const idxOf = new Map<DeliveryRow, number>();
+  rows.forEach((r, i) => idxOf.set(r, i));
+
+  if (accumulate === "per_order") {
+    rows.forEach((r) => {
+      const d = cfg.distance ? stepTierFee(cfg.distance, r.distance_km ?? 0) : 0;
+      const w = cfg.weight ? stepTierFee(cfg.weight, r.weight_kg ?? 0) : 0;
+      out[idxOf.get(r)!] = d + w;
+    });
+    return out;
+  }
+
+  const byRider = groupBy(rows, riderKey);
+  for (const [, rrows] of byRider) {
+    const byDay = groupBy(rrows, (r) => r.delivery_date);
+    for (const [, drows] of byDay) {
+      const sumKm = drows.reduce((s, r) => s + (Number(r.distance_km) || 0), 0);
+      const sumKg = drows.reduce((s, r) => s + (Number(r.weight_kg) || 0), 0);
+      const dayFee = (cfg.distance ? stepTierFee(cfg.distance, sumKm) : 0) + (cfg.weight ? stepTierFee(cfg.weight, sumKg) : 0);
+      // alokasi ke tiap baris hari itu (proporsional jarak, fallback berat, fallback rata)
+      const weights = drows.map((r) => (cfg.distance ? Number(r.distance_km) || 0 : Number(r.weight_kg) || 0));
+      const parts = allocInt(dayFee, weights);
+      drows.forEach((r, i) => (out[idxOf.get(r)!] = parts[i]));
+    }
+  }
+  return out;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function calcThresholdComponent(rows: DeliveryRow[], cfg: any): number[] {
+  const out = new Array(rows.length).fill(0);
+  const idxOf = new Map<DeliveryRow, number>();
+  rows.forEach((r, i) => idxOf.set(r, i));
+
+  const byRider = groupBy(rows, riderKey);
+  for (const [, rrows] of byRider) {
+    const byStoreDay = groupBy(rrows, (r) => resolveField(r, cfg.group_by) + "||" + r.delivery_date);
+    for (const [, grp] of byStoreDay) {
+      const storeVal = resolveField(grp[0], cfg.group_by);
+      const rule = (cfg.rules || []).find((x: { key: string }) => norm(x.key) === norm(storeVal));
+      const threshold = Number(rule?.threshold ?? cfg.default?.threshold) || 0;
+      const rate = Number(rule?.rate ?? cfg.default?.rate) || 0;
+      const totalKg = grp.reduce((s, r) => s + (Number(r.weight_kg) || 0), 0);
+      const grpFee = threshold > 0 ? Math.ceil(totalKg / threshold) * rate : 0;
+      const parts = allocInt(grpFee, grp.map((r) => Number(r.weight_kg) || 0));
+      grp.forEach((r, i) => (out[idxOf.get(r)!] = parts[i]));
+    }
+  }
+  return out;
+}
+
 // ---------------- main ----------------
 export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResult {
   const warnings: string[] = [];
@@ -149,64 +242,25 @@ export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResul
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cfg = env.config as any;
 
-  // base fee per baris (index-aligned dgn `completed`)
-  const baseByRow = new Array(completed.length).fill(0);
-  const idxOf = new Map<DeliveryRow, number>();
-  completed.forEach((r, i) => idxOf.set(r, i));
-
+  // base fee per baris (index-aligned dgn `completed`) — didelegasikan ke
+  // component murni per sub-tipe (lihat di atas).
   const byRider = groupBy(completed, riderKey);
 
-  for (const [, rrows] of byRider) {
-    if (env.type === "flat_unit") {
-      const seen = new Set<string>();
-      for (const r of rrows) {
-        let rate = 0;
-        let billable = true;
-        if (cfg.unit === "unique_address") {
-          const key = r.delivery_date + "|" + norm(r.destination_address);
-          if (seen.has(key)) billable = false;
-          else seen.add(key);
-        }
-        if (billable) {
-          if (cfg.rate_by === "flat") rate = Number(cfg.flat_rate) || 0;
-          else {
-            const hit = (cfg.rates || []).find((x: { key: string }) => norm(x.key) === norm(resolveField(r, cfg.match_column)));
-            rate = hit ? Number(hit.rate) || 0 : Number(cfg.default_rate) || 0;
-          }
-        }
-        baseByRow[idxOf.get(r)!] = rate;
-      }
-    } else if (env.type === "tier") {
-      for (const r of rrows) {
-        const d = cfg.distance ? stepTierFee(cfg.distance, r.distance_km ?? 0) : 0;
-        const w = cfg.weight ? stepTierFee(cfg.weight, r.weight_kg ?? 0) : 0;
-        baseByRow[idxOf.get(r)!] = d + w;
-      }
-    } else if (env.type === "tier_daily") {
-      const byDay = groupBy(rrows, (r) => r.delivery_date);
-      for (const [, drows] of byDay) {
-        const sumKm = drows.reduce((s, r) => s + (Number(r.distance_km) || 0), 0);
-        const sumKg = drows.reduce((s, r) => s + (Number(r.weight_kg) || 0), 0);
-        const dayFee = (cfg.distance ? stepTierFee(cfg.distance, sumKm) : 0) + (cfg.weight ? stepTierFee(cfg.weight, sumKg) : 0);
-        // alokasi ke tiap baris hari itu (proporsional jarak, fallback berat, fallback rata)
-        const weights = drows.map((r) => (cfg.distance ? Number(r.distance_km) || 0 : Number(r.weight_kg) || 0));
-        const parts = allocInt(dayFee, weights);
-        drows.forEach((r, i) => (baseByRow[idxOf.get(r)!] = parts[i]));
-      }
-    } else if (env.type === "threshold_multiple") {
-      const byStoreDay = groupBy(rrows, (r) => resolveField(r, cfg.group_by) + "||" + r.delivery_date);
-      for (const [, grp] of byStoreDay) {
-        const storeVal = resolveField(grp[0], cfg.group_by);
-        const rule = (cfg.rules || []).find((x: { key: string }) => norm(x.key) === norm(storeVal));
-        const threshold = Number(rule?.threshold ?? cfg.default?.threshold) || 0;
-        const rate = Number(rule?.rate ?? cfg.default?.rate) || 0;
-        const totalKg = grp.reduce((s, r) => s + (Number(r.weight_kg) || 0), 0);
-        const grpFee = threshold > 0 ? Math.ceil(totalKg / threshold) * rate : 0;
-        const parts = allocInt(grpFee, grp.map((r) => Number(r.weight_kg) || 0));
-        grp.forEach((r, i) => (baseByRow[idxOf.get(r)!] = parts[i]));
-      }
-    }
+  let baseByRow: number[];
+  if (env.type === "flat_unit") {
+    baseByRow = calcFlatComponent(completed, cfg);
+  } else if (env.type === "tier") {
+    baseByRow = calcTierComponent(completed, cfg, "per_order");
+  } else if (env.type === "tier_daily") {
+    baseByRow = calcTierComponent(completed, cfg, "daily");
+  } else if (env.type === "threshold_multiple") {
+    baseByRow = calcThresholdComponent(completed, cfg);
+  } else {
+    baseByRow = new Array(completed.length).fill(0);
   }
+
+  const idxOf = new Map<DeliveryRow, number>();
+  completed.forEach((r, i) => idxOf.set(r, i));
 
   // ---- modifier per baris ----
   const addByRow = new Array(completed.length).fill(0);
@@ -353,7 +407,59 @@ export interface CombinedCalcResult {
   anomalies: RowAnomaly[];
 }
 
-export function calcCombinedScheme(
+// ---------------- pure component (Kategori 2 — Per Kehadiran) ----------------
+// Terima attendance logs (index-aligned dengan output), kembaliin
+// {daily_base, overtime, incentive} PER RIDER PER HARI (1 log = 1 rider-hari).
+// Murni: tanpa bookkeeping absentRows/warnings — itu tetap tanggung jawab
+// wrapper (calcAttendanceScheme) / calcHybridScheme. Lihat §5.
+export interface AttendanceComponentResult {
+  daily_base: number;
+  overtime: number;
+  incentive: number;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function calcAttendanceComponent(logs: AttendanceLogRow[], cfg: any): AttendanceComponentResult[] {
+  const fullFee = Number(cfg.full_fee) || 0;
+  const standardMin = Number(cfg.standard_minutes) || 0;
+  const overtimeOn = !!cfg.overtime?.enabled;
+  const overtimeRatePerHour = Number(cfg.overtime?.rate_per_hour) || 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const incentives: any[] = cfg.incentives ?? [];
+
+  return logs.map((r) => {
+    if (r.is_absent) {
+      return { daily_base: 0, overtime: 0, incentive: 0 };
+    }
+    const actualMin = Number(r.duration_minutes) || 0;
+    const proportion = standardMin > 0 ? Math.min(1, actualMin / standardMin) : (actualMin > 0 ? 1 : 0);
+    const daily_base = Math.round(fullFee * proportion);
+
+    let overtime = 0;
+    if (overtimeOn && standardMin > 0 && actualMin > standardMin) {
+      overtime = Math.round(((actualMin - standardMin) / 60) * overtimeRatePerHour);
+    }
+
+    let incentive = 0;
+    for (const inc of incentives) {
+      const amount = Number(inc.amount) || 0;
+      if (inc.condition === "always") incentive += amount;
+      else if (inc.condition === "ontime_only" && !r.is_late) incentive += amount;
+    }
+
+    return { daily_base, overtime, incentive };
+  });
+}
+
+// =========================================================
+// Kategori 3 (Hybrid) — kombinasi Kategori 1 (delivery component) +
+// Kategori 2 (attendance component), dijumlah pakai allocInt() yang sudah
+// ada. Bukan engine baru — cuma pemanggil component + alokasi.
+// Dulunya `calcCombinedScheme()` (reimplementasi ulang rumus proporsi jam +
+// tier per-order); sekarang reuse calcTierComponent()/calcAttendanceComponent().
+// docs/pricing-engine-v2-design.md §3, §5.
+// =========================================================
+export function calcHybridScheme(
   env: PricingEnvelope,
   deliveries: DeliveryRow[],
   attendanceLogs: AttendanceLogRow[],
@@ -393,30 +499,42 @@ export function calcCombinedScheme(
   const idxOf = new Map<DeliveryRow, number>();
   completed.forEach((r, i) => idxOf.set(r, i));
 
-  // per-order fee per row
-  const perOrderByRow = completed.map((r) => {
-    const val = orderBy === "weight" ? (r.weight_kg ?? 0) : (r.distance_km ?? 0);
-    return stepTierFee(orderTier, val);
-  });
+  // ---- delivery component: subtype "tier", 1 dimensi aktif sesuai order_by ----
+  const tierCfg = {
+    distance: orderBy === "distance" ? orderTier : null,
+    weight: orderBy === "weight" ? orderTier : null,
+  };
+  const perOrderByRow = calcTierComponent(completed, tierCfg, "per_order");
 
-  // daily fee per rider+day
+  // ---- attendance component: daily base + "ontime_bonus" sebagai incentive
+  //      ontime_only tunggal (superset attendance standalone yang punya list) ----
   const byRider = groupBy(completed, riderKey);
-  const dailyMap = new Map<string, { daily_base: number; ontime_bonus: number }>();
+  const riderDayKeys: string[] = [];
   for (const [rider, rrows] of byRider) {
     const byDay = groupBy(rrows, (r) => r.delivery_date);
-    for (const [date] of byDay) {
-      const log = attMap.get(rider + "|" + date);
-      let daily_base = 0;
-      let bonus = 0;
-      if (log && !log.is_absent) {
-        const actualMin = Number(log.duration_minutes) || 0;
-        const proportion = standardMin > 0 ? Math.min(1, actualMin / standardMin) : (actualMin > 0 ? 1 : 0);
-        daily_base = Math.round(fullFee * proportion);
-        if (!log.is_late) bonus = ontimeBonus;
-      }
-      dailyMap.set(rider + "|" + date, { daily_base, ontime_bonus: bonus });
-    }
+    for (const [date] of byDay) riderDayKeys.push(rider + "|" + date);
   }
+  // sintesis 1 "log" per rider-hari yang MUNCUL DI DATA PENGIRIMAN (bukan di
+  // data absensi) — replikasi persis perilaku lama: rider-hari yang gak ada
+  // log absensinya dianggap 0 (bukan error), rider-hari yang cuma ada di
+  // absensi (tanpa kiriman) diabaikan (gak pernah dilihat, sama seperti dulu).
+  const syntheticLogs: AttendanceLogRow[] = riderDayKeys.map((k) => {
+    const log = attMap.get(k);
+    if (log) return log;
+    const sep = k.lastIndexOf("|");
+    return { rider_id: k.slice(0, sep), log_date: k.slice(sep + 1), is_absent: true };
+  });
+  const attendanceCfg = {
+    full_fee: fullFee,
+    standard_minutes: standardMin,
+    overtime: null,
+    incentives: [{ amount: ontimeBonus, condition: "ontime_only" }],
+  };
+  const attComp = calcAttendanceComponent(syntheticLogs, attendanceCfg);
+  const dailyMap = new Map<string, { daily_base: number; ontime_bonus: number }>();
+  riderDayKeys.forEach((k, i) => {
+    dailyMap.set(k, { daily_base: attComp[i].daily_base, ontime_bonus: attComp[i].incentive });
+  });
 
   // allocate daily fee across deliveries of that day (proportional by distance/weight)
   const dailyAllocByRow = new Array(completed.length).fill(0);
@@ -486,39 +604,18 @@ export function calcCombinedScheme(
 export function calcAttendanceScheme(env: PricingEnvelope, logs: AttendanceLogRow[]): AttendanceCalcResult {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cfg = env.config as any;
-  const fullFee = Number(cfg.full_fee) || 0;
   const standardMin = Number(cfg.standard_minutes) || 0;
-  const overtimeOn = !!cfg.overtime?.enabled;
-  const overtimeRatePerHour = Number(cfg.overtime?.rate_per_hour) || 0;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const incentives: any[] = cfg.incentives ?? [];
 
   const warnings: string[] = [];
   if (standardMin <= 0) warnings.push("Jam standar shift belum diisi di skema — proporsi jam kerja tidak bisa dihitung dengan benar.");
 
+  const comp = calcAttendanceComponent(logs, cfg);
+
   let absentRows = 0;
-  const perRow: AttendanceRowFee[] = logs.map((r) => {
-    if (r.is_absent) {
-      absentRows++;
-      return { id: r.id ?? null, rider: riderKey(r), date: r.log_date, base: 0, overtime: 0, incentive: 0, fee: 0 };
-    }
-    const actualMin = Number(r.duration_minutes) || 0;
-    const proportion = standardMin > 0 ? Math.min(1, actualMin / standardMin) : (actualMin > 0 ? 1 : 0);
-    const base = Math.round(fullFee * proportion);
-
-    let overtime = 0;
-    if (overtimeOn && standardMin > 0 && actualMin > standardMin) {
-      overtime = Math.round(((actualMin - standardMin) / 60) * overtimeRatePerHour);
-    }
-
-    let incentiveTotal = 0;
-    for (const inc of incentives) {
-      const amount = Number(inc.amount) || 0;
-      if (inc.condition === "always") incentiveTotal += amount;
-      else if (inc.condition === "ontime_only" && !r.is_late) incentiveTotal += amount;
-    }
-
-    return { id: r.id ?? null, rider: riderKey(r), date: r.log_date, base, overtime, incentive: incentiveTotal, fee: base + overtime + incentiveTotal };
+  const perRow: AttendanceRowFee[] = logs.map((r, i) => {
+    if (r.is_absent) absentRows++;
+    const c = comp[i];
+    return { id: r.id ?? null, rider: riderKey(r), date: r.log_date, base: c.daily_base, overtime: c.overtime, incentive: c.incentive, fee: c.daily_base + c.overtime + c.incentive };
   });
 
   const riderMap = new Map<string, AttendanceRiderLine>();

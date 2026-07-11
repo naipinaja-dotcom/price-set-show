@@ -1,0 +1,381 @@
+{
+  "generated_at": "2026-07-11T13:14:46.983Z",
+  "sample_limit": 500,
+  "scheme_count": 8,
+  "schemes": [
+    {
+      "scheme_id": "e206e33b-9a5b-4d13-82db-ae2526f99af5",
+      "scheme_name": "Nusantara Card Semesta · Client · Flat per Unit",
+      "client_id": "80b281c3-8076-4559-9aff-422cf8ff848c",
+      "scheme_for": "rider",
+      "calc_type": "flat_unit",
+      "sample": {
+        "delivery_rows": 0
+      },
+      "result": {
+        "perRow": [],
+        "perRider": [],
+        "subtotal": 0,
+        "grandTotal": 0,
+        "completedRows": 0,
+        "skippedRows": 0,
+        "skippedPerRider": [],
+        "warnings": [],
+        "anomalies": []
+      }
+    },
+    {
+      "scheme_id": "e6c5ae11-d056-4911-8f4f-cbf709dfd774",
+      "scheme_name": "Payment Goreca",
+      "client_id": "9ef01850-b7a2-45eb-9c7a-0c0deca70c65",
+      "scheme_for": "rider",
+      "calc_type": "tier",
+      "sample": {
+        "delivery_rows": 21
+      },
+      "result": {
+        "perRow": [
+          {
+            "id": "2985d96b-d2d4-4024-87f2-fbeb4e35a1e9",
+            "rider": "d5e2c7e6-7859-4284-8065-9b294fe0b681",
+            "date": "2026-07-04",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "3c147755-0bbf-44af-b18d-741eb975485a",
+            "rider": "c9344fe4-81bb-4664-99fb-d7b30e27a673",
+            "date": "2026-07-04",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "ec5b15f1-bdd1-48ad-8fe0-44a68cbd10d3",
+            "rider": "78206cf5-baae-4812-8324-f0f03271f0fe",
+            "date": "2026-07-04",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "7ed154c9-3746-49fc-87ed-33512b02fb1f",
+            "rider": "d5e2c7e6-7859-4284-8065-9b294fe0b681",
+            "date": "2026-07-05",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "97c88cba-077f-4d8f-8e15-144593aeba7a",
+            "rider": "c9344fe4-81bb-4664-99fb-d7b30e27a673",
+            "date": "2026-07-05",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "e3ea44a0-2d4c-446d-aa72-7fd742067926",
+            "rider": "78206cf5-baae-4812-8324-f0f03271f0fe",
+            "date": "2026-07-05",
+            "base": 18000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 18000
+          },
+          {
+            "id": "2765205c-9fd1-4838-ad0c-62d1962f5fef",
+            "rider": "c9344fe4-81bb-4664-99fb-d7b30e27a673",
+            "date": "2026-07-06",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "7038e936-41cf-42ff-904a-0509df308d8a",
+            "rider": "d5e2c7e6-7859-4284-8065-9b294fe0b681",
+            "date": "2026-07-06",
+            "base": 16500,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 16500
+          },
+          {
+            "id": "7c15693e-8f43-41e9-94e0-324c50f43a3c",
+            "rider": "78206cf5-baae-4812-8324-f0f03271f0fe",
+            "date": "2026-07-06",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "38a90873-030e-4e01-b2f3-339e6fa72526",
+            "rider": "78206cf5-baae-4812-8324-f0f03271f0fe",
+            "date": "2026-07-07",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "7ada7ad3-0b37-4f82-abde-414b33fab83e",
+            "rider": "d5e2c7e6-7859-4284-8065-9b294fe0b681",
+            "date": "2026-07-07",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "c1cd1ffe-2ee4-42c2-8fdb-8d794f445ad5",
+            "rider": "c9344fe4-81bb-4664-99fb-d7b30e27a673",
+            "date": "2026-07-07",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "bc56f7d4-6b89-48ac-9947-c0150ba9ee40",
+            "rider": "78206cf5-baae-4812-8324-f0f03271f0fe",
+            "date": "2026-07-08",
+            "base": 19500,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 19500
+          },
+          {
+            "id": "c7d55e3d-a421-4e14-9be0-77e0789d5ca3",
+            "rider": "c9344fe4-81bb-4664-99fb-d7b30e27a673",
+            "date": "2026-07-08",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "f19fe997-1516-460d-bd17-be9518e3faf1",
+            "rider": "d5e2c7e6-7859-4284-8065-9b294fe0b681",
+            "date": "2026-07-08",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "318a8534-1a42-42f9-9cc2-d00c67efcafd",
+            "rider": "c9344fe4-81bb-4664-99fb-d7b30e27a673",
+            "date": "2026-07-09",
+            "base": 16500,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 16500
+          },
+          {
+            "id": "5a410e81-9dc7-43e6-97d1-4ecf67a1af37",
+            "rider": "d5e2c7e6-7859-4284-8065-9b294fe0b681",
+            "date": "2026-07-09",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "a4dc9b87-68eb-46e4-abdb-27b1c9a8d67f",
+            "rider": "78206cf5-baae-4812-8324-f0f03271f0fe",
+            "date": "2026-07-09",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "9fd2bcc1-b1b9-4edb-9026-29088a351a08",
+            "rider": "78206cf5-baae-4812-8324-f0f03271f0fe",
+            "date": "2026-07-10",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "bdbb25c6-e58d-4510-926c-9d3786f058de",
+            "rider": "d5e2c7e6-7859-4284-8065-9b294fe0b681",
+            "date": "2026-07-10",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          },
+          {
+            "id": "bfbf033b-5f3a-4040-8b5e-0f7d77c39764",
+            "rider": "c9344fe4-81bb-4664-99fb-d7b30e27a673",
+            "date": "2026-07-10",
+            "base": 15000,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "fee": 15000
+          }
+        ],
+        "perRider": [
+          {
+            "rider": "78206cf5-baae-4812-8324-f0f03271f0fe",
+            "units": 7,
+            "base": 112500,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "total": 112500
+          },
+          {
+            "rider": "d5e2c7e6-7859-4284-8065-9b294fe0b681",
+            "units": 7,
+            "base": 106500,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "total": 106500
+          },
+          {
+            "rider": "c9344fe4-81bb-4664-99fb-d7b30e27a673",
+            "units": 7,
+            "base": 106500,
+            "add_kg": 0,
+            "multi_drop": 0,
+            "total": 106500
+          }
+        ],
+        "subtotal": 325500,
+        "grandTotal": 325500,
+        "completedRows": 21,
+        "skippedRows": 0,
+        "skippedPerRider": [],
+        "warnings": [],
+        "anomalies": []
+      }
+    },
+    {
+      "scheme_id": "a2c80eba-0705-4d62-91fa-34b5bb34b826",
+      "scheme_name": "Payment Wicked Pies",
+      "client_id": "b02967d4-2e7e-425b-9e44-71af3e0a8ddd",
+      "scheme_for": "rider",
+      "calc_type": "flat_unit",
+      "sample": {
+        "delivery_rows": 0
+      },
+      "result": {
+        "perRow": [],
+        "perRider": [],
+        "subtotal": 0,
+        "grandTotal": 0,
+        "completedRows": 0,
+        "skippedRows": 0,
+        "skippedPerRider": [],
+        "warnings": [],
+        "anomalies": []
+      }
+    },
+    {
+      "scheme_id": "71e25207-99ed-438e-a714-b9be744dc739",
+      "scheme_name": "Payment Alfagift",
+      "client_id": "ce4f343b-b7b9-4585-bc03-a6f10e36d38b",
+      "scheme_for": "rider",
+      "calc_type": "attendance",
+      "sample": {
+        "attendance_rows": 0
+      },
+      "result": {
+        "perRow": [],
+        "perRider": [],
+        "subtotal": 0,
+        "totalRows": 0,
+        "absentRows": 0,
+        "warnings": []
+      }
+    },
+    {
+      "scheme_id": "94af8492-a5a9-481c-bfe9-aa0240961267",
+      "scheme_name": "Payment rider NCS",
+      "client_id": "80b281c3-8076-4559-9aff-422cf8ff848c",
+      "scheme_for": "rider",
+      "calc_type": "flat_unit",
+      "sample": {
+        "delivery_rows": 0
+      },
+      "result": {
+        "perRow": [],
+        "perRider": [],
+        "subtotal": 0,
+        "grandTotal": 0,
+        "completedRows": 0,
+        "skippedRows": 0,
+        "skippedPerRider": [],
+        "warnings": [],
+        "anomalies": []
+      }
+    },
+    {
+      "scheme_id": "d5f1cda7-18c4-418f-ab92-d19390bbb839",
+      "scheme_name": "It's Buah · Rider · Flat per Unit",
+      "client_id": "0eb6a42b-bcb3-4321-a9a9-1661e87def46",
+      "scheme_for": "rider",
+      "calc_type": "flat_unit",
+      "sample": {
+        "delivery_rows": 0
+      },
+      "result": {
+        "perRow": [],
+        "perRider": [],
+        "subtotal": 0,
+        "grandTotal": 0,
+        "completedRows": 0,
+        "skippedRows": 0,
+        "skippedPerRider": [],
+        "warnings": [],
+        "anomalies": []
+      }
+    },
+    {
+      "scheme_id": "d3bb702f-7c25-44fe-bb67-d8f84eb82281",
+      "scheme_name": "Payment Kebon Kita",
+      "client_id": "bb77f47f-b277-4154-84f1-d5af1583024c",
+      "scheme_for": "rider",
+      "calc_type": "attendance",
+      "sample": {
+        "attendance_rows": 0
+      },
+      "result": {
+        "perRow": [],
+        "perRider": [],
+        "subtotal": 0,
+        "totalRows": 0,
+        "absentRows": 0,
+        "warnings": []
+      }
+    },
+    {
+      "scheme_id": "e2ceae7f-0a04-4917-9876-20cf59fe90cd",
+      "scheme_name": "Payment Rider YCH Phillips",
+      "client_id": "003c7280-cf2a-40f5-b797-ed97f8f5c9ea",
+      "scheme_for": "rider",
+      "calc_type": "attendance",
+      "sample": {
+        "attendance_rows": 0
+      },
+      "result": {
+        "perRow": [],
+        "perRider": [],
+        "subtotal": 0,
+        "totalRows": 0,
+        "absentRows": 0,
+        "warnings": []
+      }
+    }
+  ]
+}

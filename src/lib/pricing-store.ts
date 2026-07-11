@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import type { PricingScheme } from "./pricing-types";
+import { calcTypeToCategory, type PricingScheme } from "./pricing-types";
 
 // pricing_schemes dibuat manual lewat SQL Editor, belum ikut proses
 // auto-generate types Supabase — pakai `sb` (untyped) khusus buat tabel ini,
@@ -17,13 +17,18 @@ const SELECT_COLS = "id, name, client_id, scheme_for, calc_type, effective_from,
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalize(r: any): PricingScheme {
+  // Kolom fisik tabel masih `calc_type` (belum dimigrasi, lihat
+  // docs/pricing-engine-v2-design.md §7) — di-mapping ke category/subtype
+  // di boundary ini supaya sisa aplikasi pakai taksonomi baru.
+  const { category, subtype } = calcTypeToCategory(r.calc_type);
   return {
     id: r.id,
     name: r.name,
     client_id: r.client_id,
     client_name: r.clients?.name ?? null,
     scheme_for: (r.scheme_for as PricingScheme["scheme_for"]) ?? "rider",
-    calc_type: r.calc_type,
+    category,
+    subtype,
     effective_from: r.effective_from,
     effective_to: r.effective_to,
     params: r.params,
@@ -65,14 +70,19 @@ export async function getPricingScheme(id: string): Promise<PricingScheme | unde
   return data ? normalize(data) : undefined;
 }
 
-export type SavePricingSchemeInput = Omit<PricingScheme, "id" | "created_at" | "client_name"> & { id?: string };
+export type SavePricingSchemeInput = Omit<PricingScheme, "id" | "created_at" | "client_name" | "category" | "subtype"> & {
+  id?: string;
+};
 
 export async function savePricingScheme(s: SavePricingSchemeInput): Promise<PricingScheme> {
   const payload = {
     name: s.name,
     client_id: s.client_id,
     scheme_for: s.scheme_for,
-    calc_type: s.calc_type,
+    // Kolom fisik masih `calc_type` — `params.type` sudah menyimpan nilai
+    // yang persis sama (lihat komentar PricingEnvelope di pricing-types.ts),
+    // jadi tinggal dipakai ulang, tidak perlu field terpisah di input.
+    calc_type: s.params.type,
     effective_from: s.effective_from,
     effective_to: s.effective_to || null,
     params: s.params,

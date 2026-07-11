@@ -4,7 +4,7 @@ import { Plus, Pencil, Trash2, Tag } from "lucide-react";
 import { useEffect, useState } from "react";
 import { listPricingSchemes, deletePricingScheme, listClients, type MockClient } from "@/lib/pricing-store";
 import type { PricingScheme } from "@/lib/pricing-types";
-import { PRICING_TYPES } from "@/lib/pricing-types";
+import { pricingLabel } from "@/lib/pricing-types";
 import { formatTanggal } from "@/lib/format";
 import { toast } from "sonner";
 import {
@@ -36,8 +36,6 @@ function PricingListPage() {
   useEffect(refresh, []);
 
   const filtered = schemes.filter((s) => filterClient === "all" || (s.client_id ?? "all-clients") === filterClient);
-
-  const typeMeta = (k: string) => PRICING_TYPES.find((t) => t.key === k);
 
   return (
     <AdminLayout title="Pricing Schemes" subtitle="Skema kalkulasi pendapatan rider per client">
@@ -97,7 +95,6 @@ function PricingListPage() {
             </thead>
             <tbody>
               {filtered.map((s) => {
-                const tm = typeMeta(s.calc_type);
                 return (
                   <tr key={s.id} className="border-t border-border hover:bg-muted/30">
                     <td className="px-4 py-3 font-medium">{s.name}</td>
@@ -116,7 +113,7 @@ function PricingListPage() {
                     </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center rounded-md bg-primary-soft text-primary-soft-foreground px-2 py-0.5 text-[11px] font-medium">
-                        {tm?.name ?? s.calc_type}
+                        {pricingLabel(s.category, s.subtype)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">

@@ -3,7 +3,7 @@ import {
   stepTierFee,
   calcScheme,
   calcAttendanceScheme,
-  calcCombinedScheme,
+  calcHybridScheme,
   type DeliveryRow,
 } from "@/lib/pricing-calc";
 import type { PricingEnvelope, StepTier } from "@/lib/pricing-types";
@@ -364,9 +364,9 @@ describe("calcAttendanceScheme", () => {
 });
 
 // ==================================================================
-// calcCombinedScheme (daily + ontime + per-order)
+// calcHybridScheme (daily + ontime + per-order)
 // ==================================================================
-describe("calcCombinedScheme", () => {
+describe("calcHybridScheme", () => {
   const e = env({
     type: "combined",
     config: {
@@ -386,7 +386,7 @@ describe("calcCombinedScheme", () => {
     const logs = [
       { rider_id: "R1", log_date: "2026-07-01", duration_minutes: 600, is_late: false, is_absent: false },
     ];
-    const res = calcCombinedScheme(e, deliveries, logs);
+    const res = calcHybridScheme(e, deliveries, logs);
     const line = res.perRider.find((r) => r.rider === "R1")!;
     expect(line.daily_base).toBe(100000); // full day
     expect(line.ontime_bonus).toBe(20000); // ontime
@@ -397,7 +397,7 @@ describe("calcCombinedScheme", () => {
   });
 
   it("warns and skips daily fee when there is no attendance data", () => {
-    const res = calcCombinedScheme(e, [row({ rider_id: "R1", distance_km: 5 })], []);
+    const res = calcHybridScheme(e, [row({ rider_id: "R1", distance_km: 5 })], []);
     expect(res.warnings.some((w) => w.includes("absensi"))).toBe(true);
     const line = res.perRider[0];
     expect(line.daily_base).toBe(0);
