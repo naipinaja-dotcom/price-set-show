@@ -53,8 +53,9 @@ function DashboardPage() {
             Hubungkan Supabase project untuk mengaktifkan data real
           </div>
           <p className="text-xs text-primary-soft-foreground/80">
-            Halaman dashboard, list riders, dan reminder tunggakan akan menarik dari tabel{" "}
-            <code className="text-[11px]">v_active_installment_reminders</code> setelah project di-connect.
+            Halaman dashboard, list riders, dan data tunggakan akan menarik langsung dari tabel
+            {" "}<code className="text-[11px]">riders</code>, <code className="text-[11px]">payroll_runs</code>,{" "}
+            dan <code className="text-[11px]">rider_installments</code> setelah project di-connect.
           </p>
         </div>
       )}

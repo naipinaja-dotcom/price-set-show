@@ -11,6 +11,8 @@ import { calcScheme, type DeliveryRow, type CalcResult, calcAttendanceScheme, ty
 import { formatRupiah } from "@/lib/format";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
+import { saveLastFeePeriod } from "@/lib/last-fee-period";
+import { resolveRiderIdentities } from "@/lib/rider-lookup";
 import { Loader2, Play, AlertTriangle, Info, Save } from "lucide-react";
 
 export const Route = createFileRoute("/admin/calculate")({ component: CalculatePage });
@@ -89,24 +91,21 @@ function CalculatePage() {
         const { data: attData, error: attErr } = await aq;
         if (attErr) throw attErr;
 
-        const deliveryRows = (deliveryData ?? []) as unknown as DeliveryRow[];
-        const attRows = (attData ?? []) as AttendanceLogRow[];
-        if (deliveryRows.length === 0) toast.message("Tidak ada data pengiriman di rentang & client ini.");
-        if (attRows.length === 0) toast.message("Tidak ada data absensi — daily fee & bonus ontime tidak dihitung.");
+        const deliveryRowsRaw = (deliveryData ?? []) as unknown as DeliveryRow[];
+        const attRowsRaw = (attData ?? []) as AttendanceLogRow[];
+        if (deliveryRowsRaw.length === 0) toast.message("Tidak ada data pengiriman di rentang & client ini.");
+        if (attRowsRaw.length === 0) toast.message("Tidak ada data absensi — daily fee & bonus ontime tidak dihitung.");
 
-        const riderIds = [...new Set([
-          ...deliveryRows.map((r) => r.rider_id),
-          ...attRows.map((r) => r.rider_id),
-        ].filter((id): id is string => Boolean(id)))];
-        let riderMap: Record<string, { full_name: string; employee_id: string }> = {};
-        if (riderIds.length > 0) {
-          const { data: riderData } = await supabase.from("riders").select("id, full_name, employee_id").in("id", riderIds);
-          riderMap = Object.fromEntries((riderData ?? []).map((r) => [r.id, { full_name: r.full_name, employee_id: r.employee_id }]));
-        }
+        // resolve identitas rider dari rider_id ATAU fallback kode mitra (driver_code),
+        // biar baris yang link rider_id-nya putus tetap kehitung & ketemu namanya.
+        const { resolvedIdOf, nameOf } = await resolveRiderIdentities([...deliveryRowsRaw, ...attRowsRaw]);
+        const deliveryRows = deliveryRowsRaw.map((r) => ({ ...r, rider_id: resolvedIdOf(r) }));
+        const attRows = attRowsRaw.map((r) => ({ ...r, rider_id: resolvedIdOf(r) }));
+
         const names: Record<string, string> = {};
-        for (const r of [...deliveryRows, ...attRows]) {
-          const key = r.rider_id || r.driver_code || "(tanpa rider)";
-          if (!names[key]) names[key] = riderMap[r.rider_id ?? ""]?.full_name || r.driver_code || key;
+        for (const r of [...deliveryRowsRaw, ...attRowsRaw]) {
+          const key = resolvedIdOf(r) || r.driver_code || "(tanpa rider)";
+          if (!names[key]) names[key] = nameOf(r);
         }
         setRiderNames(names);
 
@@ -127,29 +126,15 @@ function CalculatePage() {
         const rowsPlain = (data ?? []) as AttendanceLogRow[];
         if (rowsPlain.length === 0) toast.message("Tidak ada data absensi di rentang & client ini.");
 
-        // STEP 2: Extract unique rider_id
-        const riderIds = [...new Set(rowsPlain.map((r) => r.rider_id).filter((id): id is string => Boolean(id)))];
-
-        // STEP 3: Fetch nama rider berdasarkan ID
-        let riderMap: Record<string, { full_name: string; employee_id: string }> = {};
-        if (riderIds.length > 0) {
-          const { data: riderData } = await supabase
-            .from("riders")
-            .select("id, full_name, employee_id")
-            .in("id", riderIds);
-          riderMap = Object.fromEntries((riderData ?? []).map((r) => [r.id, { full_name: r.full_name, employee_id: r.employee_id }]));
-        }
-
-        // STEP 4: Gabungkan data attendance dengan info rider
-        const rows = rowsPlain.map((r) => ({
-          ...r,
-          riders: r.rider_id ? riderMap[r.rider_id] : undefined,
-        })) as (AttendanceLogRow & { riders?: { full_name?: string; employee_id?: string } })[];
+        // STEP 2-3: resolve identitas rider dari rider_id ATAU fallback kode mitra,
+        // biar baris yang link rider_id-nya putus tetap kehitung & ketemu namanya.
+        const { resolvedIdOf, nameOf } = await resolveRiderIdentities(rowsPlain);
+        const rows = rowsPlain.map((r) => ({ ...r, rider_id: resolvedIdOf(r) }));
 
         const names: Record<string, string> = {};
-        for (const r of rows) {
-          const key = r.rider_id || r.driver_code || "(tanpa rider)";
-          if (!names[key]) names[key] = r.riders?.full_name || r.driver_code || key;
+        for (const r of rowsPlain) {
+          const key = resolvedIdOf(r) || r.driver_code || "(tanpa rider)";
+          if (!names[key]) names[key] = nameOf(r);
         }
         setRiderNames(names);
 
@@ -172,30 +157,16 @@ function CalculatePage() {
           toast.message("Tidak ada data pengiriman di rentang & client ini.");
         }
 
-        // STEP 2: Extract unique rider_id
-        const riderIds = [...new Set(rowsPlain.map((r) => r.rider_id).filter((id): id is string => Boolean(id)))];
-
-        // STEP 3: Fetch nama rider berdasarkan ID
-        let riderMap: Record<string, { full_name: string; employee_id: string }> = {};
-        if (riderIds.length > 0) {
-          const { data: riderData } = await supabase
-            .from("riders")
-            .select("id, full_name, employee_id")
-            .in("id", riderIds);
-          riderMap = Object.fromEntries((riderData ?? []).map((r) => [r.id, { full_name: r.full_name, employee_id: r.employee_id }]));
-        }
-
-        // STEP 4: Gabungkan data delivery dengan info rider
-        const rows = rowsPlain.map((r) => ({
-          ...r,
-          riders: r.rider_id ? riderMap[r.rider_id] : undefined,
-        })) as unknown as (DeliveryRow & { riders?: { full_name?: string; employee_id?: string } })[];
+        // STEP 2-3: resolve identitas rider dari rider_id ATAU fallback kode mitra,
+        // biar baris yang link rider_id-nya putus tetap kehitung & ketemu namanya.
+        const { resolvedIdOf, nameOf } = await resolveRiderIdentities(rowsPlain);
+        const rows = rowsPlain.map((r) => ({ ...r, rider_id: resolvedIdOf(r) })) as unknown as DeliveryRow[];
 
         // map nama rider untuk tampilan
         const names: Record<string, string> = {};
-        for (const r of rows) {
-          const key = r.rider_id || r.driver_code || "(tanpa rider)";
-          if (!names[key]) names[key] = r.riders?.full_name || r.driver_code || key;
+        for (const r of rowsPlain) {
+          const key = resolvedIdOf(r) || r.driver_code || "(tanpa rider)";
+          if (!names[key]) names[key] = nameOf(r);
         }
         setRiderNames(names);
 
@@ -233,6 +204,12 @@ function CalculatePage() {
         if (err) throw err;
         done += chunk.length;
       }
+      saveLastFeePeriod({
+        from, to,
+        clientId: clientId || null,
+        clientName: clientId ? (clients.find((c) => c.id === clientId)?.name ?? "(client tidak dikenal)") : "Semua Client",
+        rowCount: done,
+      });
       toast.success(`Fee tersimpan ke ${done} baris. Siap dipakai Payroll Run.`);
     } catch (e) {
       toast.error((e as Error).message);

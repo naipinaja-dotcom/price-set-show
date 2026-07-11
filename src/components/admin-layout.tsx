@@ -10,37 +10,85 @@ import {
   Calculator,
   Coins,
   TrendingUp,
+  LayoutPanelTop,
   ShieldCheck,
   Search,
   Receipt,
   LogOut,
   Menu,
   X,
+  Package,
+  Banknote,
+  Percent,
+  Bike,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 
-const NAV = [
-  { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/admin/clients", label: "Clients", icon: Users },
+// -------------------- Payroll Mode vs Intelligence Mode --------------------
+// Nav dipecah 2 grup, di-switch lewat toggle di atas sidebar (bukan gabung
+// jadi 1 halaman). Item yang belum ada routenya (SLA/Area/Client Analytics,
+// Attendance Rules — udah nyatu di Pricing Schemes) sengaja tidak dimasukkan.
+type NavMode = "payroll" | "intelligence";
+const NAV_MODE_STORAGE_KEY = "dash-admin-nav-mode";
+
+const NAV_PAYROLL = [
+  { to: "/admin/dashboard", label: "Payroll Dashboard", icon: LayoutDashboard },
   { to: "/admin/riders", label: "Riders", icon: UserCircle2 },
+  { to: "/admin/clients", label: "Clients", icon: Users },
   { to: "/admin/pricing", label: "Pricing Schemes", icon: Tag },
-  { to: "/admin/upload", label: "Upload Data", icon: Upload },
+  { to: "/admin/upload", label: "Attendance Upload", icon: Upload },
+  { to: "/admin/payroll", label: "Payroll Run", icon: Calculator },
+  { to: "/admin/deductions", label: "Deductions", icon: Wallet },
   { to: "/admin/data-check", label: "Cek Data", icon: Search },
   { to: "/admin/calculate", label: "Hitung Fee", icon: Coins },
-  { to: "/admin/deductions", label: "Deductions", icon: Wallet },
-  { to: "/admin/payroll", label: "Payroll Run", icon: Calculator },
-  { to: "/admin/invoices", label: "Invoices", icon: Receipt },
-  { to: "/admin/pnl", label: "PnL / Margin", icon: TrendingUp },
   { to: "/admin/reports", label: "Reports", icon: FileBarChart2 },
   { to: "/admin/users", label: "User Management", icon: ShieldCheck },
 ] as const;
+
+const NAV_INTELLIGENCE = [
+  { to: "/admin/pnl-dashboard", label: "Executive Dashboard", icon: LayoutPanelTop },
+  { to: "/admin/pnl", label: "Margin Analytics", icon: TrendingUp },
+  { to: "/admin/invoices", label: "Invoices", icon: Receipt },
+  { to: "/admin/shipment-analytics", label: "Shipment Analytics", icon: Package },
+  { to: "/admin/revenue-analytics", label: "Revenue Analytics", icon: Banknote },
+  { to: "/admin/bcr-analytics", label: "BCR Analytics", icon: Percent },
+  { to: "/admin/driver-analytics", label: "Driver Analytics", icon: Bike },
+] as const;
+
+const NAV_GROUPS: Record<NavMode, { sectionLabel: string; items: typeof NAV_PAYROLL | typeof NAV_INTELLIGENCE }> = {
+  payroll: { sectionLabel: "PAYROLL", items: NAV_PAYROLL },
+  intelligence: { sectionLabel: "INTELLIGENCE", items: NAV_INTELLIGENCE },
+};
+
+function modeForPath(pathname: string): NavMode {
+  return NAV_INTELLIGENCE.some((it) => pathname === it.to || pathname.startsWith(it.to + "/")) ? "intelligence" : "payroll";
+}
 
 export function AdminLayout({ children, title, subtitle }: { children: ReactNode; title: string; subtitle?: string }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const [mode, setMode] = useState<NavMode>(() => {
+    if (typeof window === "undefined") return modeForPath(pathname);
+    const stored = window.localStorage.getItem(NAV_MODE_STORAGE_KEY);
+    return stored === "payroll" || stored === "intelligence" ? stored : modeForPath(pathname);
+  });
+
+  // Kalau user pindah halaman lewat cara lain (mis. link langsung / back button)
+  // ke route yang beda grup, ikutin mode-nya biar toggle tetep konsisten.
+  useEffect(() => {
+    setMode(modeForPath(pathname));
+  }, [pathname]);
+
+  useEffect(() => {
+    window.localStorage.setItem(NAV_MODE_STORAGE_KEY, mode);
+  }, [mode]);
+
+  const navItems = NAV_GROUPS[mode].items;
+  const sectionLabel = NAV_GROUPS[mode].sectionLabel;
 
   const handleLogout = () => {
     logout();
@@ -60,8 +108,29 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
             <div className="text-[10px] text-muted-foreground tracking-widest uppercase mt-0.5">PT. Dash Elektrik</div>
           </div>
         </div>
-        <nav className="flex-1 px-2.5 py-3 space-y-0.5">
-          {NAV.map((it) => {
+
+        {/* Mode switcher — ganti grup menu, bukan navigasi langsung */}
+        <div className="px-3 pt-3">
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-muted">
+            {([["intelligence", "PnL Mode"], ["payroll", "Payroll Mode"]] as const).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={
+                  "text-[12px] font-medium py-1.5 rounded-md transition-colors " +
+                  (mode === m ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <nav className="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
+          <div className="px-3 pb-1.5 pt-1 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-widest">{sectionLabel}</div>
+          {navItems.map((it) => {
             const Icon = it.icon;
             const active = pathname === it.to || pathname.startsWith(it.to + "/");
             return (
@@ -114,8 +183,26 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
                 <X className="w-5 h-5" />
               </button>
             </div>
+            <div className="px-3 pt-3">
+              <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-muted">
+                {([["intelligence", "PnL Mode"], ["payroll", "Payroll Mode"]] as const).map(([m, label]) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    className={
+                      "text-[12px] font-medium py-1.5 rounded-md transition-colors " +
+                      (mode === m ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
-              {NAV.map((it) => {
+              <div className="px-2 pb-1.5 pt-1 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-widest">{sectionLabel}</div>
+              {navItems.map((it) => {
                 const Icon = it.icon;
                 const active = pathname === it.to || pathname.startsWith(it.to + "/");
                 return (

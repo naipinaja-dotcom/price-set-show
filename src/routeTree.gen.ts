@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ApiPnlWeeklyPushRouteImport } from './routes/api.pnl-weekly-push'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as RiderRouteImport } from './routes/rider'
 import { Route as LoginRouteImport } from './routes/login'
@@ -19,8 +20,13 @@ import { Route as RiderPayslipsRouteImport } from './routes/rider.payslips'
 import { Route as RiderDashboardRouteImport } from './routes/rider.dashboard'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as AdminUploadRouteImport } from './routes/admin.upload'
+import { Route as AdminShipmentAnalyticsRouteImport } from './routes/admin.shipment-analytics'
+import { Route as AdminRevenueAnalyticsRouteImport } from './routes/admin.revenue-analytics'
+import { Route as AdminDriverAnalyticsRouteImport } from './routes/admin.driver-analytics'
+import { Route as AdminBcrAnalyticsRouteImport } from './routes/admin.bcr-analytics'
 import { Route as AdminRidersRouteImport } from './routes/admin.riders'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
+import { Route as AdminPnlDashboardRouteImport } from './routes/admin.pnl-dashboard'
 import { Route as AdminPnlRouteImport } from './routes/admin.pnl'
 import { Route as AdminPayrollRouteImport } from './routes/admin.payroll'
 import { Route as AdminInvoicesRouteImport } from './routes/admin.invoices'
@@ -33,6 +39,11 @@ import { Route as AdminPricingIndexRouteImport } from './routes/admin.pricing.in
 import { Route as AdminPricingNewRouteImport } from './routes/admin.pricing.new'
 import { Route as AdminPricingIdRouteImport } from './routes/admin.pricing.$id'
 
+const ApiPnlWeeklyPushRoute = ApiPnlWeeklyPushRouteImport.update({
+  id: '/api/pnl-weekly-push',
+  path: '/api/pnl-weekly-push',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
   path: '/sitemap.xml',
@@ -83,6 +94,26 @@ const AdminUploadRoute = AdminUploadRouteImport.update({
   path: '/upload',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminShipmentAnalyticsRoute = AdminShipmentAnalyticsRouteImport.update({
+  id: '/shipment-analytics',
+  path: '/shipment-analytics',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminRevenueAnalyticsRoute = AdminRevenueAnalyticsRouteImport.update({
+  id: '/revenue-analytics',
+  path: '/revenue-analytics',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminDriverAnalyticsRoute = AdminDriverAnalyticsRouteImport.update({
+  id: '/driver-analytics',
+  path: '/driver-analytics',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminBcrAnalyticsRoute = AdminBcrAnalyticsRouteImport.update({
+  id: '/bcr-analytics',
+  path: '/bcr-analytics',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminRidersRoute = AdminRidersRouteImport.update({
   id: '/riders',
   path: '/riders',
@@ -91,6 +122,11 @@ const AdminRidersRoute = AdminRidersRouteImport.update({
 const AdminReportsRoute = AdminReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminPnlDashboardRoute = AdminPnlDashboardRouteImport.update({
+  id: '/pnl-dashboard',
+  path: '/pnl-dashboard',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminPnlRoute = AdminPnlRouteImport.update({
@@ -154,15 +190,21 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
   '/rider': typeof RiderRouteWithChildren
+  '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/admin/bcr-analytics': typeof AdminBcrAnalyticsRoute
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
+  '/admin/driver-analytics': typeof AdminDriverAnalyticsRoute
   '/admin/invoices': typeof AdminInvoicesRoute
   '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/revenue-analytics': typeof AdminRevenueAnalyticsRoute
+  '/admin/shipment-analytics': typeof AdminShipmentAnalyticsRoute
   '/admin/pnl': typeof AdminPnlRoute
+  '/admin/pnl-dashboard': typeof AdminPnlDashboardRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/riders': typeof AdminRidersRoute
   '/admin/upload': typeof AdminUploadRoute
@@ -179,15 +221,21 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
   '/rider': typeof RiderRouteWithChildren
+  '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/admin/bcr-analytics': typeof AdminBcrAnalyticsRoute
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
+  '/admin/driver-analytics': typeof AdminDriverAnalyticsRoute
   '/admin/invoices': typeof AdminInvoicesRoute
   '/admin/payroll': typeof AdminPayrollRoute
+  '/admin/revenue-analytics': typeof AdminRevenueAnalyticsRoute
+  '/admin/shipment-analytics': typeof AdminShipmentAnalyticsRoute
   '/admin/pnl': typeof AdminPnlRoute
+  '/admin/pnl-dashboard': typeof AdminPnlDashboardRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/riders': typeof AdminRidersRoute
   '/admin/upload': typeof AdminUploadRoute
@@ -205,17 +253,20 @@ export interface FileRoutesById {
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
   '/rider': typeof RiderRouteWithChildren
+  '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/admin/bcr-analytics': typeof AdminBcrAnalyticsRoute
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
+  '/admin/driver-analytics': typeof AdminDriverAnalyticsRoute
   '/admin/invoices': typeof AdminInvoicesRoute
   '/admin/payroll': typeof AdminPayrollRoute
-  '/admin/pnl': typeof AdminPnlRoute
-  '/admin/reports': typeof AdminReportsRoute
+  '/admin/revenue-analytics': typeof AdminRevenueAnalyticsRoute
   '/admin/riders': typeof AdminRidersRoute
+  '/admin/shipment-analytics': typeof AdminShipmentAnalyticsRoute
   '/admin/upload': typeof AdminUploadRoute
   '/admin/users': typeof AdminUsersRoute
   '/rider/dashboard': typeof RiderDashboardRoute
@@ -232,17 +283,23 @@ export interface FileRouteTypes {
     | '/admin'
     | '/login'
     | '/rider'
+    | '/api/pnl-weekly-push'
     | '/sitemap.xml'
+    | '/admin/bcr-analytics'
     | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
     | '/admin/data-check'
     | '/admin/deductions'
+    | '/admin/driver-analytics'
     | '/admin/invoices'
     | '/admin/payroll'
     | '/admin/pnl'
+    | '/admin/pnl-dashboard'
     | '/admin/reports'
+    | '/admin/revenue-analytics'
     | '/admin/riders'
+    | '/admin/shipment-analytics'
     | '/admin/upload'
     | '/admin/users'
     | '/rider/dashboard'
@@ -257,17 +314,23 @@ export interface FileRouteTypes {
     | '/admin'
     | '/login'
     | '/rider'
+    | '/api/pnl-weekly-push'
     | '/sitemap.xml'
+    | '/admin/bcr-analytics'
     | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
     | '/admin/data-check'
     | '/admin/deductions'
+    | '/admin/driver-analytics'
     | '/admin/invoices'
     | '/admin/payroll'
     | '/admin/pnl'
+    | '/admin/pnl-dashboard'
     | '/admin/reports'
+    | '/admin/revenue-analytics'
     | '/admin/riders'
+    | '/admin/shipment-analytics'
     | '/admin/upload'
     | '/admin/users'
     | '/rider/dashboard'
@@ -282,17 +345,23 @@ export interface FileRouteTypes {
     | '/admin'
     | '/login'
     | '/rider'
+    | '/api/pnl-weekly-push'
     | '/sitemap.xml'
+    | '/admin/bcr-analytics'
     | '/admin/calculate'
     | '/admin/clients'
     | '/admin/dashboard'
     | '/admin/data-check'
     | '/admin/deductions'
+    | '/admin/driver-analytics'
     | '/admin/invoices'
     | '/admin/payroll'
     | '/admin/pnl'
+    | '/admin/pnl-dashboard'
     | '/admin/reports'
+    | '/admin/revenue-analytics'
     | '/admin/riders'
+    | '/admin/shipment-analytics'
     | '/admin/upload'
     | '/admin/users'
     | '/rider/dashboard'
@@ -308,11 +377,19 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
   LoginRoute: typeof LoginRoute
   RiderRoute: typeof RiderRouteWithChildren
+  ApiPnlWeeklyPushRoute: typeof ApiPnlWeeklyPushRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/api/pnl-weekly-push': {
+      id: '/api/pnl-weekly-push'
+      path: '/api/pnl-weekly-push'
+      fullPath: '/api/pnl-weekly-push'
+      preLoaderRoute: typeof ApiPnlWeeklyPushRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sitemap.xml': {
       id: '/sitemap.xml'
       path: '/sitemap.xml'
@@ -383,6 +460,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUploadRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/shipment-analytics': {
+      id: '/admin/shipment-analytics'
+      path: '/shipment-analytics'
+      fullPath: '/admin/shipment-analytics'
+      preLoaderRoute: typeof AdminShipmentAnalyticsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/revenue-analytics': {
+      id: '/admin/revenue-analytics'
+      path: '/revenue-analytics'
+      fullPath: '/admin/revenue-analytics'
+      preLoaderRoute: typeof AdminRevenueAnalyticsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/driver-analytics': {
+      id: '/admin/driver-analytics'
+      path: '/driver-analytics'
+      fullPath: '/admin/driver-analytics'
+      preLoaderRoute: typeof AdminDriverAnalyticsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/bcr-analytics': {
+      id: '/admin/bcr-analytics'
+      path: '/bcr-analytics'
+      fullPath: '/admin/bcr-analytics'
+      preLoaderRoute: typeof AdminBcrAnalyticsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/riders': {
       id: '/admin/riders'
       path: '/riders'
@@ -395,6 +500,13 @@ declare module '@tanstack/react-router' {
       path: '/reports'
       fullPath: '/admin/reports'
       preLoaderRoute: typeof AdminReportsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/pnl-dashboard': {
+      id: '/admin/pnl-dashboard'
+      path: '/pnl-dashboard'
+      fullPath: '/admin/pnl-dashboard'
+      preLoaderRoute: typeof AdminPnlDashboardRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/pnl': {
@@ -486,10 +598,15 @@ interface AdminRouteChildren {
   AdminInvoicesRoute: typeof AdminInvoicesRoute
   AdminPayrollRoute: typeof AdminPayrollRoute
   AdminPnlRoute: typeof AdminPnlRoute
+  AdminPnlDashboardRoute: typeof AdminPnlDashboardRoute
   AdminReportsRoute: typeof AdminReportsRoute
   AdminRidersRoute: typeof AdminRidersRoute
   AdminUploadRoute: typeof AdminUploadRoute
   AdminUsersRoute: typeof AdminUsersRoute
+  AdminShipmentAnalyticsRoute: typeof AdminShipmentAnalyticsRoute
+  AdminRevenueAnalyticsRoute: typeof AdminRevenueAnalyticsRoute
+  AdminDriverAnalyticsRoute: typeof AdminDriverAnalyticsRoute
+  AdminBcrAnalyticsRoute: typeof AdminBcrAnalyticsRoute
   AdminPricingIdRoute: typeof AdminPricingIdRoute
   AdminPricingNewRoute: typeof AdminPricingNewRoute
   AdminPricingIndexRoute: typeof AdminPricingIndexRoute
@@ -504,10 +621,15 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminInvoicesRoute: AdminInvoicesRoute,
   AdminPayrollRoute: AdminPayrollRoute,
   AdminPnlRoute: AdminPnlRoute,
+  AdminPnlDashboardRoute: AdminPnlDashboardRoute,
   AdminReportsRoute: AdminReportsRoute,
   AdminRidersRoute: AdminRidersRoute,
   AdminUploadRoute: AdminUploadRoute,
   AdminUsersRoute: AdminUsersRoute,
+  AdminShipmentAnalyticsRoute: AdminShipmentAnalyticsRoute,
+  AdminRevenueAnalyticsRoute: AdminRevenueAnalyticsRoute,
+  AdminDriverAnalyticsRoute: AdminDriverAnalyticsRoute,
+  AdminBcrAnalyticsRoute: AdminBcrAnalyticsRoute,
   AdminPricingIdRoute: AdminPricingIdRoute,
   AdminPricingNewRoute: AdminPricingNewRoute,
   AdminPricingIndexRoute: AdminPricingIndexRoute,
@@ -534,6 +656,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
   LoginRoute: LoginRoute,
   RiderRoute: RiderRouteWithChildren,
+  ApiPnlWeeklyPushRoute: ApiPnlWeeklyPushRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
 }
 export const routeTree = rootRouteImport

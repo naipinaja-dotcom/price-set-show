@@ -22,5 +22,14 @@ export function getServerConfig() {
     // Add server-only values here, e.g.:
     //   databaseUrl: process.env.DATABASE_URL,
     //   stripeSecretKey: process.env.STRIPE_SECRET_KEY,
+
+    // Weekly PNL Push (lihat src/routes/api.pnl-weekly-push.ts) —
+    // pnlPushSecret wajib dikirim cron/manual trigger sebagai header
+    // `x-pnl-push-secret` biar endpoint gak bisa dipanggil orang sembarang.
+    pnlPushSecret: process.env.PNL_PUSH_SECRET,
+    slackWebhookUrl: process.env.SLACK_WEBHOOK_URL,
+    resendApiKey: process.env.RESEND_API_KEY,
+    pnlPushEmailFrom: process.env.PNL_PUSH_EMAIL_FROM,
+    pnlPushEmailTo: process.env.PNL_PUSH_EMAIL_TO,
   };
 }

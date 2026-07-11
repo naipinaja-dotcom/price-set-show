@@ -6,8 +6,11 @@ import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
-import { Plus, Loader2, CheckCircle2, Send, X } from "lucide-react";
+import { Plus, Loader2, CheckCircle2, Send, X, Download } from "lucide-react";
 import { fetchAllRows } from "@/lib/fetch-all";
+import { getLastFeePeriod, type LastFeePeriod } from "@/lib/last-fee-period";
+import { resolveRiderIdentities } from "@/lib/rider-lookup";
+import { downloadBulkPaymentCSV, downloadBulkPaymentXLS, type BulkPaymentRow } from "@/lib/bulk-payment-export";
 
 export const Route = createFileRoute("/admin/payroll")({ component: PayrollPage });
 
@@ -28,6 +31,9 @@ function PayrollPage() {
   const [newRunOpen, setNewRunOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [exportingBulk, setExportingBulk] = useState(false);
+  const [lastPeriod, setLastPeriod] = useState<LastFeePeriod | null>(null);
+  const [prefill, setPrefill] = useState<{ start: string; end: string } | null>(null);
   const {
     pageSize: detailPageSize, setPageSize: setDetailPageSize, page: detailPage, setPage: setDetailPage,
     totalPages: detailTotalPages, paged: pagedDetails, from: detailFrom, to: detailTo, total: detailTotal,
@@ -39,7 +45,7 @@ function PayrollPage() {
     if (error) toast.error(error.message); else setRuns(data ?? []);
     setLoading(false);
   };
-  useEffect(() => { loadRuns(); }, []);
+  useEffect(() => { loadRuns(); setLastPeriod(getLastFeePeriod()); }, []);
 
   const loadDetails = async (runId: string) => {
     const { data, error } = await supabase.from("payroll_details")
@@ -56,43 +62,49 @@ function PayrollPage() {
       .select().single();
     setCreating(false);
     if (error) { toast.error(error.message); return; }
-    toast.success("Run dibuat"); setRuns([data, ...runs]); setActiveRun(data); setNewRunOpen(false);
+    toast.success("Run dibuat"); setRuns([data, ...runs]); setActiveRun(data); setNewRunOpen(false); setPrefill(null);
   };
 
   const generate = async () => {
     if (!activeRun) return;
     if (!(await confirmDialog({ title: "Generate ulang payroll?", description: "Detail payroll yang lama untuk run ini akan dihapus dan dihitung ulang.", confirmText: "Generate ulang", danger: false }))) return;
     setLoading(true);
+    try {
     // delete existing details for this run
     await supabase.from("payroll_details").delete().eq("run_id", activeRun.id);
 
-    // STEP 1: Fetch semua delivery & attendance di periode ini dulu
+    // STEP 1: Fetch semua delivery & attendance di periode ini dulu (sekalian fee-nya)
     // Pakai fetchAllRows supaya data >1000 baris tidak terpotong diam-diam.
     const [deliveries, attendance] = await Promise.all([
-      fetchAllRows<{ rider_id: string }>((sb, from, to) =>
-        sb.from("delivery_records").select("rider_id")
+      fetchAllRows<{ rider_id: string | null; driver_code: string | null; fee: number | null }>((sb, from, to) =>
+        sb.from("delivery_records").select("rider_id, driver_code, fee")
           .gte("delivery_date", activeRun.period_start).lte("delivery_date", activeRun.period_end)
           .range(from, to)),
-      fetchAllRows<{ rider_id: string }>((sb, from, to) =>
-        (sb as any).from("attendance_logs").select("rider_id")
+      fetchAllRows<{ rider_id: string | null; driver_code: string | null; fee: number | null }>((sb, from, to) =>
+        (sb as any).from("attendance_logs").select("rider_id, driver_code, fee")
           .gte("log_date", activeRun.period_start).lte("log_date", activeRun.period_end)
           .range(from, to)),
     ]);
 
-    // STEP 2: Extract unique rider_id yang punya aktivitas di periode ini
+    // STEP 2: resolve identitas rider dari rider_id ATAU fallback kode mitra —
+    // baris lama yang link rider_id-nya putus (upload sebelum resolveOrCreateRiders
+    // dipasang) tetap kehitung, bukan diam-diam hilang dari payroll.
+    const { resolvedIdOf } = await resolveRiderIdentities([...deliveries, ...attendance]);
     const riderIds = [...new Set([
-      ...deliveries.map((d) => d.rider_id),
-      ...attendance.map((a) => a.rider_id),
-    ])].filter(Boolean);
+      ...deliveries.map(resolvedIdOf),
+      ...attendance.map(resolvedIdOf),
+    ])].filter((id): id is string => !!id);
 
     // STEP 3: Fetch detail rider HANYA yang ada di list rider_ids
     let riders: any[] = [];
     if (riderIds.length > 0) {
-      const { data } = await supabase.from("riders")
+      const { data, error } = await supabase.from("riders")
         .select("id, client_id, employee_id, full_name")
         .in("id", riderIds);
+      if (error) throw error;
       riders = data ?? [];
     }
+    console.log(`[Payroll Generate] ${deliveries.length} baris delivery, ${attendance.length} baris absensi, ${riderIds.length} rider_id unik, ${riders.length} rider ketemu di tabel riders.`);
 
     // STEP 4: Fetch data pendukung lain (installments, deduction_types)
     const [{ data: installments }, { data: autoTypes }] = await Promise.all([
@@ -106,26 +118,12 @@ function PayrollPage() {
     const deductionsToInsert: any[] = [];
 
     for (const rider of riders ?? []) {
-      const rDelivs = deliveries.filter((d) => d.rider_id === rider.id);
-      const rAttend = attendance.filter((a) => a.rider_id === rider.id);
+      const rDelivs = deliveries.filter((d) => resolvedIdOf(d) === rider.id);
+      const rAttend = attendance.filter((a) => resolvedIdOf(a) === rider.id);
 
-      // Fetch detail delivery & attendance dengan fee untuk rider ini
-      const [{ data: rDelivDetails }, { data: rAttendDetails }] = await Promise.all([
-        rDelivs.length > 0 
-          ? supabase.from("delivery_records").select("fee")
-              .eq("rider_id", rider.id)
-              .gte("delivery_date", activeRun.period_start).lte("delivery_date", activeRun.period_end)
-          : Promise.resolve({ data: [] }),
-        rAttend.length > 0
-          ? (supabase as any).from("attendance_logs").select("fee")
-              .eq("rider_id", rider.id)
-              .gte("log_date", activeRun.period_start).lte("log_date", activeRun.period_end)
-          : Promise.resolve({ data: [] }),
-      ]);
-
-      const deliveryFee = (rDelivDetails ?? []).reduce((s, d) => s + Number(d.fee || 0), 0);
-      const deliveryCount = rDelivDetails?.length ?? 0;
-      const attendanceFee = (rAttendDetails ?? []).reduce((s: number, a: any) => s + Number(a.fee || 0), 0);
+      const deliveryFee = rDelivs.reduce((s, d) => s + Number(d.fee || 0), 0);
+      const deliveryCount = rDelivs.length;
+      const attendanceFee = rAttend.reduce((s, a) => s + Number(a.fee || 0), 0);
       // Insentif & penalty udah dianyam ke dalam attendance_fee sama Type E
       // engine (bukan line-item terpisah lagi kayak jalur lama).
       const incentiveTotal = 0;
@@ -169,15 +167,19 @@ function PayrollPage() {
     }
     if (detailsToInsert.length) {
       const { error: e1 } = await supabase.from("payroll_details").insert(detailsToInsert);
-      if (e1) { setLoading(false); return toast.error(e1.message); }
+      if (e1) throw e1;
     }
     if (deductionsToInsert.length) {
       const { error: e2 } = await supabase.from("payroll_deductions").insert(deductionsToInsert);
-      if (e2) { setLoading(false); return toast.error(e2.message); }
+      if (e2) throw e2;
     }
     toast.success(`Generate ${detailsToInsert.length} detail`);
     loadDetails(activeRun.id);
-    setLoading(false);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const finalize = async () => {
@@ -224,8 +226,76 @@ function PayrollPage() {
     }
   };
 
+  // Bulk payment — file transfer bank buat Finance, format ngikutin persis
+  // template yang udah dipakai (lihat src/lib/bulk-payment-export.ts).
+  // Data bank rider (bank_name/bank_account/bank_account_holder) sengaja
+  // di-fetch on-demand di sini, bukan ditaruh di query list utama, biar gak
+  // nempel terus di state layar (data rekening termasuk sensitif).
+  const exportBulkPayment = async (format: "csv" | "xls") => {
+    if (!activeRun || details.length === 0) return toast.error("Belum ada detail payroll untuk run ini");
+    setExportingBulk(true);
+    try {
+      const riderIds = [...new Set(details.map((d) => d.rider_id))];
+      const { data: bankData, error } = await (supabase as any)
+        .from("riders")
+        .select("id, full_name, bank_name, bank_account, bank_account_holder")
+        .in("id", riderIds);
+      if (error) throw error;
+      const bankOf = new Map((bankData ?? []).map((r: any) => [r.id, r]));
+
+      // Gabung per rider (jaga-jaga kalau 1 rider punya >1 baris detail di run yang sama)
+      const byRider = new Map<string, number>();
+      for (const d of details) byRider.set(d.rider_id, (byRider.get(d.rider_id) ?? 0) + Number(d.net_pay || 0));
+
+      const rows: BulkPaymentRow[] = [];
+      const missingBank: string[] = [];
+      for (const [riderId, amount] of byRider) {
+        if (amount <= 0) continue; // gak perlu transfer kalau net pay 0/negatif
+        const r = bankOf.get(riderId) as { full_name?: string; bank_name?: string | null; bank_account?: string | null; bank_account_holder?: string | null } | undefined;
+        if (!r?.bank_name || !r?.bank_account) {
+          missingBank.push(r?.full_name ?? riderId);
+          continue;
+        }
+        rows.push({
+          bankName: r.bank_name,
+          accountNumber: r.bank_account,
+          receiverName: r.bank_account_holder || r.full_name || "",
+          amount,
+        });
+      }
+
+      if (missingBank.length > 0) {
+        toast.warning(`${missingBank.length} rider dilewati (belum ada data bank): ${missingBank.slice(0, 5).join(", ")}${missingBank.length > 5 ? ", ..." : ""}`);
+      }
+      if (rows.length === 0) return toast.error("Tidak ada rider dengan data bank lengkap untuk di-export");
+
+      const filename = `Bulk Payment - ${activeRun.name} - ${activeRun.period_end}`;
+      if (format === "csv") downloadBulkPaymentCSV(filename, rows);
+      else downloadBulkPaymentXLS(filename, rows);
+      toast.success(`Bulk payment ${rows.length} rider berhasil di-generate`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setExportingBulk(false);
+    }
+  };
+
   return (
     <AdminLayout title="Payroll">
+      {lastPeriod && !runs.some((r) => r.period_start === lastPeriod.from && r.period_end === lastPeriod.to) && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
+          <span>
+            Kamu baru Hitung Fee &amp; commit <b>{lastPeriod.rowCount} baris</b> untuk <b>{lastPeriod.clientName}</b>, periode <b>{lastPeriod.from} → {lastPeriod.to}</b>.
+            Ingat: kalau kamu Hitung Fee client lain juga buat periode ini, Payroll Run tetap ngambil SEMUA client sekaligus (bukan cuma yang terakhir dihitung) — jadi generate boleh langsung dijalankan setelah semua client selesai di-commit.
+          </span>
+          <button
+            onClick={() => { setPrefill({ start: lastPeriod.from, end: lastPeriod.to }); setNewRunOpen(true); }}
+            className="shrink-0 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm"
+          >
+            Buat Run periode ini
+          </button>
+        </div>
+      )}
       <div className="flex gap-6">
         <aside className="w-64 shrink-0">
           <button onClick={() => setNewRunOpen(true)} disabled={creating}
@@ -260,6 +330,22 @@ function PayrollPage() {
                   </button>
                   <button onClick={publish} disabled={activeRun.status === "published" || publishing} className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1">
                     {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Publish
+                  </button>
+                  <button
+                    onClick={() => exportBulkPayment("csv")}
+                    disabled={activeRun.status === "draft" || exportingBulk || details.length === 0}
+                    title={activeRun.status === "draft" ? "Finalize dulu sebelum generate bulk payment" : "Download CSV buat upload ke bank"}
+                    className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1"
+                  >
+                    {exportingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Bulk Payment (CSV)
+                  </button>
+                  <button
+                    onClick={() => exportBulkPayment("xls")}
+                    disabled={activeRun.status === "draft" || exportingBulk || details.length === 0}
+                    title={activeRun.status === "draft" ? "Finalize dulu sebelum generate bulk payment" : "Download XLS buat upload ke bank"}
+                    className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1"
+                  >
+                    {exportingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Bulk Payment (XLS)
                   </button>
                 </div>
               </div>
@@ -296,13 +382,23 @@ function PayrollPage() {
           )}
         </section>
       </div>
-      {newRunOpen && <NewRunModal creating={creating} onClose={() => setNewRunOpen(false)} onCreate={createRun} />}
+      {newRunOpen && (
+        <NewRunModal
+          creating={creating}
+          initialStart={prefill?.start}
+          initialEnd={prefill?.end}
+          onClose={() => { setNewRunOpen(false); setPrefill(null); }}
+          onCreate={createRun}
+        />
+      )}
     </AdminLayout>
   );
 }
 
-function NewRunModal({ creating, onClose, onCreate }: {
+function NewRunModal({ creating, initialStart, initialEnd, onClose, onCreate }: {
   creating: boolean;
+  initialStart?: string;
+  initialEnd?: string;
   onClose: () => void;
   onCreate: (input: { name: string; period_type: string; period_start: string; period_end: string }) => void;
 }) {
@@ -311,8 +407,8 @@ function NewRunModal({ creating, onClose, onCreate }: {
   const lastOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
   const [name, setName] = useState(`Payroll ${today.toLocaleString("id-ID", { month: "long", year: "numeric" })}`);
   const [periodType, setPeriodType] = useState("monthly");
-  const [start, setStart] = useState(firstOfMonth);
-  const [end, setEnd] = useState(lastOfMonth);
+  const [start, setStart] = useState(initialStart ?? firstOfMonth);
+  const [end, setEnd] = useState(initialEnd ?? lastOfMonth);
 
   const submit = () => {
     if (!name.trim()) return toast.error("Nama run wajib diisi");
@@ -328,6 +424,9 @@ function NewRunModal({ creating, onClose, onCreate }: {
           <h2 className="text-lg font-semibold">Payroll Run Baru</h2>
           <button onClick={onClose} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
         </div>
+        {initialStart && (
+          <p className="text-xs text-muted-foreground mb-3">Tanggal diisi otomatis dari periode Hitung Fee terakhir — bisa diubah kalau perlu.</p>
+        )}
         <div className="space-y-3 text-sm">
           <div>
             <label className="font-medium">Nama Run</label>

@@ -1,25 +1,19 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { listPricingSchemes } from "@/lib/pricing-store";
-import type { PricingScheme, SchemeFor } from "@/lib/pricing-types";
-import { calcScheme, type DeliveryRow } from "@/lib/pricing-calc";
+import type { PricingScheme } from "@/lib/pricing-types";
+import type { DeliveryRow } from "@/lib/pricing-calc";
+import { computePnl, type ClientPnl } from "@/lib/pnl-engine";
 import { formatRupiah } from "@/lib/format";
 import { toast } from "sonner";
-import { Loader2, Play, TrendingUp, AlertTriangle } from "lucide-react";
+import { Loader2, Play, TrendingUp, AlertTriangle, LayoutDashboard } from "lucide-react";
 
 export const Route = createFileRoute("/admin/pnl")({ component: PnlPage });
 
 type ClientLite = { id: string; name: string };
-type PnlRow = {
-  clientId: string;
-  client: string;
-  revenue: number | null; // null = belum ada skema client
-  cost: number;
-  margin: number | null;
-  marginPct: number | null;
-};
+type PnlRow = ClientPnl;
 
 const firstOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10); };
 const today = () => new Date().toISOString().slice(0, 10);
@@ -38,12 +32,6 @@ function PnlPage() {
     listPricingSchemes().then(setSchemes);
   }, []);
 
-  // pilih skema aktif: yang khusus client itu diutamakan, lalu yang "semua client"
-  const pickScheme = (cid: string, kind: SchemeFor) => {
-    const cands = schemes.filter((s) => s.scheme_for === kind && s.params?.version === 1 && (s.client_id === cid || s.client_id === null));
-    return cands.sort((a, b) => (a.client_id === cid ? -1 : 1) - (b.client_id === cid ? -1 : 1))[0];
-  };
-
   const run = async () => {
     if (from > to) return toast.error("Tanggal 'dari' tidak boleh setelah 'sampai'");
     setRunning(true);
@@ -56,26 +44,9 @@ function PnlPage() {
       if (error) throw error;
 
       const all = (data ?? []) as unknown as (DeliveryRow & { client_id: string | null })[];
-      const byClient = new Map<string, DeliveryRow[]>();
-      for (const r of all) {
-        const cid = r.client_id ?? "(tanpa client)";
-        (byClient.get(cid) ?? byClient.set(cid, []).get(cid)!).push(r);
-      }
-
-      const nameOf = new Map(clients.map((c) => [c.id, c.name]));
-      const out: PnlRow[] = [];
-      for (const [cid, crows] of byClient) {
-        const riderS = pickScheme(cid, "rider");
-        const clientS = pickScheme(cid, "client");
-        const cost = riderS ? calcScheme(riderS.params, crows).subtotal : 0;
-        const revenue = clientS ? calcScheme(clientS.params, crows).subtotal : null;
-        const margin = revenue === null ? null : revenue - cost;
-        const marginPct = revenue && revenue > 0 && margin !== null ? (margin / revenue) * 100 : null;
-        out.push({ clientId: cid, client: nameOf.get(cid) ?? "(tanpa client)", revenue, cost, margin, marginPct });
-      }
-      out.sort((a, b) => (b.margin ?? -Infinity) - (a.margin ?? -Infinity));
-      setRows(out);
-      if (out.length === 0) toast.message("Tidak ada data pengiriman di rentang ini.");
+      const { perClient } = computePnl(all, schemes, clients);
+      setRows(perClient);
+      if (perClient.length === 0) toast.message("Tidak ada data pengiriman di rentang ini.");
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -90,7 +61,10 @@ function PnlPage() {
   const maxMargin = Math.max(1, ...(rows ?? []).map((r) => Math.abs(r.margin ?? 0)));
 
   return (
-    <AdminLayout title="PnL / Margin" subtitle="Revenue (tagihan client) − Cost (bayar rider) = Margin. Dihitung langsung dari data pengiriman.">
+    <AdminLayout title="Margin Analytics" subtitle="Revenue (tagihan client) − Cost (bayar rider) = Margin, per client. Dihitung langsung dari data pengiriman.">
+      <Link to="/admin/pnl-dashboard" className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline mb-4">
+        <LayoutDashboard className="w-4 h-4" /> Lihat Executive Dashboard (ringkasan + tren)
+      </Link>
       {/* Kontrol */}
       <div className="rounded-lg border border-border bg-card p-5 mb-4 flex flex-wrap items-end gap-3 text-sm">
         <div className="flex flex-col gap-1.5">

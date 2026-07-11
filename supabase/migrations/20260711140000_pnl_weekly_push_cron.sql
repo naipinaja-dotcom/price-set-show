@@ -1,0 +1,44 @@
+-- Weekly PNL Push — pg_cron scheduling (Fase 2, C.5)
+--
+-- Ini BUKAN migration otomatis seperti file lain di folder ini. Isinya sengaja
+-- di-comment out karena butuh 2 nilai yang cuma diketahui pas deploy:
+--   1. URL production project ini (mis. https://xxxx.vercel.app)
+--   2. Isi env PNL_PUSH_SECRET yang sama persis dengan yang di-set di server
+--
+-- Cara aktivasi (jalankan manual di Supabase SQL Editor, BUKAN lewat migration
+-- runner otomatis):
+--   1. Buka Supabase Dashboard -> Database -> Extensions -> aktifkan
+--      "pg_cron" dan "pg_net" kalau belum aktif.
+--   2. Copy blok SQL di bawah, ganti dua placeholder:
+--        <PRODUCTION_URL>   -> domain production (tanpa trailing slash)
+--        <PNL_PUSH_SECRET>  -> isi env PNL_PUSH_SECRET
+--   3. Jalankan di SQL Editor. Sekali jalan, cron langsung terjadwal —
+--      tidak perlu diulang tiap deploy.
+--   4. Cek jadwal aktif: SELECT * FROM cron.job;
+--   5. Cek histori run & response: SELECT * FROM cron.job_run_details
+--      ORDER BY start_time DESC LIMIT 10;
+--
+-- Jadwal di bawah: setiap Senin jam 07:00 WIB (00:00 UTC).
+-- Format cron: menit jam tanggal bulan hari-minggu (semua dalam UTC).
+
+-- create extension if not exists pg_cron;
+-- create extension if not exists pg_net;
+--
+-- select cron.schedule(
+--   'weekly-pnl-push',
+--   '0 0 * * 1', -- tiap Senin 00:00 UTC (07:00 WIB)
+--   $$
+--   select net.http_post(
+--     url := '<PRODUCTION_URL>/api/pnl-weekly-push',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'x-pnl-push-secret', '<PNL_PUSH_SECRET>'
+--     ),
+--     body := '{}'::jsonb
+--   );
+--   $$
+-- );
+
+-- Untuk ganti jadwal atau matikan cron:
+--   select cron.unschedule('weekly-pnl-push');
+--   -- lalu jalankan ulang cron.schedule(...) di atas dengan jadwal baru.

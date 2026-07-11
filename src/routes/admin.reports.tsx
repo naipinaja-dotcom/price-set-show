@@ -67,15 +67,19 @@ function ClientReport({ runId, run }: { runId: string; run?: Run }) {
     if (!runId) return;
     (async () => {
       setLoading(true);
-      const [{ data: details, error }, { data: clients }] = await Promise.all([
-        supabase.from("payroll_details").select("*").eq("run_id", runId),
-        supabase.from("clients").select("id, name"),
-      ]);
+      // Ditarik dari report_summary_weekly (canonical source), bukan query
+      // langsung ke payroll_details — biar angka konsisten sama report lain.
+      // Cast `as any`: view ini belum ada di types.ts generated Supabase,
+      // sama seperti pola delivery_records/attendance_logs di finance-worksheet.tsx.
+      const { data: details, error } = await (supabase as any)
+        .from("report_summary_weekly")
+        .select("*")
+        .eq("run_id", runId);
       if (error) { toast.error(error.message); setLoading(false); return; }
       const byClient = new Map<string, ClientRow>();
       for (const d of details ?? []) {
         const cid = d.client_id ?? "_";
-        const name = clients?.find((c) => c.id === d.client_id)?.name ?? "Tanpa Client";
+        const name = d.client_name ?? "Tanpa Client";
         const acc = byClient.get(cid) ?? {
           client_id: d.client_id, client_name: name,
           rider_count: 0, delivery_count: 0, delivery_fee: 0, attendance_fee: 0,

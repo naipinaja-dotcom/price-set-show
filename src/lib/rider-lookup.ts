@@ -32,3 +32,54 @@ export async function resolveOrCreateRiders(
   (inserted ?? []).forEach((r) => map.set(r.employee_id, r.id));
   return { map, createdCodes: missing };
 }
+
+export interface RiderIdentityRow {
+  rider_id?: string | null;
+  driver_code?: string | null;
+}
+
+export interface RiderIdentity {
+  id: string;
+  full_name: string;
+  employee_id: string;
+  client_id?: string | null;
+}
+
+// Sebagian delivery_records/attendance_logs bisa punya rider_id NULL (baris lama
+// sebelum resolveOrCreateRiders dipasang, atau match sempat gagal) walau
+// driver_code (kode mitra)-nya valid. Fungsi ini nyari identitas rider dari
+// KEDUANYA — rider_id kalau ada, fallback ke driver_code→employee_id kalau
+// nggak — biar baris itu tetap kehitung/ketemu namanya, bukan diam-diam ke-skip.
+// Dipakai baca (Hitung Fee, Payroll Run), BUKAN bikin rider baru (beda dari
+// resolveOrCreateRiders yang khusus upload).
+export async function resolveRiderIdentities(rows: RiderIdentityRow[]): Promise<{
+  byId: Map<string, RiderIdentity>;
+  byCode: Map<string, RiderIdentity>;
+  resolvedIdOf: (row: RiderIdentityRow) => string | null;
+  nameOf: (row: RiderIdentityRow) => string;
+}> {
+  const ids = [...new Set(rows.map((r) => r.rider_id).filter((v): v is string => !!v))];
+  const codes = [...new Set(rows.filter((r) => !r.rider_id && r.driver_code).map((r) => r.driver_code as string))];
+  const byId = new Map<string, RiderIdentity>();
+  const byCode = new Map<string, RiderIdentity>();
+
+  const queries: Promise<{ data: RiderIdentity[] | null }>[] = [];
+  if (ids.length > 0) queries.push(supabase.from("riders").select("id, full_name, employee_id, client_id").in("id", ids) as any);
+  if (codes.length > 0) queries.push(supabase.from("riders").select("id, full_name, employee_id, client_id").in("employee_id", codes) as any);
+  const results = await Promise.all(queries);
+  for (const res of results) {
+    for (const r of res.data ?? []) {
+      byId.set(r.id, r);
+      byCode.set(r.employee_id, r);
+    }
+  }
+
+  const resolvedIdOf = (row: RiderIdentityRow) => row.rider_id || (row.driver_code ? byCode.get(row.driver_code)?.id ?? null : null);
+  const nameOf = (row: RiderIdentityRow) =>
+    (row.rider_id && byId.get(row.rider_id)?.full_name) ||
+    (row.driver_code && byCode.get(row.driver_code)?.full_name) ||
+    row.driver_code ||
+    "(tanpa rider)";
+
+  return { byId, byCode, resolvedIdOf, nameOf };
+}

@@ -50,8 +50,11 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
     (async () => {
       setLoading(true);
       try {
-        const { data: details, error: e1 } = await sb.from("payroll_details")
-          .select("id, rider_id, client_id, delivery_count, gross_earning, net_pay, remarks, riders(full_name, employee_id)")
+        // Ditarik dari report_summary_weekly (canonical source), bukan
+        // langsung ke payroll_details — biar konsisten sama ClientReport.
+        // `id:detail_id` biar bentuk objeknya gak berubah dari sebelumnya.
+        const { data: details, error: e1 } = await sb.from("report_summary_weekly")
+          .select("id:detail_id, rider_id, client_id, delivery_count, gross_earning, net_pay, remarks, rider_name, rider_employee_id")
           .eq("run_id", runId);
         if (e1) throw e1;
 
@@ -103,12 +106,12 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
 
         const built: RiderRow[] = (details ?? []).map((d: {
           id: string; rider_id: string; delivery_count: number; gross_earning: number; net_pay: number; remarks: string | null;
-          riders?: { full_name?: string; employee_id?: string };
+          rider_name?: string | null; rider_employee_id?: string | null;
         }) => ({
           detailId: d.id,
           rider_id: d.rider_id,
-          name: d.riders?.full_name ?? "(tanpa nama)",
-          employeeId: d.riders?.employee_id ?? "",
+          name: d.rider_name ?? "(tanpa nama)",
+          employeeId: d.rider_employee_id ?? "",
           orderCount: d.delivery_count,
           feeRider: Number(d.gross_earning),
           activeDates: datesByRider.get(d.rider_id)?.size ?? 0,
