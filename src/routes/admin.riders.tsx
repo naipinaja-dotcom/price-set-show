@@ -238,6 +238,20 @@ function RiderImportModal({ clients, onClose, onDone }:
     ]));
   };
 
+  // CSV Tanggal Lahir biasanya format Indonesia DD-MM-YYYY (mis. "15-02-1994"),
+  // tapi kolom birth_date di DB bertipe `date` (butuh YYYY-MM-DD). Dikirim
+  // mentah bikin Postgres salah baca angka hari sebagai bulan -> error
+  // "date/time field value out of range" kalau hari > 12.
+  const parseBirthDate = (raw: string): string | null => {
+    const t = raw.trim();
+    if (!t) return null;
+    if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(t)) return t; // udah ISO
+    const m = t.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/); // DD-MM-YYYY atau DD/MM/YYYY
+    if (!m) return null;
+    const [, d, mo, y] = m;
+    return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  };
+
   const doImport = async () => {
     if (rows.length === 0) return toast.error("Upload CSV dulu");
     setImporting(true);
@@ -266,11 +280,13 @@ function RiderImportModal({ clients, onClose, onDone }:
       const rawStatus = (o.status || "active").toLowerCase().replace(/\s+/g, "_");
       let status: string = STATUS_ALIASES[rawStatus] ?? rawStatus;
       if (!validStatus.includes(status)) { warnings.push(`Baris ${line}: status "${o.status}" tidak dikenal — pakai "active"`); status = "active"; }
+      const birth_date = parseBirthDate(o.birth_date || "");
+      if (o.birth_date && !birth_date) warnings.push(`Baris ${line}: tanggal lahir "${o.birth_date}" tidak dikenal formatnya — dikosongkan`);
       payload.push({
         employee_id: o.employee_id, full_name: o.full_name,
         nik: o.nik || null, phone: o.phone || null, email: o.email || null, client_id, status,
         bank_name: o.bank_name || null, bank_account: o.bank_account || null, bank_account_holder: o.bank_account_holder || null,
-        birth_date: o.birth_date || null, birth_place: o.birth_place || null, notes: o.notes || null,
+        birth_date, birth_place: o.birth_place || null, notes: o.notes || null,
       });
     });
     if (payload.length === 0) { setImporting(false); return toast.error("Tidak ada baris valid untuk diimpor"); }
