@@ -7,33 +7,45 @@ import type { PricingScheme } from "@/lib/pricing-types";
 import type { DeliveryRow } from "@/lib/pricing-calc";
 import { computePnl, type ClientPnl } from "@/lib/pnl-engine";
 import { formatRupiah } from "@/lib/format";
+import { useIntelligenceDate } from "@/lib/use-intelligence-date";
 import { toast } from "sonner";
-import { Loader2, Play, TrendingUp, AlertTriangle, LayoutDashboard } from "lucide-react";
+import { TrendingUp, AlertTriangle, LayoutDashboard } from "lucide-react";
 
 export const Route = createFileRoute("/admin/pnl")({ component: PnlPage });
 
 type ClientLite = { id: string; name: string };
 type PnlRow = ClientPnl;
 
-const firstOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10); };
-const today = () => new Date().toISOString().slice(0, 10);
 const jt = (n: number) => "Rp " + (n / 1_000_000).toLocaleString("id-ID", { maximumFractionDigits: 1 }) + " jt";
 
 function PnlPage() {
   const [clients, setClients] = useState<ClientLite[]>([]);
   const [schemes, setSchemes] = useState<PricingScheme[]>([]);
-  const [from, setFrom] = useState(firstOfMonth());
-  const [to, setTo] = useState(today());
+  const { from, to } = useIntelligenceDate();
   const [running, setRunning] = useState(false);
   const [rows, setRows] = useState<PnlRow[] | null>(null);
 
+  // Ga ada filter sendiri di sini — tanggal acuan diatur dari Executive
+  // Dashboard (lihat use-intelligence-date.ts), halaman ini otomatis hitung
+  // begitu client/skema selesai dimuat.
   useEffect(() => {
-    supabase.from("clients").select("id, name").order("name").then(({ data }) => setClients(data ?? []));
-    listPricingSchemes().then(setSchemes);
+    (async () => {
+      const [{ data: clientsData }, schemesData] = await Promise.all([
+        supabase.from("clients").select("id, name").order("name"),
+        listPricingSchemes(),
+      ]);
+      setClients(clientsData ?? []);
+      setSchemes(schemesData);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (clients.length > 0 && schemes.length >= 0) run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients, schemes]);
+
   const run = async () => {
-    if (from > to) return toast.error("Tanggal 'dari' tidak boleh setelah 'sampai'");
     setRunning(true);
     setRows(null);
     try {
@@ -61,26 +73,10 @@ function PnlPage() {
   const maxMargin = Math.max(1, ...(rows ?? []).map((r) => Math.abs(r.margin ?? 0)));
 
   return (
-    <AdminLayout title="Margin Analytics" subtitle="Revenue (tagihan client) − Cost (bayar rider) = Margin, per client. Dihitung langsung dari data pengiriman.">
+    <AdminLayout title="Margin Analytics" subtitle={`Revenue (tagihan client) − Cost (bayar rider) = Margin, per client. Periode ${from} → ${to} (atur di Executive Dashboard).`}>
       <Link to="/admin/pnl-dashboard" className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline mb-4">
-        <LayoutDashboard className="w-4 h-4" /> Lihat Executive Dashboard (ringkasan + tren)
+        <LayoutDashboard className="w-4 h-4" /> Ubah tanggal di Executive Dashboard
       </Link>
-      {/* Kontrol */}
-      <div className="rounded-lg border border-border bg-card p-5 mb-4 flex flex-wrap items-end gap-3 text-sm">
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Dari Tanggal</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2" />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Sampai Tanggal</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2" />
-        </div>
-        <button onClick={run} disabled={running}
-          className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 font-medium disabled:opacity-50">
-          {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {running ? "Menghitung…" : "Hitung PnL"}
-        </button>
-      </div>
 
       {rows && (
         <>
@@ -158,10 +154,10 @@ function PnlPage() {
         </>
       )}
 
-      {!rows && !running && (
+      {!rows && (
         <div className="rounded-lg border border-dashed border-border p-10 text-center text-muted-foreground">
           <TrendingUp className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          Pilih periode lalu klik <b className="mx-1">Hitung PnL</b> untuk lihat margin per client.
+          {running ? "Menghitung margin per client…" : "Memuat…"}
         </div>
       )}
     </AdminLayout>

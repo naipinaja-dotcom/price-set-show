@@ -8,17 +8,24 @@ import type { DeliveryRow } from "@/lib/pricing-calc";
 import { computePnl, buildTrend, type ClientPnl, type TrendGranularity } from "@/lib/pnl-engine";
 import { formatRupiah } from "@/lib/format";
 import { useAuth } from "@/lib/auth";
+import { useIntelligenceDate } from "@/lib/use-intelligence-date";
 import { triggerWeeklyPnlPushManual } from "@/lib/api/pnl-push.functions";
 import { toast } from "sonner";
-import { Loader2, Play, TrendingUp, ArrowRight, AlertTriangle, Send, CheckCircle2, XCircle } from "lucide-react";
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Line, ComposedChart } from "recharts";
+import { Loader2, TrendingUp, ArrowRight, AlertTriangle, Send, CheckCircle2, XCircle, DollarSign, TrendingDown, Percent, Activity, BellRing } from "lucide-react";
+import { usePayrollOverdue } from "@/lib/use-payroll-overdue";
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Line, LineChart, ReferenceLine } from "recharts";
+
+function autoGranularity(from: string, to: string): TrendGranularity {
+  const days = Math.round((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86_400_000) + 1;
+  if (days > 60) return "monthly";
+  if (days > 14) return "weekly";
+  return "daily";
+}
 
 export const Route = createFileRoute("/admin/pnl-dashboard")({ component: ExecutiveDashboard });
 
 type ClientLite = { id: string; name: string };
 
-const firstOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10); };
-const today = () => new Date().toISOString().slice(0, 10);
 const jt = (n: number) => "Rp " + (n / 1_000_000).toLocaleString("id-ID", { maximumFractionDigits: 1 }) + " jt";
 
 type PnlSnapshot = {
@@ -38,9 +45,8 @@ function ExecutiveDashboard() {
   const { session } = useAuth();
   const [clients, setClients] = useState<ClientLite[]>([]);
   const [schemes, setSchemes] = useState<PricingScheme[]>([]);
-  const [from, setFrom] = useState(firstOfMonth());
-  const [to, setTo] = useState(today());
-  const [granularity, setGranularity] = useState<TrendGranularity>("daily");
+  const { from, setFrom, to, setTo, resetToDefault } = useIntelligenceDate();
+  const overdueStatus = usePayrollOverdue();
   const [running, setRunning] = useState(false);
   const [perClient, setPerClient] = useState<ClientPnl[] | null>(null);
   const [snapshots, setSnapshots] = useState<PnlSnapshot[]>([]);
@@ -55,11 +61,29 @@ function ExecutiveDashboard() {
       .then(({ data }: { data: PnlSnapshot[] | null }) => setSnapshots(data ?? []));
   };
 
+  const [initialized, setInitialized] = useState(false);
   useEffect(() => {
-    supabase.from("clients").select("id, name").order("name").then(({ data }) => setClients(data ?? []));
-    listPricingSchemes().then(setSchemes);
+    (async () => {
+      const [{ data: clientsData }, schemesData] = await Promise.all([
+        supabase.from("clients").select("id, name").order("name"),
+        listPricingSchemes(),
+      ]);
+      setClients(clientsData ?? []);
+      setSchemes(schemesData);
+      setInitialized(true);
+    })();
     loadSnapshots();
   }, []);
+
+  useEffect(() => {
+    if (initialized) run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialized]);
+
+  useEffect(() => {
+    if (initialized) run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
 
   const testWeeklyPush = async () => {
     if (!session?.access_token) return toast.error("Sesi admin habis — login ulang");
@@ -100,6 +124,7 @@ function ExecutiveDashboard() {
     }
   };
 
+
   const totRevenue = (perClient ?? []).reduce((s, r) => s + (r.revenue ?? 0), 0);
   const totCost = (perClient ?? []).reduce((s, r) => s + r.cost, 0);
   const totMargin = totRevenue - totCost;
@@ -107,161 +132,204 @@ function ExecutiveDashboard() {
   const clientsWithRevenue = (perClient ?? []).filter((r) => r.revenue !== null);
   const rugiCount = clientsWithRevenue.filter((r) => (r.marginPct ?? 0) < 0).length;
   const thinCount = clientsWithRevenue.filter((r) => (r.marginPct ?? 100) >= 0 && (r.marginPct ?? 100) < 15).length;
-  const trend = perClient ? buildTrend(perClient, granularity) : [];
+  const trend = perClient ? buildTrend(perClient, autoGranularity(from, to)) : [];
   const topByMargin = clientsWithRevenue.slice().sort((a, b) => (b.margin ?? 0) - (a.margin ?? 0)).slice(0, 5);
   const missingRevenue = (perClient ?? []).filter((r) => r.revenue === null);
   const maxTopMargin = Math.max(1, ...topByMargin.map((r) => Math.abs(r.margin ?? 0)));
 
   return (
     <AdminLayout title="Executive Dashboard" subtitle="Ringkasan bisnis: Revenue, Cost, Margin, dan tren BCR lintas periode.">
-      {/* Kontrol */}
-      <div className="rounded-lg border border-border bg-card p-5 mb-4 flex flex-wrap items-end gap-3 text-sm">
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Dari Tanggal</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2" />
+
+      {/* ── Date range control ── */}
+      <div className="rounded-xl border border-border bg-card/60 backdrop-blur-sm p-4 mb-5 flex flex-wrap items-end gap-3 text-sm shadow-sm">
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Dari</label>
+          <input
+            type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+            className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow cursor-pointer"
+          />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Sampai Tanggal</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2" />
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Sampai</label>
+          <input
+            type="date" value={to} onChange={(e) => setTo(e.target.value)}
+            className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow cursor-pointer"
+          />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Granularitas Tren</label>
-          <div className="flex rounded-md border border-border overflow-hidden">
-            {(["daily", "weekly", "monthly"] as TrendGranularity[]).map((g) => (
-              <button key={g} onClick={() => setGranularity(g)}
-                className={"px-3 py-2 text-sm " + (granularity === g ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted")}>
-                {g === "daily" ? "Harian" : g === "weekly" ? "Mingguan" : "Bulanan"}
-              </button>
-            ))}
-          </div>
-        </div>
-        <button onClick={run} disabled={running}
-          className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 font-medium disabled:opacity-50">
-          {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {running ? "Menghitung…" : "Hitung"}
+        <button
+          type="button" onClick={resetToDefault}
+          className="rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+        >
+          7 Hari Terakhir
         </button>
-      </div>
-
-      {/* Weekly PNL Push — histori & tombol tes manual. Cron mingguan yang
-          beneran jalan lewat /api/pnl-weekly-push, lihat migration pg_cron. */}
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <div>
-            <h3 className="text-sm font-semibold">Weekly PNL Push</h3>
-            <p className="text-xs text-muted-foreground">Dikirim otomatis tiap minggu ke Slack &amp; Email (butuh cron aktif — lihat setup di Supabase).</p>
-          </div>
-          <button onClick={testWeeklyPush} disabled={pushing}
-            className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50">
-            {pushing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            {pushing ? "Mengirim…" : "Test Kirim Sekarang"}
-          </button>
-        </div>
-        {snapshots.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Belum ada histori push.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[560px]">
-              <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="p-2">Periode</th>
-                  <th className="p-2 text-right">Margin</th>
-                  <th className="p-2">Slack</th>
-                  <th className="p-2">Email</th>
-                  <th className="p-2">Trigger</th>
-                </tr>
-              </thead>
-              <tbody>
-                {snapshots.map((s) => (
-                  <tr key={s.id} className="border-t border-border">
-                    <td className="p-2">{s.week_start} → {s.week_end}</td>
-                    <td className="p-2 text-right">{formatRupiah(s.total_margin)} ({s.total_margin_pct.toFixed(1)}%)</td>
-                    <td className="p-2">
-                      {s.push_status?.slack?.ok
-                        ? <CheckCircle2 className="w-4 h-4 text-success" />
-                        : <span title={s.push_status?.slack?.error}><XCircle className="w-4 h-4 text-destructive" /></span>}
-                    </td>
-                    <td className="p-2">
-                      {s.push_status?.email?.ok
-                        ? <CheckCircle2 className="w-4 h-4 text-success" />
-                        : <span title={s.push_status?.email?.error}><XCircle className="w-4 h-4 text-destructive" /></span>}
-                    </td>
-                    <td className="p-2 text-xs text-muted-foreground capitalize">{s.triggered_by}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {perClient && (
-        <>
-          {/* KPI */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <Kpi label="Revenue" value={jt(totRevenue)} />
-            <Kpi label="Cost" value={jt(totCost)} />
-            <Kpi label="Gross Margin" value={jt(totMargin)} accent="success" />
-            <Kpi label="Margin %" value={totPct.toFixed(1) + "%"} accent="success" />
-          </div>
-
-          {(rugiCount > 0 || thinCount > 0) && (
-            <div className="flex items-start gap-2 mb-4 text-sm rounded-lg border border-warning/30 bg-warning/5 p-3 text-warning">
-              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-              <span>
-                {rugiCount > 0 && <b>{rugiCount} client RUGI</b>}{rugiCount > 0 && thinCount > 0 && ", "}
-                {thinCount > 0 && <b>{thinCount} client margin tipis (&lt;15%)</b>}. Lihat rincian di{" "}
-                <Link to="/admin/pnl" className="underline">Margin Analytics</Link>.
-              </span>
-            </div>
+        <div className="flex items-center gap-2 ml-auto">
+          {running ? (
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground animate-pulse">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Menghitung…
+            </span>
+          ) : (
+            <span className="text-[11px] text-muted-foreground">Berlaku untuk semua halaman Intelligence Mode.</span>
           )}
+        </div>
+      </div>
 
-          {/* Tren BCR */}
-          <div className="rounded-lg border border-border bg-card p-5 mb-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold">Tren Revenue vs Cost & BCR (Margin %)</h3>
+      {/* ── Payroll overdue notice (P1) ── */}
+      {overdueStatus.overdue && (
+        <Link
+          to="/admin/payroll"
+          className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/8 px-4 py-3 mb-5 hover:bg-amber-500/15 transition-colors"
+        >
+          <BellRing className="w-4 h-4 text-amber-500 flex-shrink-0 animate-pulse" />
+          <span className="text-sm text-amber-600 dark:text-amber-400">
+            <b>Payroll run belum dibuat</b> — periode terakhir berakhir {overdueStatus.lastPeriodEnd},
+            sudah terlambat {overdueStatus.daysLate} hari.
+          </span>
+          <ArrowRight className="w-4 h-4 text-amber-500 ml-auto flex-shrink-0" />
+        </Link>
+      )}
+
+      {/* ── KPI cards ── */}
+      {perClient && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          <Kpi label="Total Revenue" value={jt(totRevenue)} icon={<DollarSign className="w-4 h-4" />} variant="default" />
+          <Kpi label="Total Cost" value={jt(totCost)} icon={<TrendingDown className="w-4 h-4" />} variant="muted" />
+          <Kpi label="Gross Margin" value={jt(totMargin)} icon={<Activity className="w-4 h-4" />} variant={totMargin >= 0 ? "success" : "danger"} />
+          <Kpi label="Margin %" value={totPct.toFixed(1) + "%"} icon={<Percent className="w-4 h-4" />} variant={totPct >= 15 ? "success" : totPct >= 0 ? "warning" : "danger"} />
+        </div>
+      )}
+
+      {/* ── Warning banner ── */}
+      {perClient && (rugiCount > 0 || thinCount > 0) && (
+        <div className="flex items-start gap-3 mb-5 rounded-xl border border-amber-500/30 bg-amber-500/8 p-4">
+          <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+          </div>
+          <div className="text-sm">
+            <p className="font-semibold text-amber-600 dark:text-amber-400 mb-0.5">Perhatian Margin Client</p>
+            <p className="text-muted-foreground">
+              {rugiCount > 0 && <span className="font-medium text-destructive">{rugiCount} client RUGI</span>}
+              {rugiCount > 0 && thinCount > 0 && <span className="text-muted-foreground"> · </span>}
+              {thinCount > 0 && <span className="font-medium text-amber-600 dark:text-amber-400">{thinCount} client margin tipis (&lt;15%)</span>}
+              {" — "}
+              <Link to="/admin/pnl" className="underline underline-offset-2 hover:text-foreground transition-colors">
+                Lihat rincian di Margin Analytics
+              </Link>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Charts ── */}
+      {perClient && (
+        <div className="grid md:grid-cols-2 gap-4 mb-5">
+          <div className="rounded-xl border border-border bg-card shadow-sm p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-semibold">Tren Revenue vs Cost</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Perbandingan pendapatan dan biaya rider</p>
+              </div>
             </div>
             {trend.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-8 text-center">Tidak ada data untuk digambar trennya.</p>
+              <div className="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2">
+                <Activity className="w-7 h-7 opacity-30" />
+                <p className="text-sm">Tidak ada data untuk periode ini.</p>
+              </div>
             ) : (
-              <ResponsiveContainer width="100%" height={280}>
-                <ComposedChart data={trend} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
-                  <YAxis yAxisId="rp" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                    tickFormatter={(v) => jt(v)} width={70} />
-                  <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                    tickFormatter={(v) => v + "%"} width={45} />
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={trend} margin={{ top: 5, right: 8, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gRev" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.18} />
+                      <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gCost" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--muted-foreground)" stopOpacity={0.12} />
+                      <stop offset="95%" stopColor="var(--muted-foreground)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.6} />
+                  <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} tickFormatter={(v) => jt(v)} width={68} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
-                    formatter={(value: number, name: string) => name === "BCR (Margin %)" ? [value.toFixed(1) + "%", name] : [formatRupiah(value), name]}
+                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.1)" }}
+                    formatter={(value: number) => formatRupiah(value)}
                   />
-                  <Area yAxisId="rp" type="monotone" dataKey="revenue" name="Revenue" stroke="var(--primary)" fill="var(--primary)" fillOpacity={0.12} strokeWidth={2} />
-                  <Area yAxisId="rp" type="monotone" dataKey="cost" name="Cost" stroke="var(--muted-foreground)" fill="var(--muted-foreground)" fillOpacity={0.08} strokeWidth={2} />
-                  <Line yAxisId="pct" type="monotone" dataKey="marginPct" name="BCR (Margin %)" stroke="var(--success)" strokeWidth={2} dot={false} />
-                </ComposedChart>
+                  <Area type="monotone" dataKey="revenue" name="Revenue" stroke="var(--primary)" fill="url(#gRev)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="cost" name="Cost" stroke="var(--muted-foreground)" fill="url(#gCost)" strokeWidth={2} />
+                </AreaChart>
               </ResponsiveContainer>
             )}
           </div>
 
-          <div className="grid md:grid-cols-2 gap-4">
-            {/* Top clients by margin */}
-            <div className="rounded-lg border border-border bg-card p-5">
-              <h3 className="text-sm font-semibold mb-3">Top 5 Client berdasarkan Margin</h3>
+          <div className="rounded-xl border border-border bg-card shadow-sm p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-semibold">Tren BCR (Margin %)</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-2 h-0.5 bg-destructive inline-block rounded" /> Rugi
+                  </span>
+                  {" · "}
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-2 h-0.5 bg-amber-500 inline-block rounded" /> &lt;15% tipis
+                  </span>
+                </p>
+              </div>
+            </div>
+            {trend.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2">
+                <Percent className="w-7 h-7 opacity-30" />
+                <p className="text-sm">Tidak ada data untuk periode ini.</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={trend} margin={{ top: 5, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.6} />
+                  <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} tickFormatter={(v) => v + "%"} width={40} axisLine={false} tickLine={false} />
+                  <ReferenceLine y={0} stroke="var(--destructive)" strokeDasharray="4 3" strokeWidth={1.5} />
+                  <ReferenceLine y={15} stroke="#f59e0b" strokeDasharray="4 3" strokeWidth={1.5} />
+                  <Tooltip
+                    contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.1)" }}
+                    formatter={(value: number) => value.toFixed(1) + "%"}
+                  />
+                  <Line type="monotone" dataKey="marginPct" name="BCR (Margin %)" stroke="var(--success)" strokeWidth={2.5} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Bottom panels ── */}
+      {perClient && (
+        <>
+          <div className="grid md:grid-cols-2 gap-4 mb-5">
+            <div className="rounded-xl border border-border bg-card shadow-sm p-5">
+              <h3 className="text-sm font-semibold mb-4">Top 5 Client berdasarkan Margin</h3>
               {topByMargin.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Belum ada client dengan skema revenue.</p>
               ) : (
-                <div className="space-y-2.5">
-                  {topByMargin.map((r) => {
+                <div className="space-y-3">
+                  {topByMargin.map((r, i) => {
                     const loss = (r.marginPct ?? 0) < 0;
+                    const pct = Math.max(3, Math.min(100, (Math.abs(r.margin ?? 0) / maxTopMargin) * 100));
                     return (
-                      <div key={r.clientId} className="text-sm">
-                        <div className="flex justify-between mb-1">
-                          <span className="font-medium truncate">{r.client}</span>
-                          <span className={loss ? "text-destructive" : "text-success"}>{formatRupiah(r.margin ?? 0)}</span>
+                      <div key={r.clientId}>
+                        <div className="flex justify-between items-center mb-1.5 text-sm">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-5 h-5 rounded-md bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground flex-shrink-0">{i + 1}</span>
+                            <span className="font-medium truncate">{r.client}</span>
+                          </div>
+                          <span className={"font-mono text-xs font-semibold flex-shrink-0 ml-2 " + (loss ? "text-destructive" : "text-success")}>
+                            {formatRupiah(r.margin ?? 0)}
+                          </span>
                         </div>
                         <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                          <div className={"h-full " + (loss ? "bg-destructive" : "bg-success")}
-                            style={{ width: Math.max(3, Math.min(100, (Math.abs(r.margin ?? 0) / maxTopMargin) * 100)) + "%" }} />
+                          <div
+                            className={"h-full rounded-full transition-all duration-500 " + (loss ? "bg-destructive" : "bg-success")}
+                            style={{ width: pct + "%" }}
+                          />
                         </div>
                       </div>
                     );
@@ -270,17 +338,19 @@ function ExecutiveDashboard() {
               )}
             </div>
 
-            {/* Belum ada skema revenue */}
-            <div className="rounded-lg border border-border bg-card p-5">
-              <h3 className="text-sm font-semibold mb-3">Client Tanpa Skema Revenue</h3>
+            <div className="rounded-xl border border-border bg-card shadow-sm p-5">
+              <h3 className="text-sm font-semibold mb-4">Client Tanpa Skema Revenue</h3>
               {missingRevenue.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Semua client sudah punya skema revenue (client-side). ✅</p>
+                <div className="flex items-center gap-2 text-sm text-success">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  <span>Semua client sudah punya skema revenue (client-side).</span>
+                </div>
               ) : (
-                <ul className="text-sm space-y-1.5">
+                <ul className="space-y-2">
                   {missingRevenue.map((r) => (
-                    <li key={r.clientId} className="flex justify-between text-muted-foreground">
-                      <span>{r.client}</span>
-                      <span>Cost: {formatRupiah(r.cost)}</span>
+                    <li key={r.clientId} className="flex justify-between items-center text-sm py-1.5 border-b border-border/50 last:border-0">
+                      <span className="font-medium">{r.client}</span>
+                      <span className="text-xs text-muted-foreground font-mono">Cost: {formatRupiah(r.cost)}</span>
                     </li>
                   ))}
                 </ul>
@@ -288,27 +358,119 @@ function ExecutiveDashboard() {
             </div>
           </div>
 
-          <Link to="/admin/pnl" className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline mt-4">
+          <Link to="/admin/pnl" className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline underline-offset-2 transition-colors">
             Lihat rincian per client di Margin Analytics <ArrowRight className="w-4 h-4" />
           </Link>
         </>
       )}
 
+      {/* ── Weekly PNL Push ── */}
+      <div className="rounded-xl border border-border bg-card shadow-sm p-5 mt-5">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 className="text-sm font-semibold">Weekly PNL Push</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Dikirim otomatis tiap Senin 07:00 WIB ke Slack &amp; Email (butuh pg_cron aktif).</p>
+          </div>
+          <button
+            onClick={testWeeklyPush} disabled={pushing}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors cursor-pointer"
+          >
+            {pushing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+            {pushing ? "Mengirim…" : "Test Kirim Sekarang"}
+          </button>
+        </div>
+        {snapshots.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">Belum ada histori push.</p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full text-sm min-w-[560px]">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2">Periode</th>
+                  <th className="text-right text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2">Margin</th>
+                  <th className="text-center text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2">Slack</th>
+                  <th className="text-center text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2">Email</th>
+                  <th className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2">Trigger</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshots.map((s) => (
+                  <tr key={s.id} className="border-b border-border/50 last:border-0 hover:bg-muted/40 transition-colors">
+                    <td className="px-2 py-2.5 font-mono text-xs">{s.week_start} → {s.week_end}</td>
+                    <td className="px-2 py-2.5 text-right font-mono text-xs font-semibold">
+                      <span className={s.total_margin >= 0 ? "text-success" : "text-destructive"}>
+                        {formatRupiah(s.total_margin)}
+                      </span>
+                      <span className="text-muted-foreground ml-1">({s.total_margin_pct.toFixed(1)}%)</span>
+                    </td>
+                    <td className="px-2 py-2.5 text-center">
+                      {s.push_status?.slack?.ok
+                        ? <CheckCircle2 className="w-4 h-4 text-success mx-auto" />
+                        : <span title={s.push_status?.slack?.error}><XCircle className="w-4 h-4 text-destructive mx-auto" /></span>}
+                    </td>
+                    <td className="px-2 py-2.5 text-center">
+                      {s.push_status?.email?.ok
+                        ? <CheckCircle2 className="w-4 h-4 text-success mx-auto" />
+                        : <span title={s.push_status?.email?.error}><XCircle className="w-4 h-4 text-destructive mx-auto" /></span>}
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <span className="inline-block text-[10px] font-medium uppercase tracking-wider bg-muted text-muted-foreground rounded px-1.5 py-0.5 capitalize">
+                        {s.triggered_by}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Empty state ── */}
       {!perClient && !running && (
-        <div className="rounded-lg border border-dashed border-border p-10 text-center text-muted-foreground">
-          <TrendingUp className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          Pilih periode lalu klik <b className="mx-1">Hitung</b> untuk lihat ringkasan bisnis.
+        <div className="rounded-xl border border-dashed border-border p-14 text-center text-muted-foreground mt-5">
+          <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-3">
+            <TrendingUp className="w-6 h-6 opacity-50" />
+          </div>
+          <p className="text-sm font-medium">Belum ada data</p>
+          <p className="text-xs mt-1 opacity-60">Pilih rentang tanggal untuk lihat ringkasan bisnis.</p>
         </div>
       )}
     </AdminLayout>
   );
 }
 
-function Kpi({ label, value, accent }: { label: string; value: string; accent?: "success" }) {
+type KpiVariant = "default" | "muted" | "success" | "warning" | "danger";
+
+function Kpi({ label, value, icon, variant = "default" }: { label: string; value: string; icon?: React.ReactNode; variant?: KpiVariant }) {
+  const styles: Record<KpiVariant, string> = {
+    default: "border-border bg-card",
+    muted: "border-border bg-card",
+    success: "border-success/25 bg-success/5",
+    warning: "border-amber-500/25 bg-amber-500/5",
+    danger: "border-destructive/25 bg-destructive/5",
+  };
+  const valueStyles: Record<KpiVariant, string> = {
+    default: "text-foreground",
+    muted: "text-muted-foreground",
+    success: "text-success",
+    warning: "text-amber-600 dark:text-amber-400",
+    danger: "text-destructive",
+  };
+  const iconStyles: Record<KpiVariant, string> = {
+    default: "bg-muted text-muted-foreground",
+    muted: "bg-muted text-muted-foreground",
+    success: "bg-success/15 text-success",
+    warning: "bg-amber-500/15 text-amber-500",
+    danger: "bg-destructive/15 text-destructive",
+  };
   return (
-    <div className={"rounded-xl border p-4 " + (accent === "success" ? "border-success/30 bg-success/5" : "border-border bg-card")}>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={"text-lg font-semibold mt-1 " + (accent === "success" ? "text-success" : "")}>{value}</div>
+    <div className={"rounded-xl border p-4 shadow-sm " + styles[variant]}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+        {icon && <div className={"w-7 h-7 rounded-lg flex items-center justify-center " + iconStyles[variant]}>{icon}</div>}
+      </div>
+      <div className={"text-xl font-bold font-mono tracking-tight " + valueStyles[variant]}>{value}</div>
     </div>
   );
 }

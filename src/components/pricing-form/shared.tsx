@@ -137,44 +137,71 @@ export function FieldLabel({ children }: { children: React.ReactNode }) {
   return <label className="text-xs text-muted-foreground">{children}</label>;
 }
 
-// StepTier editor (dipakai tier jarak/berat, Add-KG, & order-tier hybrid)
+// StepTier editor — mirrors mockup's Tier Configuration table:
+// MIN | MAX | BASE FEE | PER KM, with row 0 being the base_fee/base_until pair.
 export function StepTierEditor({ value, onChange, unit }: { value: StepTierState; onChange: (v: StepTierState) => void; unit: "km" | "kg" }) {
   const setTier = (i: number, patch: Partial<StepTierState["tiers"][number]>) =>
     onChange({ ...value, tiers: value.tiers.map((t, idx) => (idx === i ? { ...t, ...patch } : t)) });
   const addTier = () => onChange({ ...value, tiers: [...value.tiers, { from: value.base_until || "0", to: "", step: "1", add_per_step: "" }] });
   const delTier = (i: number) => onChange({ ...value, tiers: value.tiers.filter((_, idx) => idx !== i) });
 
+  const inputCls = "w-full text-sm rounded border border-border/80 bg-background px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-primary/50 tabular-nums";
+
   return (
-    <div>
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <div className="flex flex-col gap-1.5">
-          <FieldLabel>Base Fee (Rp)</FieldLabel>
-          <RupiahInput value={value.base_fee} onChange={(v) => onChange({ ...value, base_fee: v })} />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <FieldLabel>Base sampai ({unit})</FieldLabel>
-          <TextInput value={value.base_until} inputMode="decimal" onChange={(e) => onChange({ ...value, base_until: e.target.value })} />
-        </div>
+    <div className="rounded-lg border border-border overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
+        <span className="text-sm font-semibold">Tier Configuration</span>
+        <button type="button" onClick={addTier}
+          className="inline-flex items-center gap-1.5 text-xs font-medium border border-border rounded-md px-2.5 py-1.5 hover:bg-muted transition-colors">
+          <Plus className="w-3.5 h-3.5" /> Add Tier
+        </button>
       </div>
-      <TableShell>
-        <>
-          <Th>Dari ({unit})</Th>
-          <Th>Sampai ({unit})</Th>
-          <Th>Step</Th>
-          <Th>+Rp / step</Th>
-          <Th className="w-10" />
-        </>
-        {value.tiers.map((t, i) => (
-          <tr key={i} className="border-t border-border/60">
-            <Td><TextInput value={t.from} inputMode="decimal" onChange={(e) => setTier(i, { from: e.target.value })} /></Td>
-            <Td><TextInput value={t.to} placeholder="∞" inputMode="decimal" onChange={(e) => setTier(i, { to: e.target.value })} /></Td>
-            <Td><TextInput value={t.step} inputMode="decimal" onChange={(e) => setTier(i, { step: e.target.value })} /></Td>
-            <Td><RupiahInput value={t.add_per_step} onChange={(v) => setTier(i, { add_per_step: v })} /></Td>
-            <Td className="text-center"><RowDeleteBtn onClick={() => delTier(i)} /></Td>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+            <th className="px-3 py-2 text-left">Min ({unit})</th>
+            <th className="px-3 py-2 text-left">Max ({unit})</th>
+            <th className="px-3 py-2 text-left">Base Fee (Rp)</th>
+            <th className="px-3 py-2 text-left">Per {unit === "km" ? "Km" : "Kg"} (Rp)</th>
+            <th className="px-3 py-2 w-10" />
           </tr>
-        ))}
-      </TableShell>
-      <AddRowBtn onClick={addTier}>Tambah Jenjang</AddRowBtn>
+        </thead>
+        <tbody>
+          {/* Row 0 — base fee entry (min fixed at 0) */}
+          <tr className="border-t border-border/60">
+            <td className="px-3 py-1.5 text-muted-foreground tabular-nums">0</td>
+            <td className="px-3 py-1.5">
+              <input className={inputCls} value={value.base_until} inputMode="decimal"
+                onChange={(e) => onChange({ ...value, base_until: e.target.value })} placeholder="0" />
+            </td>
+            <td className="px-3 py-1.5">
+              <input className={inputCls} value={value.base_fee ? Number(formatRupiah(value.base_fee).replace(/\D/g, "")).toLocaleString("id-ID") : ""}
+                inputMode="numeric" placeholder="0"
+                onChange={(e) => onChange({ ...value, base_fee: String(parseRupiah(e.target.value)) })} />
+            </td>
+            <td className="px-3 py-1.5 text-muted-foreground tabular-nums">0</td>
+            <td />
+          </tr>
+          {/* Tier rows */}
+          {value.tiers.map((t, i) => (
+            <tr key={i} className="border-t border-border/60 hover:bg-muted/30 transition-colors">
+              <td className="px-3 py-1.5"><input className={inputCls} value={t.from} inputMode="decimal" onChange={(e) => setTier(i, { from: e.target.value })} /></td>
+              <td className="px-3 py-1.5"><input className={inputCls} value={t.to} placeholder="∞" inputMode="decimal" onChange={(e) => setTier(i, { to: e.target.value })} /></td>
+              <td className="px-3 py-1.5 text-muted-foreground text-center">—</td>
+              <td className="px-3 py-1.5">
+                <input className={inputCls} value={t.add_per_step ? Number(t.add_per_step).toLocaleString("id-ID") : ""}
+                  inputMode="numeric" placeholder="0"
+                  onChange={(e) => setTier(i, { add_per_step: String(parseRupiah(e.target.value)) })} />
+              </td>
+              <td className="px-2 text-center">
+                <button type="button" onClick={() => delTier(i)} className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-muted transition-colors">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

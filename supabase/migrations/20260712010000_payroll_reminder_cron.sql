@@ -1,0 +1,48 @@
+-- Payroll Disbursement Reminder — pg_cron scheduling (PRD.md §10 backlog #8)
+--
+-- Ini BUKAN migration otomatis seperti file lain di folder ini. Isinya sengaja
+-- di-comment out karena butuh 2 nilai yang cuma diketahui pas deploy:
+--   1. URL production project ini (mis. https://xxxx.vercel.app)
+--   2. Isi env PAYROLL_REMINDER_SECRET yang sama persis dengan yang di-set di server
+--
+-- Cara aktivasi (jalankan manual di Supabase SQL Editor, BUKAN lewat migration
+-- runner otomatis):
+--   1. Buka Supabase Dashboard -> Database -> Extensions -> aktifkan
+--      "pg_cron" dan "pg_net" kalau belum aktif (kemungkinan sudah aktif dari
+--      setup Weekly PNL Push).
+--   2. Copy blok SQL di bawah, ganti dua placeholder:
+--        <PRODUCTION_URL>          -> domain production (tanpa trailing slash)
+--        <PAYROLL_REMINDER_SECRET> -> isi env PAYROLL_REMINDER_SECRET
+--   3. Jalankan di SQL Editor. Sekali jalan, cron langsung terjadwal —
+--      tidak perlu diulang tiap deploy.
+--   4. Cek jadwal aktif: SELECT * FROM cron.job;
+--   5. Cek histori run & response: SELECT * FROM cron.job_run_details
+--      ORDER BY start_time DESC LIMIT 10;
+--
+-- Jadwal di bawah: SETIAP HARI jam 07:00 WIB (00:00 UTC) — beda dari Weekly PNL
+-- Push yang cuma Senin, karena jadwal disbursement per client/rider bisa jatuh
+-- di hari mana saja (endpoint sendiri yang nentuin ada yang jatuh tempo atau
+-- tidak hari itu, lihat src/lib/payroll-reminder.server.ts — kalau kosong,
+-- Slack/Email sengaja TIDAK dikirim).
+
+-- create extension if not exists pg_cron;
+-- create extension if not exists pg_net;
+--
+-- select cron.schedule(
+--   'payroll-reminder-daily',
+--   '0 0 * * *', -- tiap hari 00:00 UTC (07:00 WIB)
+--   $$
+--   select net.http_post(
+--     url := '<PRODUCTION_URL>/api/payroll-reminder',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'x-payroll-reminder-secret', '<PAYROLL_REMINDER_SECRET>'
+--     ),
+--     body := '{}'::jsonb
+--   );
+--   $$
+-- );
+
+-- Untuk ganti jadwal atau matikan cron:
+--   select cron.unschedule('payroll-reminder-daily');
+--   -- lalu jalankan ulang cron.schedule(...) di atas dengan jadwal baru.

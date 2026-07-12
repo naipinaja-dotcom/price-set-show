@@ -57,19 +57,13 @@ export const PRICING_CATEGORIES: PricingCategoryOption[] = [
   {
     key: "attendance",
     name: "Per Kehadiran",
-    desc: "Base harian + komponen",
+    desc: "Base harian + komponen (± kiriman)",
     icon: "CalendarDays",
     callout:
-      "Bukan berdasarkan kiriman. Ada base fee harian proporsional jam kerja (dari data absensi) + komponen tambahan (dinamai sendiri), sebagian bisa conditional.",
+      "Base fee harian proporsional jam kerja (dari data absensi) + insentif opsional. Toggle 'Komponen per kiriman' untuk tambah fee per pengiriman (menggantikan tipe Kombinasi lama).",
   },
-  {
-    key: "hybrid",
-    name: "Kombinasi",
-    desc: "Harian + ontime + per km/kg",
-    icon: "Layers",
-    callout:
-      "Rider dapat tiga komponen: (1) fee harian proporsional jam kerja dari data absensi, (2) bonus ontime kalau tidak terlambat, (3) fee per kiriman berdasarkan jarak (km) atau berat (kg) berjenjang.",
-  },
+  // "hybrid" tidak muncul di UI lagi — scheme lama tetap terbaca.
+  // Skema baru pakai category "attendance" + delivery_component toggle.
 ];
 
 export interface DeliverySubtypeOption {

@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AdminLayout } from "@/components/admin-layout";
 import { fetchAllRows } from "@/lib/fetch-all";
 import { formatRupiah } from "@/lib/format";
+import { useIntelligenceDate } from "@/lib/use-intelligence-date";
 import { toast } from "sonner";
-import { Loader2, Play, Bike } from "lucide-react";
+import { Bike } from "lucide-react";
 import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
 
@@ -28,19 +29,21 @@ type DriverLine = {
   onTimeRate: number; // % dari hari yang benar-benar masuk (bukan absen)
 };
 
-const firstOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10); };
-const today = () => new Date().toISOString().slice(0, 10);
 const isCompleted = (s: string | null) => String(s ?? "").trim().toLowerCase() === "completed";
 
 function DriverAnalyticsPage() {
-  const [from, setFrom] = useState(firstOfMonth());
-  const [to, setTo] = useState(today());
+  const { from, to } = useIntelligenceDate();
   const [running, setRunning] = useState(false);
   const [rows, setRows] = useState<DriverLine[] | null>(null);
   const [sortBy, setSortBy] = useState<"earning" | "deliveries" | "onTime">("earning");
 
+  // Ga ada filter sendiri di sini — tanggal acuan diatur dari Executive Dashboard.
+  useEffect(() => {
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const run = async () => {
-    if (from > to) return toast.error("Tanggal 'dari' tidak boleh setelah 'sampai'");
     setRunning(true);
     setRows(null);
     try {
@@ -112,23 +115,7 @@ function DriverAnalyticsPage() {
   const { pageSize, setPageSize, page, setPage, totalPages, paged, from: pFrom, to: pTo, total: pTotal } = usePagination(sorted, 20);
 
   return (
-    <AdminLayout title="Driver Analytics" subtitle="Performa rider: volume kiriman, on-time rate, dan earning per rider.">
-      <div className="rounded-lg border border-border bg-card p-5 mb-4 flex flex-wrap items-end gap-3 text-sm">
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Dari Tanggal</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2" />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Sampai Tanggal</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2" />
-        </div>
-        <button onClick={run} disabled={running}
-          className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 font-medium disabled:opacity-50">
-          {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {running ? "Menghitung…" : "Hitung"}
-        </button>
-      </div>
-
+    <AdminLayout title="Driver Analytics" subtitle={`Performa rider: volume kiriman, on-time rate, dan earning. Periode ${from} → ${to} (atur di Executive Dashboard).`}>
       {rows && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -195,10 +182,10 @@ function DriverAnalyticsPage() {
         </>
       )}
 
-      {!rows && !running && (
+      {!rows && (
         <div className="rounded-lg border border-dashed border-border p-10 text-center text-muted-foreground">
           <Bike className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          Pilih periode lalu klik <b className="mx-1">Hitung</b> untuk lihat performa rider.
+          {running ? "Menghitung performa rider…" : "Memuat…"}
         </div>
       )}
     </AdminLayout>

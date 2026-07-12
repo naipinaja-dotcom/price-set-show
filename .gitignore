@@ -40,3 +40,11 @@ test-results
 *.njsproj
 *.sln
 *.sw?
+*.lnk
+
+# Local AI tooling artifacts (ruflo/claude-flow) — not part of the app
+.claude/
+.claude-flow/
+.mcp.json
+.swarm/
+ruvector.db

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
@@ -6,7 +6,7 @@ import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
-import { Plus, Loader2, CheckCircle2, Send, X, Download } from "lucide-react";
+import { Plus, Loader2, CheckCircle2, Send, X, Download, ExternalLink } from "lucide-react";
 import { fetchAllRows } from "@/lib/fetch-all";
 import { getLastFeePeriod, type LastFeePeriod } from "@/lib/last-fee-period";
 import { resolveRiderIdentities } from "@/lib/rider-lookup";
@@ -280,98 +280,168 @@ function PayrollPage() {
     }
   };
 
+  // Compute stepper step: 1=select period, 2=cek data, 3=hitung, 4=review&commit
+  const stepNum = !activeRun ? 1
+    : activeRun.status === "published" ? 4
+    : details.length > 0 ? 4
+    : 3;
+
+  const STEPS = [
+    { n: 1, label: "Pilih Periode" },
+    { n: 2, label: "Cek Data" },
+    { n: 3, label: "Hitung Fee" },
+    { n: 4, label: "Review & Commit" },
+  ];
+
   return (
-    <AdminLayout title="Payroll">
+    <AdminLayout title="Payroll Run" subtitle="Proses payroll rider step by step">
       {lastPeriod && !runs.some((r) => r.period_start === lastPeriod.from && r.period_end === lastPeriod.to) && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
           <span>
             Kamu baru Hitung Fee &amp; commit <b>{lastPeriod.rowCount} baris</b> untuk <b>{lastPeriod.clientName}</b>, periode <b>{lastPeriod.from} → {lastPeriod.to}</b>.
-            Ingat: kalau kamu Hitung Fee client lain juga buat periode ini, Payroll Run tetap ngambil SEMUA client sekaligus (bukan cuma yang terakhir dihitung) — jadi generate boleh langsung dijalankan setelah semua client selesai di-commit.
           </span>
           <button
             onClick={() => { setPrefill({ start: lastPeriod.from, end: lastPeriod.to }); setNewRunOpen(true); }}
-            className="shrink-0 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm"
+            className="shrink-0 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-sm"
           >
             Buat Run periode ini
           </button>
         </div>
       )}
+
       <div className="flex gap-6">
-        <aside className="w-64 shrink-0">
+        {/* Run list sidebar */}
+        <aside className="w-56 shrink-0">
           <button onClick={() => setNewRunOpen(true)} disabled={creating}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm mb-3 disabled:opacity-50">
+            className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm mb-3 disabled:opacity-50">
             <Plus className="w-4 h-4" /> Buat Run Baru
           </button>
           <div className="space-y-1">
             {loading && !runs.length ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> :
-              runs.map((r) => (
-                <button key={r.id} onClick={() => setActiveRun(r)}
-                  className={`w-full text-left p-2 rounded text-sm ${activeRun?.id === r.id ? "bg-muted font-medium" : "hover:bg-muted/50"}`}>
-                  <div className="truncate">{r.name}</div>
-                  <div className="text-xs text-muted-foreground">{r.period_start} → {r.period_end} · {r.status}</div>
-                </button>
-              ))}
+              runs.map((r) => {
+                const statusColor = r.status === "published" ? "text-success" : r.status === "finalized" ? "text-warning" : "text-muted-foreground";
+                return (
+                  <button key={r.id} onClick={() => setActiveRun(r)}
+                    className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors ${activeRun?.id === r.id ? "bg-primary-soft text-primary-soft-foreground font-medium" : "hover:bg-muted/60"}`}>
+                    <div className="truncate font-medium text-[13px]">{r.name}</div>
+                    <div className={`text-[11px] mt-0.5 ${statusColor}`}>{r.period_start} → {r.period_end} · {r.status}</div>
+                  </button>
+                );
+              })}
           </div>
         </aside>
+
+        {/* Main area */}
         <section className="flex-1 min-w-0">
-          {!activeRun ? <p className="text-sm text-muted-foreground">Pilih atau buat payroll run.</p> : (
+          {!activeRun ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-muted grid place-items-center text-muted-foreground"><Plus className="w-5 h-5" /></div>
+              <p className="text-sm text-muted-foreground">Pilih run dari daftar atau buat run baru untuk memulai payroll.</p>
+              <button onClick={() => setNewRunOpen(true)} className="text-sm text-primary font-medium hover:underline">Buat Payroll Run →</button>
+            </div>
+          ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                <div>
-                  <h3 className="font-semibold">{activeRun.name}</h3>
-                  <p className="text-xs text-muted-foreground">{activeRun.period_start} → {activeRun.period_end} · status: <b>{activeRun.status}</b></p>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={generate} disabled={loading} className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1">
-                    {loading && <Loader2 className="w-4 h-4 animate-spin" />} Generate Detail
-                  </button>
-                  <button onClick={finalize} disabled={activeRun.status !== "draft" || finalizing} className="rounded-md bg-warning text-warning-foreground px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1">
-                    {finalizing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Finalize
-                  </button>
-                  <button onClick={publish} disabled={activeRun.status === "published" || publishing} className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1">
-                    {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Publish
-                  </button>
-                  <button
-                    onClick={() => exportBulkPayment("csv")}
-                    disabled={activeRun.status === "draft" || exportingBulk || details.length === 0}
-                    title={activeRun.status === "draft" ? "Finalize dulu sebelum generate bulk payment" : "Download CSV buat upload ke bank"}
-                    className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1"
-                  >
-                    {exportingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Bulk Payment (CSV)
-                  </button>
-                  <button
-                    onClick={() => exportBulkPayment("xls")}
-                    disabled={activeRun.status === "draft" || exportingBulk || details.length === 0}
-                    title={activeRun.status === "draft" ? "Finalize dulu sebelum generate bulk payment" : "Download XLS buat upload ke bank"}
-                    className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50 inline-flex items-center gap-1"
-                  >
-                    {exportingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Bulk Payment (XLS)
-                  </button>
+              {/* Stepper */}
+              <div className="flex items-center mb-5 rounded-xl border border-border bg-card p-4 gap-1">
+                {STEPS.map((s, i) => {
+                  const done = s.n < stepNum || (s.n === 4 && activeRun.status === "published");
+                  const active = s.n === stepNum && activeRun.status !== "published";
+                  return (
+                    <div key={s.n} className="flex items-center flex-1 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`w-7 h-7 rounded-full grid place-items-center flex-shrink-0 text-xs font-bold transition-colors
+                          ${done ? "bg-success text-success-foreground" : active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                          {done ? <CheckCircle2 className="w-4 h-4" /> : s.n}
+                        </div>
+                        <span className={`text-[12px] font-medium truncate hidden sm:block ${active ? "text-foreground" : done ? "text-success" : "text-muted-foreground"}`}>{s.label}</span>
+                      </div>
+                      {i < STEPS.length - 1 && <div className={`flex-1 mx-2 h-px ${s.n < stepNum ? "bg-success/50" : "bg-border"}`} />}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Run info + step actions */}
+              <div className="rounded-xl border border-border bg-card p-4 mb-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[15px] font-semibold">{activeRun.name}</div>
+                    <div className="text-[12px] text-muted-foreground mt-0.5">{activeRun.period_start} → {activeRun.period_end}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {/* Step 2: Cek Data link */}
+                    <Link to="/admin/data-check"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[13px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                      <ExternalLink className="w-3.5 h-3.5" /> Cek Data
+                    </Link>
+                    {/* Step 3: Generate */}
+                    <button onClick={generate} disabled={loading}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[13px] disabled:opacity-50 hover:bg-muted transition-colors">
+                      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                      {details.length > 0 ? "Generate Ulang" : "Hitung Fee"}
+                    </button>
+                    {/* Step 4: Finalize */}
+                    <button onClick={finalize} disabled={activeRun.status !== "draft" || finalizing || details.length === 0}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-warning text-warning-foreground px-3 py-1.5 text-[13px] disabled:opacity-40 transition-colors">
+                      {finalizing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />} Finalize
+                    </button>
+                    {/* Step 4: Publish */}
+                    <button onClick={publish} disabled={activeRun.status === "published" || publishing || details.length === 0}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-[13px] disabled:opacity-40 transition-colors">
+                      {publishing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Publish
+                    </button>
+                    {/* Export */}
+                    <button onClick={() => exportBulkPayment("csv")}
+                      disabled={activeRun.status === "draft" || exportingBulk || details.length === 0}
+                      title={activeRun.status === "draft" ? "Finalize dulu" : "Download CSV bank"}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[13px] disabled:opacity-40 hover:bg-muted transition-colors">
+                      {exportingBulk ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} CSV
+                    </button>
+                    <button onClick={() => exportBulkPayment("xls")}
+                      disabled={activeRun.status === "draft" || exportingBulk || details.length === 0}
+                      title={activeRun.status === "draft" ? "Finalize dulu" : "Download XLS bank"}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[13px] disabled:opacity-40 hover:bg-muted transition-colors">
+                      {exportingBulk ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} XLS
+                    </button>
+                  </div>
                 </div>
               </div>
+
+              {/* Detail table */}
               {details.length > 0 && (
                 <div className="flex justify-end mb-2"><PageSizeSelect pageSize={detailPageSize} setPageSize={setDetailPageSize} /></div>
               )}
-              <div className="rounded-lg border border-border overflow-x-auto">
+              <div className="rounded-xl border border-border overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted text-left">
-                    <tr><th className="p-2">Rider</th><th>Delivery</th><th>Fee Deliv</th><th>Fee Absensi</th><th>Insentif</th><th>Penalty</th><th>Gross</th><th>Potongan</th><th>Net Pay</th></tr>
+                  <thead className="bg-muted/60 text-left">
+                    <tr>
+                      <th className="px-3 py-2.5 font-medium text-[12px] text-muted-foreground">Rider</th>
+                      <th className="px-2 py-2.5 font-medium text-[12px] text-muted-foreground">Deliv</th>
+                      <th className="px-2 py-2.5 font-medium text-[12px] text-muted-foreground">Fee Deliv</th>
+                      <th className="px-2 py-2.5 font-medium text-[12px] text-muted-foreground">Fee Absensi</th>
+                      <th className="px-2 py-2.5 font-medium text-[12px] text-muted-foreground">Insentif</th>
+                      <th className="px-2 py-2.5 font-medium text-[12px] text-muted-foreground">Penalty</th>
+                      <th className="px-2 py-2.5 font-medium text-[12px] text-muted-foreground">Gross</th>
+                      <th className="px-2 py-2.5 font-medium text-[12px] text-muted-foreground">Potongan</th>
+                      <th className="px-2 py-2.5 font-medium text-[12px] text-muted-foreground">Net Pay</th>
+                    </tr>
                   </thead>
                   <tbody>
-                    {details.length === 0 ? <tr><td colSpan={9} className="p-6 text-center text-muted-foreground">Belum ada detail — klik Generate Detail</td></tr> :
-                      pagedDetails.map((d) => (
-                        <tr key={d.id} className="border-t border-border">
-                          <td className="p-2"><div className="font-medium">{d.riders?.full_name}</div><div className="text-xs text-muted-foreground">{d.riders?.employee_id}</div></td>
-                          <td>{d.delivery_count}</td>
-                          <td>Rp{Number(d.delivery_fee).toLocaleString("id-ID")}</td>
-                          <td>Rp{Number(d.attendance_fee).toLocaleString("id-ID")}</td>
-                          <td>Rp{Number(d.incentive).toLocaleString("id-ID")}</td>
-                          <td className="text-destructive">Rp{Number(d.penalty).toLocaleString("id-ID")}</td>
-                          <td>Rp{Number(d.gross_earning).toLocaleString("id-ID")}</td>
-                          <td className="text-destructive">Rp{Number(d.total_deduction).toLocaleString("id-ID")}</td>
-                          <td className="font-semibold">Rp{Number(d.net_pay).toLocaleString("id-ID")}</td>
-                        </tr>
-                      ))}
+                    {details.length === 0 ? (
+                      <tr><td colSpan={9} className="p-8 text-center text-muted-foreground text-sm">Belum ada detail — klik "Hitung Fee" untuk generate</td></tr>
+                    ) : pagedDetails.map((d) => (
+                      <tr key={d.id} className="border-t border-border hover:bg-muted/30 transition-colors">
+                        <td className="px-3 py-2.5"><div className="font-medium text-[13px]">{d.riders?.full_name}</div><div className="text-[11px] text-muted-foreground">{d.riders?.employee_id}</div></td>
+                        <td className="px-2 py-2.5 text-[13px]">{d.delivery_count}</td>
+                        <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.delivery_fee).toLocaleString("id-ID")}</td>
+                        <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.attendance_fee).toLocaleString("id-ID")}</td>
+                        <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.incentive).toLocaleString("id-ID")}</td>
+                        <td className="px-2 py-2.5 text-[13px] tabular-nums text-destructive">Rp{Number(d.penalty).toLocaleString("id-ID")}</td>
+                        <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.gross_earning).toLocaleString("id-ID")}</td>
+                        <td className="px-2 py-2.5 text-[13px] tabular-nums text-destructive">Rp{Number(d.total_deduction).toLocaleString("id-ID")}</td>
+                        <td className="px-2 py-2.5 text-[13px] tabular-nums font-semibold">Rp{Number(d.net_pay).toLocaleString("id-ID")}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>

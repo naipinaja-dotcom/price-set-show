@@ -71,11 +71,8 @@ function LoginPage() {
     <main className="min-h-screen grid lg:grid-cols-2 bg-background">
       <div className="hidden lg:flex flex-col justify-between p-12 bg-primary text-primary-foreground">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-primary-foreground/15 grid place-items-center font-bold">D</div>
-          <div>
-            <div className="font-semibold">DASH Payroll</div>
-            <div className="text-xs opacity-80">PT. Dash Elektrik Indonesia</div>
-          </div>
+          <img src="/dash-logo.png" alt="DASH" className="h-8 w-auto" style={{ filter: "brightness(0) invert(1)" }} />
+          <div className="text-xs opacity-80">PT. Dash Elektrik Indonesia</div>
         </div>
         <div>
           <h2 className="text-3xl font-semibold leading-tight mb-3">

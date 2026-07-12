@@ -365,7 +365,8 @@ export interface AttendanceRowFee {
   base: number;
   overtime: number;
   incentive: number;
-  fee: number; // base + overtime + incentive
+  delivery_component: number; // dari delivery_component config (0 kalau tidak ada)
+  fee: number; // base + overtime + incentive + delivery_component
 }
 
 export interface AttendanceRiderLine {
@@ -374,6 +375,7 @@ export interface AttendanceRiderLine {
   base: number;
   overtime: number;
   incentive: number;
+  delivery_component: number;
   total: number;
 }
 
@@ -601,7 +603,7 @@ export function calcHybridScheme(
   return { perRow, perRider, subtotal, completedRows: completed.length, skippedRows: skipped, skippedPerRider, warnings, anomalies };
 }
 
-export function calcAttendanceScheme(env: PricingEnvelope, logs: AttendanceLogRow[]): AttendanceCalcResult {
+export function calcAttendanceScheme(env: PricingEnvelope, logs: AttendanceLogRow[], deliveryRows?: DeliveryRow[]): AttendanceCalcResult {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cfg = env.config as any;
   const standardMin = Number(cfg.standard_minutes) || 0;
@@ -611,18 +613,60 @@ export function calcAttendanceScheme(env: PricingEnvelope, logs: AttendanceLogRo
 
   const comp = calcAttendanceComponent(logs, cfg);
 
+  // ---- delivery_component (opsional) ----
+  // Aggregate fee pengiriman per rider+hari, lalu ditambahkan ke fee absensi.
+  const delivCompMap = new Map<string, number>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const delivCfg = (cfg.delivery_component as any) ?? null;
+  if (delivCfg?.enabled && deliveryRows?.length) {
+    const completed = deliveryRows.filter(isCompleted);
+    let baseByRow: number[];
+    if (delivCfg.method === "flat") {
+      baseByRow = calcFlatComponent(completed, delivCfg);
+    } else if (delivCfg.method === "threshold") {
+      baseByRow = calcThresholdComponent(completed, delivCfg);
+    } else {
+      // tier (default) — window daily_rider = akumulasi harian, per_row = per kiriman
+      const accumulate: "daily" | "per_order" = delivCfg.window === "daily_rider" ? "daily" : "per_order";
+      const tierCfg = {
+        distance: delivCfg.order_by === "distance" ? delivCfg.order_tier : null,
+        weight: delivCfg.order_by === "weight" ? delivCfg.order_tier : null,
+      };
+      baseByRow = calcTierComponent(completed, tierCfg, accumulate);
+    }
+    completed.forEach((r, i) => {
+      const k = riderKey(r) + "|" + r.delivery_date;
+      delivCompMap.set(k, (delivCompMap.get(k) ?? 0) + baseByRow[i]);
+    });
+    if (completed.length === 0) warnings.push("delivery_component aktif tapi tidak ada data pengiriman di rentang ini.");
+  }
+
   let absentRows = 0;
   const perRow: AttendanceRowFee[] = logs.map((r, i) => {
     if (r.is_absent) absentRows++;
     const c = comp[i];
-    return { id: r.id ?? null, rider: riderKey(r), date: r.log_date, base: c.daily_base, overtime: c.overtime, incentive: c.incentive, fee: c.daily_base + c.overtime + c.incentive };
+    const delivComp = delivCompMap.get(riderKey(r) + "|" + r.log_date) ?? 0;
+    return {
+      id: r.id ?? null,
+      rider: riderKey(r),
+      date: r.log_date,
+      base: c.daily_base,
+      overtime: c.overtime,
+      incentive: c.incentive,
+      delivery_component: delivComp,
+      fee: c.daily_base + c.overtime + c.incentive + delivComp,
+    };
   });
 
   const riderMap = new Map<string, AttendanceRiderLine>();
   perRow.forEach((rf, i) => {
-    const line = riderMap.get(rf.rider) ?? { rider: rf.rider, daysWorked: 0, base: 0, overtime: 0, incentive: 0, total: 0 };
+    const line = riderMap.get(rf.rider) ?? { rider: rf.rider, daysWorked: 0, base: 0, overtime: 0, incentive: 0, delivery_component: 0, total: 0 };
     if (!logs[i].is_absent) line.daysWorked += 1;
-    line.base += rf.base; line.overtime += rf.overtime; line.incentive += rf.incentive; line.total += rf.fee;
+    line.base += rf.base;
+    line.overtime += rf.overtime;
+    line.incentive += rf.incentive;
+    line.delivery_component += rf.delivery_component;
+    line.total += rf.fee;
     riderMap.set(rf.rider, line);
   });
   const perRider = [...riderMap.values()].sort((a, b) => b.total - a.total);

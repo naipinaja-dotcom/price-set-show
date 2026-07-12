@@ -31,5 +31,9 @@ export function getServerConfig() {
     resendApiKey: process.env.RESEND_API_KEY,
     pnlPushEmailFrom: process.env.PNL_PUSH_EMAIL_FROM,
     pnlPushEmailTo: process.env.PNL_PUSH_EMAIL_TO,
+
+    // Payroll Reminder (lihat src/routes/api.payroll-reminder.ts) — sama
+    // polanya dengan pnlPushSecret, header `x-payroll-reminder-secret`.
+    payrollReminderSecret: process.env.PAYROLL_REMINDER_SECRET,
   };
 }

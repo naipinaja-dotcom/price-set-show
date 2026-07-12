@@ -39,8 +39,8 @@ import {
   loadAttendanceState,
   type AttendanceState,
 } from "./pricing-form/attendance-fields";
-import { HybridFields, buildHybridConfig, loadHybridState } from "./pricing-form/hybrid-fields";
 import { InteractiveCalc, emptyHybridState, type HybridState } from "./pricing-form/interactive-calc";
+import { loadDeliveryCompState } from "./pricing-form/attendance-delivery-comp";
 
 const CATEGORY_ICONS = { Truck, CalendarDays, Layers } as const;
 const SUBTYPE_ICONS = { MapPin, Ruler, Package } as const;
@@ -74,16 +74,16 @@ function emptyForm(): FormState {
 
 function buildEnvelope(category: PricingCategory, subtype: PricingSubtype, schemeFor: SchemeFor, f: FormState): PricingEnvelope {
   const deliverySubtype = subtype ?? "flat";
-  const type =
-    category === "delivery" ? deliveryEnvelopeType(deliverySubtype, f.delivery) : category === "attendance" ? "attendance" : "combined";
-  const config =
-    category === "delivery" ? buildDeliveryConfig(deliverySubtype, f.delivery) : category === "attendance" ? buildAttendanceConfig(f.attendance) : buildHybridConfig(f.hybrid);
+  const type = category === "delivery" ? deliveryEnvelopeType(deliverySubtype, f.delivery) : "attendance";
+  const config = category === "delivery" ? buildDeliveryConfig(deliverySubtype, f.delivery) : buildAttendanceConfig(f.attendance);
 
   return {
     version: 1,
     type,
     config,
-    add_kg: category === "delivery" && (deliverySubtype === "flat" || deliverySubtype === "threshold") && f.addKgOn ? { enabled: true, tier: buildStepTier(f.addKg) } : null,
+    add_kg: category === "delivery" && (deliverySubtype === "flat" || deliverySubtype === "threshold") && f.addKgOn
+      ? { enabled: true, tier: buildStepTier(f.addKg) }
+      : null,
     multi_drop: f.multiDropOn ? { fee_per_extra_shipment: parseRupiah(f.multiDropFee) } : null,
     billing_addons:
       schemeFor === "client" && f.billingOn
@@ -114,7 +114,20 @@ function loadForm(scheme: PricingScheme | undefined): { form: FormState; categor
   } else if (category === "attendance") {
     form.attendance = loadAttendanceState(c);
   } else if (category === "hybrid") {
-    form.hybrid = loadHybridState(c);
+    // Legacy hybrid → attendance + deliveryComp enabled (ontime_bonus jadi incentive)
+    form.attendance = {
+      full_fee: String(c.full_fee ?? ""),
+      standard_hours: String((Number(c.standard_minutes) || 0) / 60 || ""),
+      overtimeOn: false,
+      overtime_rate_per_hour: "0",
+      incentives: c.ontime_bonus ? [{ label: "Bonus Ontime", amount: String(c.ontime_bonus), condition: "ontime_only" as const }] : [],
+      deliveryCompOn: true,
+      deliveryComp: loadDeliveryCompState({
+        method: "tier",
+        order_by: c.order_by ?? "distance",
+        order_tier: c.order_tier ?? null,
+      }),
+    };
   }
 
   // modifiers
@@ -184,8 +197,7 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
 
   const handleCategoryChange = (cat: PricingCategory) => {
     setCategory(cat);
-    if (cat === "hybrid") setSubtype("tier"); // calcHybridScheme cuma dukung order-fee tier, lihat pricing-types.ts
-    else if (cat === "attendance") setSubtype(null);
+    if (cat === "attendance") setSubtype(null);
     else if (cat === "delivery") setSubtype((prev) => prev ?? "flat");
   };
 
@@ -356,11 +368,6 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
         {/* ===== ATTENDANCE ===== */}
         {category === "attendance" && (
           <AttendanceFields value={f.attendance} onChange={(v) => patch({ attendance: v })} />
-        )}
-
-        {/* ===== HYBRID (Kombinasi) ===== */}
-        {category === "hybrid" && (
-          <HybridFields value={f.hybrid} onChange={(v) => patch({ hybrid: v })} />
         )}
 
         <InteractiveCalc

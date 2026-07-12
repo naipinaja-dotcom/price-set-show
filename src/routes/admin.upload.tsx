@@ -528,13 +528,14 @@ function DeliveryPreviewModal({ preview, busy, onCancel, onConfirm }: {
 
 function AttendanceUpload() {
   const [clients, setClients] = useState<Client[]>([]);
+  const [clientId, setClientId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<string[][]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    supabase.from("clients").select("id, name").then(({ data }) => setClients(data ?? []));
+    supabase.from("clients").select("id, name").order("name").then(({ data }) => setClients(data ?? []));
   }, []);
 
   const onFile = async (f: File) => {
@@ -547,9 +548,30 @@ function AttendanceUpload() {
 
   const parseDur = (s: string): number | null => {
     if (!s) return null;
-    const m = s.match(/(\d+):(\d+)/);
-    if (m) return parseInt(m[1]) * 60 + parseInt(m[2]);
+    // "9h 51m" atau "9h" atau "51m"
+    const hm = s.match(/(?:(\d+)h)?\s*(?:(\d+)m)?/);
+    if (hm && (hm[1] || hm[2])) return (parseInt(hm[1] || "0") * 60) + parseInt(hm[2] || "0");
+    // "HH:MM"
+    const colon = s.match(/(\d+):(\d+)/);
+    if (colon) return parseInt(colon[1]) * 60 + parseInt(colon[2]);
     const n = parseInt(s); return isNaN(n) ? null : n;
+  };
+
+  // Kolom Date di file absensi operasional pakai format nama-hari + tanggal
+  // Indonesia (mis. "Sabtu, 11 Juli 2026"), bukan ISO — dikirim mentah ke
+  // Postgres bikin insert gagal (log_date bertipe date NOT NULL).
+  const INDO_MONTHS: Record<string, string> = {
+    januari: "01", februari: "02", maret: "03", april: "04", mei: "05", juni: "06",
+    juli: "07", agustus: "08", september: "09", oktober: "10", november: "11", desember: "12",
+  };
+  const parseIndoDate = (raw: string): string | null => {
+    const t = raw.trim();
+    if (!t) return null;
+    if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10); // udah ISO
+    const m = t.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/); // "..., 11 Juli 2026" (nama hari di depan diabaikan)
+    if (!m) return null;
+    const month = INDO_MONTHS[m[2].toLowerCase()];
+    return month ? `${m[3]}-${month}-${m[1].padStart(2, "0")}` : null;
   };
 
   const process = async () => {
@@ -582,7 +604,7 @@ function AttendanceUpload() {
     const clientByName = new Map(clients.map((c) => [c.name.trim().toLowerCase(), c.id]));
     const unmatchedClients = new Set<string>();
 
-    const logs = rows.map((r) => {
+    const allLogs = rows.map((r) => {
       const code = r[iCode];
       const duration = parseDur(r[iDur] ?? "");
       const clientNameRaw = r[iClient] ?? null;
@@ -592,17 +614,50 @@ function AttendanceUpload() {
         if (hit) client_id = hit;
         else unmatchedClients.add(clientNameRaw);
       }
+      if (!client_id && clientId) client_id = clientId;
       const otpRaw = iOtp >= 0 ? (r[iOtp] ?? "").trim().toLowerCase() : "";
       return {
         batch_id: batch.id, rider_id: code ? riderMap.get(code) ?? null : null, driver_code: code,
         client_name: clientNameRaw, client_id,
-        log_date: r[iDate] || new Date().toISOString().slice(0, 10),
+        log_date: parseIndoDate(r[iDate] ?? "") || new Date().toISOString().slice(0, 10),
         clock_in: r[iIn] || null, clock_out: r[iOut] || null,
         duration_minutes: duration,
         is_absent: !r[iIn],
         is_late: otpRaw === "late",
       };
     });
+
+    // Deteksi duplikat: kunci = driver_code + log_date (1 rider cuma boleh 1 log
+    // per hari). Tanpa ini, re-upload file yang sama numpuk baris identik tak
+    // terbatas di attendance_logs setiap kali — sama seperti pola dedup yang
+    // dipakai di upload Delivery (lihat analyzePreview di atas).
+    const keyOf = (code: string | null | undefined, date: string) => `${code ?? ""}|${date}`;
+    const seenInFile = new Set<string>();
+    const logs: typeof allLogs = [];
+    let fileRepeatCount = 0;
+    for (const log of allLogs) {
+      const key = keyOf(log.driver_code, log.log_date);
+      if (log.driver_code && seenInFile.has(key)) { fileRepeatCount++; continue; }
+      seenInFile.add(key);
+      logs.push(log);
+    }
+
+    const codesForDedup = Array.from(new Set(logs.map((l) => l.driver_code).filter((c): c is string => !!c)));
+    const existing = await inChunks<{ id: string; driver_code: string; log_date: string }>(
+      "attendance_logs", "driver_code", codesForDedup, "id, driver_code, log_date",
+    );
+    const existingByKey = new Map(existing.map((e) => [keyOf(e.driver_code, e.log_date), e.id]));
+    const overwriteIds = logs
+      .map((l) => existingByKey.get(keyOf(l.driver_code, l.log_date)))
+      .filter((id): id is string => !!id);
+
+    if (overwriteIds.length) {
+      for (let i = 0; i < overwriteIds.length; i += 200) {
+        const chunk = overwriteIds.slice(i, i + 200);
+        const { error: delErr } = await (supabase as any).from("attendance_logs").delete().in("id", chunk);
+        if (delErr) { setBusy(false); return toast.error(`Gagal timpa data lama: ${delErr.message}`); }
+      }
+    }
 
     let inserted = 0;
     for (let i = 0; i < logs.length; i += 500) {
@@ -612,7 +667,12 @@ function AttendanceUpload() {
       inserted += chunk.length;
     }
     setBusy(false);
-    toast.success(`Berhasil upload ${inserted} log absensi` + (createdCodes.length ? ` · ${createdCodes.length} rider baru otomatis terdaftar` : ""));
+    toast.success(
+      `Berhasil upload ${inserted} log absensi` +
+      (overwriteIds.length ? ` · ${overwriteIds.length} data lama ditimpa (diperbarui)` : "") +
+      (fileRepeatCount ? ` · ${fileRepeatCount} baris dobel di file di-skip` : "") +
+      (createdCodes.length ? ` · ${createdCodes.length} rider baru otomatis terdaftar` : "")
+    );
     if (unmatchedClients.size > 0) {
       toast.warning(`Nama client tidak dikenal (aturan absensi mungkin salah pilih): ${Array.from(unmatchedClients).join(", ")}`);
     }
@@ -623,6 +683,17 @@ function AttendanceUpload() {
     <div className="space-y-4">
       <div className="text-xs text-muted-foreground">
         Format kolom: <code>Kode Mitra, Client Name, Date, Clock-in, Clock-out, Duration, OTP</code> (OTP: ONTIME/LATE — dipakai buat insentif ontime di Type E)
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-muted-foreground mb-1">Client (opsional — override jika CSV tidak punya kolom client)</label>
+        <select
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="">— dari kolom CSV / kosongkan jika CSV sudah ada client —</option>
+          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
       </div>
       <label className="block">
         <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} className="hidden" />

@@ -6,15 +6,13 @@ import { fetchAllRows } from "@/lib/fetch-all";
 import { listPricingSchemes } from "@/lib/pricing-store";
 import type { PricingScheme } from "@/lib/pricing-types";
 import type { DeliveryRow } from "@/lib/pricing-calc";
-import { computePnl, buildTrend, type ClientPnl, type ClientLite, type TrendGranularity } from "@/lib/pnl-engine";
+import { computePnl, buildTrend, type ClientPnl, type ClientLite } from "@/lib/pnl-engine";
+import { useIntelligenceDate } from "@/lib/use-intelligence-date";
 import { toast } from "sonner";
-import { Loader2, Play, Percent, AlertTriangle } from "lucide-react";
+import { Percent, AlertTriangle } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from "recharts";
 
 export const Route = createFileRoute("/admin/bcr-analytics")({ component: BcrAnalyticsPage });
-
-const firstOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10); };
-const today = () => new Date().toISOString().slice(0, 10);
 
 // Kategori sama seperti Margin Analytics (admin.pnl.tsx) & Executive Dashboard —
 // biar konsisten: rugi <0%, tipis 0-15%, sehat >=15%.
@@ -28,19 +26,30 @@ function bucketOf(marginPct: number | null): "rugi" | "tipis" | "sehat" | "no_re
 function BcrAnalyticsPage() {
   const [clients, setClients] = useState<ClientLite[]>([]);
   const [schemes, setSchemes] = useState<PricingScheme[]>([]);
-  const [from, setFrom] = useState(firstOfMonth());
-  const [to, setTo] = useState(today());
-  const [granularity, setGranularity] = useState<TrendGranularity>("daily");
+  const { from, to } = useIntelligenceDate();
   const [running, setRunning] = useState(false);
   const [perClient, setPerClient] = useState<ClientPnl[] | null>(null);
 
+  // Ga ada filter sendiri di sini — tanggal acuan diatur dari Executive
+  // Dashboard, halaman ini otomatis hitung begitu client/skema selesai dimuat.
   useEffect(() => {
-    supabase.from("clients").select("id, name").order("name").then(({ data }) => setClients(data ?? []));
-    listPricingSchemes().then(setSchemes);
+    (async () => {
+      const [{ data: clientsData }, schemesData] = await Promise.all([
+        supabase.from("clients").select("id, name").order("name"),
+        listPricingSchemes(),
+      ]);
+      setClients(clientsData ?? []);
+      setSchemes(schemesData);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (clients.length > 0) run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients, schemes]);
+
   const run = async () => {
-    if (from > to) return toast.error("Tanggal 'dari' tidak boleh setelah 'sampai'");
     setRunning(true);
     setPerClient(null);
     try {
@@ -64,39 +73,12 @@ function BcrAnalyticsPage() {
   const tipis = withRevenue.filter((r) => bucketOf(r.marginPct) === "tipis");
   const sehat = withRevenue.filter((r) => bucketOf(r.marginPct) === "sehat");
   const avgBcr = withRevenue.length > 0 ? withRevenue.reduce((s, r) => s + (r.marginPct ?? 0), 0) / withRevenue.length : 0;
-  const trend = perClient ? buildTrend(perClient, granularity) : [];
+  const trend = perClient ? buildTrend(perClient, "daily") : [];
   // urut dari yang paling parah — biar yang butuh perhatian keliatan duluan
   const ranked = withRevenue.slice().sort((a, b) => (a.marginPct ?? 0) - (b.marginPct ?? 0));
 
   return (
-    <AdminLayout title="BCR Analytics" subtitle="Bill-Cost-Ratio (margin %) per client — fokus ke client yang butuh perhatian, bukan cuma total angka.">
-      <div className="rounded-lg border border-border bg-card p-5 mb-4 flex flex-wrap items-end gap-3 text-sm">
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Dari Tanggal</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2" />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Sampai Tanggal</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2" />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Granularitas Tren</label>
-          <div className="flex rounded-md border border-border overflow-hidden">
-            {(["daily", "weekly", "monthly"] as TrendGranularity[]).map((g) => (
-              <button key={g} onClick={() => setGranularity(g)}
-                className={"px-3 py-2 text-sm " + (granularity === g ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted")}>
-                {g === "daily" ? "Harian" : g === "weekly" ? "Mingguan" : "Bulanan"}
-              </button>
-            ))}
-          </div>
-        </div>
-        <button onClick={run} disabled={running}
-          className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 font-medium disabled:opacity-50">
-          {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {running ? "Menghitung…" : "Hitung"}
-        </button>
-      </div>
-
+    <AdminLayout title="BCR Analytics" subtitle={`Bill-Cost-Ratio (margin %) per client. Periode ${from} → ${to} (atur di Executive Dashboard).`}>
       {perClient && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -168,10 +150,10 @@ function BcrAnalyticsPage() {
         </>
       )}
 
-      {!perClient && !running && (
+      {!perClient && (
         <div className="rounded-lg border border-dashed border-border p-10 text-center text-muted-foreground">
           <Percent className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          Pilih periode lalu klik <b className="mx-1">Hitung</b> untuk lihat analitik BCR.
+          {running ? "Menghitung analitik BCR…" : "Memuat…"}
         </div>
       )}
     </AdminLayout>

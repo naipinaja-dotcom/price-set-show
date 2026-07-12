@@ -137,7 +137,24 @@ function CalculatePage() {
         }
         setRiderNames(names);
 
-        const res = calcAttendanceScheme(scheme.params, rows);
+        // Kalau delivery_component aktif, fetch delivery_records juga
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const delivCfg = (scheme.params.config as any)?.delivery_component;
+        let deliveryRowsForAtt: DeliveryRow[] = [];
+        if (delivCfg?.enabled) {
+          let dq = supabase
+            .from("delivery_records")
+            .select("id, rider_id, driver_code, delivery_date, awb, district, distance_km, weight_kg, destination_address, service_type, status, delivery_type")
+            .gte("delivery_date", from)
+            .lte("delivery_date", to);
+          if (clientId) dq = dq.eq("client_id", clientId);
+          const { data: dData } = await dq;
+          const dPlain = (dData ?? []) as unknown as DeliveryRow[];
+          const { resolvedIdOf: resolveD } = await resolveRiderIdentities(dPlain);
+          deliveryRowsForAtt = dPlain.map((r) => ({ ...r, rider_id: resolveD(r) })) as unknown as DeliveryRow[];
+        }
+
+        const res = calcAttendanceScheme(scheme.params, rows, deliveryRowsForAtt.length ? deliveryRowsForAtt : undefined);
         setAttResult(res);
         setRanScheme(scheme);
       } else {
@@ -593,12 +610,15 @@ function CalculatePage() {
                   <th className="p-3 text-right">Base</th>
                   <th className="p-3 text-right">Lembur</th>
                   <th className="p-3 text-right">Insentif</th>
+                  {attResult.perRider.some((l) => l.delivery_component > 0) && (
+                    <th className="p-3 text-right">Per Kiriman</th>
+                  )}
                   <th className="p-3 text-right">Total</th>
                 </tr>
               </thead>
               <tbody>
                 {attResult.perRider.length === 0 ? (
-                  <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">Tidak ada hasil.</td></tr>
+                  <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">Tidak ada hasil.</td></tr>
                 ) : (
                   attPager.paged.map((l) => (
                     <tr key={l.rider} className="border-t border-border">
@@ -607,6 +627,9 @@ function CalculatePage() {
                       <td className="p-3 text-right">{formatRupiah(l.base)}</td>
                       <td className="p-3 text-right">{l.overtime ? formatRupiah(l.overtime) : "—"}</td>
                       <td className="p-3 text-right">{l.incentive ? formatRupiah(l.incentive) : "—"}</td>
+                      {attResult.perRider.some((x) => x.delivery_component > 0) && (
+                        <td className="p-3 text-right">{l.delivery_component ? formatRupiah(l.delivery_component) : "—"}</td>
+                      )}
                       <td className="p-3 text-right font-semibold">{formatRupiah(l.total)}</td>
                     </tr>
                   ))

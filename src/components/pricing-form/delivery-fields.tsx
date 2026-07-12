@@ -30,7 +30,7 @@ import {
 
 export interface FlatUnitState {
   unit: "awb" | "unique_address";
-  rate_by: "flat" | "column";
+  rate_by: "flat" | "column" | "delivery_type";
   match_column: string;
   flat_rate: string;
   default_rate: string;
@@ -93,8 +93,8 @@ export function buildDeliveryConfig(subtype: DeliverySubtype, d: DeliveryState):
     case "flat":
       return {
         unit: d.flatUnit.unit,
-        rate_by: d.flatUnit.rate_by,
-        match_column: d.flatUnit.match_column,
+        rate_by: d.flatUnit.rate_by === "delivery_type" ? "column" : d.flatUnit.rate_by,
+        match_column: d.flatUnit.rate_by === "delivery_type" ? "Delivery Type" : d.flatUnit.match_column,
         flat_rate: parseRupiah(d.flatUnit.flat_rate),
         default_rate: parseRupiah(d.flatUnit.default_rate),
         rates: d.flatUnit.rates.filter((r) => r.key.trim()).map((r) => ({ key: r.key.trim(), rate: parseRupiah(r.rate) })),
@@ -126,9 +126,10 @@ export function deliveryEnvelopeType(subtype: DeliverySubtype, d: DeliveryState)
 export function loadDeliveryState(subtype: DeliverySubtype, legacyType: PricingCalcType, c: any): DeliveryState {
   const state = emptyDeliveryState();
   if (subtype === "flat") {
+    const isDeliveryType = c.rate_by === "column" && /delivery type/i.test(c.match_column ?? "");
     state.flatUnit = {
       unit: c.unit ?? "awb",
-      rate_by: c.rate_by ?? "flat",
+      rate_by: isDeliveryType ? "delivery_type" : (c.rate_by ?? "flat"),
       match_column: c.match_column ?? "Area",
       flat_rate: String(c.flat_rate ?? ""),
       default_rate: String(c.default_rate ?? ""),
@@ -184,6 +185,7 @@ export function DeliveryFields({ subtype, value, onChange }: { subtype: Delivery
             >
               <option value="flat">Flat (1 tarif untuk semua)</option>
               <option value="column">Beda per kolom (mis. Area)</option>
+              <option value="delivery_type">Antar / Kembali</option>
             </select>
           </div>
         </div>
@@ -196,19 +198,14 @@ export function DeliveryFields({ subtype, value, onChange }: { subtype: Delivery
         ) : (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <FieldLabel>Tarif dibedakan berdasarkan</FieldLabel>
-                <select
-                  value={/service|layanan/i.test(f.match_column) ? "Service Type" : /delivery type|return|tipe kirim/i.test(f.match_column) ? "Delivery Type" : "Area"}
-                  onChange={(e) => patch({ match_column: e.target.value })}
-                  className="w-full text-sm rounded-md border border-border bg-card px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="Area">Area / Wilayah</option>
-                  <option value="Service Type">Jenis Layanan (Service)</option>
-                  <option value="Delivery Type">Antar / Kembali (Delivery vs Return)</option>
-                </select>
-                <p className="text-[11px] text-muted-foreground">"Antar/Kembali" dideteksi otomatis oleh sistem — ga perlu ada kolomnya di file CSV.</p>
-              </div>
+              {f.rate_by === "delivery_type" ? (
+                <p className="text-[11px] text-muted-foreground self-end">Delivery vs Return dideteksi otomatis — tidak perlu kolom di CSV.</p>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <FieldLabel>Nama Kolom</FieldLabel>
+                  <TextInput value={f.match_column} onChange={(e) => patch({ match_column: e.target.value })} placeholder="Area" />
+                </div>
+              )}
               <div className="flex flex-col gap-1.5">
                 <FieldLabel>Default Rate (fallback, Rp)</FieldLabel>
                 <RupiahInput value={f.default_rate} onChange={(v) => patch({ default_rate: v })} />
@@ -216,7 +213,7 @@ export function DeliveryFields({ subtype, value, onChange }: { subtype: Delivery
             </div>
             <TableShell>
               <>
-                <Th>{/delivery type|return|tipe kirim/i.test(f.match_column) ? "Nilai (DELIVERY / RETURN)" : /service|layanan/i.test(f.match_column) ? "Nilai (cth: INSTANT)" : "Nilai Kolom (cth: Jakarta Pusat)"}</Th>
+                <Th>{f.rate_by === "delivery_type" ? "Nilai (DELIVERY / RETURN)" : "Nilai Kolom (cth: Jakarta Pusat)"}</Th>
                 <Th className="w-44">Tarif (Rp)</Th>
                 <Th className="w-10" />
               </>

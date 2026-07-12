@@ -1,7 +1,17 @@
 // Kategori 2 — Per Kehadiran. Dipecah dari pricing-form.tsx per
 // docs/pricing-engine-v2-design.md §6.
+// v2: delivery_component toggle menggantikan kategori "Kombinasi" lama.
 import { parseRupiah } from "@/lib/format";
 import { AddRowBtn, FieldLabel, RupiahInput, Td, TableShell, TextInput, Th, RowDeleteBtn, ToggleBlock } from "./shared";
+import {
+  AttendanceDeliveryCompFields,
+  buildDeliveryCompConfig,
+  emptyDeliveryCompState,
+  loadDeliveryCompState,
+  type AttendanceDeliveryCompState,
+} from "./attendance-delivery-comp";
+
+export type { AttendanceDeliveryCompState };
 
 export interface AttendanceState {
   full_fee: string;
@@ -9,6 +19,8 @@ export interface AttendanceState {
   overtimeOn: boolean;
   overtime_rate_per_hour: string;
   incentives: { label: string; amount: string; condition: "always" | "ontime_only" }[];
+  deliveryCompOn: boolean;
+  deliveryComp: AttendanceDeliveryCompState;
 }
 
 export function emptyAttendanceState(): AttendanceState {
@@ -18,6 +30,8 @@ export function emptyAttendanceState(): AttendanceState {
     overtimeOn: false,
     overtime_rate_per_hour: "0",
     incentives: [{ label: "Insentif Ontime", amount: "40000", condition: "ontime_only" }],
+    deliveryCompOn: false,
+    deliveryComp: emptyDeliveryCompState(),
   };
 }
 
@@ -29,6 +43,7 @@ export function buildAttendanceConfig(a: AttendanceState): Record<string, unknow
     incentives: a.incentives
       .filter((c) => c.label.trim())
       .map((c) => ({ label: c.label.trim(), amount: parseRupiah(c.amount), condition: c.condition })),
+    delivery_component: a.deliveryCompOn ? buildDeliveryCompConfig(a.deliveryComp) : null,
   };
 }
 
@@ -41,6 +56,8 @@ export function loadAttendanceState(c: any): AttendanceState {
     overtime_rate_per_hour: String(c.overtime?.rate_per_hour ?? "0"),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     incentives: (c.incentives ?? []).map((x: any) => ({ label: x.label ?? "", amount: String(x.amount ?? ""), condition: x.condition === "ontime_only" ? "ontime_only" : "always" })),
+    deliveryCompOn: !!c.delivery_component?.enabled,
+    deliveryComp: loadDeliveryCompState(c.delivery_component ?? null),
   };
 }
 
@@ -106,6 +123,18 @@ export function AttendanceFields({ value, onChange }: { value: AttendanceState; 
         <AddRowBtn onClick={() => patch({ incentives: [...value.incentives, { label: "", amount: "", condition: "always" }] })}>Tambah Insentif</AddRowBtn>
         <p className="text-[11px] text-muted-foreground mt-1.5">"Cuma kalau ONTIME" itu biner — hari LATE dapet Rp0 buat insentif ini, ga ada setengah-setengah.</p>
       </div>
+
+      <ToggleBlock
+        label="Komponen per kiriman (gabung delivery + attendance)"
+        hint="Tambah fee per pengiriman ke fee absensi harian. Sumber data: delivery_records di rentang yang sama. Menggantikan tipe 'Kombinasi' lama, tapi semua metode valid (tier/flat/threshold)."
+        on={value.deliveryCompOn}
+        onToggle={(on) => patch({ deliveryCompOn: on })}
+      >
+        <AttendanceDeliveryCompFields
+          value={value.deliveryComp}
+          onChange={(v) => patch({ deliveryComp: v })}
+        />
+      </ToggleBlock>
     </div>
   );
 }

@@ -2,8 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AdminLayout } from "@/components/admin-layout";
 import { fetchAllRows } from "@/lib/fetch-all";
+import { useIntelligenceDate } from "@/lib/use-intelligence-date";
 import { toast } from "sonner";
-import { Loader2, Play, Package } from "lucide-react";
+import { Package } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/admin/shipment-analytics")({ component: ShipmentAnalyticsPage });
@@ -14,17 +15,18 @@ type ShipmentRow = {
   delivery_type: string | null;
 };
 
-const firstOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10); };
-const today = () => new Date().toISOString().slice(0, 10);
-
 function ShipmentAnalyticsPage() {
-  const [from, setFrom] = useState(firstOfMonth());
-  const [to, setTo] = useState(today());
+  const { from, to } = useIntelligenceDate();
   const [running, setRunning] = useState(false);
   const [rows, setRows] = useState<ShipmentRow[] | null>(null);
 
+  // Ga ada filter sendiri di sini — tanggal acuan diatur dari Executive Dashboard.
+  useEffect(() => {
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const run = async () => {
-    if (from > to) return toast.error("Tanggal 'dari' tidak boleh setelah 'sampai'");
     setRunning(true);
     setRows(null);
     try {
@@ -57,23 +59,7 @@ function ShipmentAnalyticsPage() {
   const trend = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, count]) => ({ date: date.slice(5), count }));
 
   return (
-    <AdminLayout title="Shipment Analytics" subtitle="Volume & status pengiriman dari data delivery_records.">
-      <div className="rounded-lg border border-border bg-card p-5 mb-4 flex flex-wrap items-end gap-3 text-sm">
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Dari Tanggal</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2" />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="font-medium text-muted-foreground">Sampai Tanggal</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-md border border-border bg-background px-3 py-2" />
-        </div>
-        <button onClick={run} disabled={running}
-          className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 font-medium disabled:opacity-50">
-          {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {running ? "Menghitung…" : "Hitung"}
-        </button>
-      </div>
-
+    <AdminLayout title="Shipment Analytics" subtitle={`Volume & status pengiriman. Periode ${from} → ${to} (atur di Executive Dashboard).`}>
       {rows && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -107,10 +93,10 @@ function ShipmentAnalyticsPage() {
         </>
       )}
 
-      {!rows && !running && (
+      {!rows && (
         <div className="rounded-lg border border-dashed border-border p-10 text-center text-muted-foreground">
           <Package className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          Pilih periode lalu klik <b className="mx-1">Hitung</b> untuk lihat analitik shipment.
+          {running ? "Menghitung analitik shipment…" : "Memuat…"}
         </div>
       )}
     </AdminLayout>
