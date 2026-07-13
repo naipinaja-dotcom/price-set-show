@@ -1,11 +1,11 @@
 -- Standarkan status rider sesuai daftar Mitra: Ready to Work, Active, Resign,
--- Blacklisted, Withdrawn, Suspend. "active" & "suspended" udah ada di enum
--- rider_status, tinggal nambah 4 value baru (ALTER TYPE ADD VALUE, idempotent
--- via DO block karena Postgres belum punya "ADD VALUE IF NOT EXISTS" versi lama).
-DO $$
-BEGIN
-  ALTER TYPE public.rider_status ADD VALUE IF NOT EXISTS 'ready_to_work';
-  ALTER TYPE public.rider_status ADD VALUE IF NOT EXISTS 'resign';
-  ALTER TYPE public.rider_status ADD VALUE IF NOT EXISTS 'blacklisted';
-  ALTER TYPE public.rider_status ADD VALUE IF NOT EXISTS 'withdrawn';
-END $$;
+-- Blacklisted, Withdrawn, Suspend.
+--
+-- riders.status di DB ini bertipe `text` biasa (lihat MASTER_schema_reset.sql),
+-- BUKAN enum Postgres — jadi tidak ada type `rider_status` untuk di-ALTER TYPE.
+-- Versi awal migration ini salah asumsi (ditulis buat skema lama yang sempat
+-- pakai enum) dan gagal dengan "type public.rider_status does not exist" saat
+-- benar-benar dijalankan. Kolom text menerima value apa saja by default, jadi
+-- tidak ada DDL yang perlu dijalankan di sini — daftar status yang valid cukup
+-- divalidasi di aplikasi (lihat STATUS_ORDER di src/routes/admin.riders.tsx).
+SELECT 1;
