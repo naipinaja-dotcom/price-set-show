@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate, Navigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { usePostHog } from "@posthog/react";
 import { useAuth } from "@/lib/auth";
 import { setFirstTimeRiderPin } from "@/lib/api/rider-auth.functions";
 import { toast } from "sonner";
@@ -10,7 +11,11 @@ export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
       { title: "Masuk — DASH Payroll" },
-      { name: "description", content: "Masuk ke DASH Payroll sebagai admin untuk mengakses dashboard payroll, attendance, dan slip gaji." },
+      {
+        name: "description",
+        content:
+          "Masuk ke DASH Payroll sebagai admin untuk mengakses dashboard payroll, attendance, dan slip gaji.",
+      },
       { property: "og:title", content: "Masuk — DASH Payroll" },
       { property: "og:description", content: "Masuk ke DASH Payroll sebagai admin." },
       { property: "og:url", content: "https://price-set-show.lovable.app/login" },
@@ -23,6 +28,7 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const { user, loginAdmin, loginRider, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const posthog = usePostHog();
   const [mode, setMode] = useState<"admin" | "rider">("admin");
   const [riderSubMode, setRiderSubMode] = useState<"login" | "firstTime">("login");
   const [email, setEmail] = useState("");
@@ -35,7 +41,8 @@ function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   if (authLoading) return null;
-  if (user) return <Navigate to={user.role === "admin" ? "/admin/dashboard" : "/rider/dashboard"} />;
+  if (user)
+    return <Navigate to={user.role === "admin" ? "/admin/dashboard" : "/rider/dashboard"} />;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,11 +51,13 @@ function LoginPage() {
       if (mode === "admin") {
         if (!email || !password) throw new Error("Email & password wajib diisi");
         await loginAdmin(email, password);
+        posthog.capture("user_logged_in", { role: "admin" });
         toast.success("Berhasil masuk");
         navigate({ to: "/admin/dashboard" });
       } else if (riderSubMode === "login") {
         if (!employeeId || !pin) throw new Error("Kode Mitra & PIN wajib diisi");
         await loginRider(employeeId, pin);
+        posthog.capture("user_logged_in", { role: "rider" });
         toast.success("Berhasil masuk");
         navigate({ to: "/rider/dashboard" });
       } else {
@@ -57,6 +66,7 @@ function LoginPage() {
         if (!/^\d{4,8}$/.test(newPin)) throw new Error("PIN 4-8 digit angka");
         await setFirstTimeRiderPin({ data: { employeeId, phone, newPin } });
         await loginRider(employeeId, newPin);
+        posthog.capture("user_logged_in", { role: "rider", first_time_pin: true });
         toast.success("PIN berhasil dibuat, berhasil masuk");
         navigate({ to: "/rider/dashboard" });
       }
@@ -71,18 +81,27 @@ function LoginPage() {
     <main className="min-h-screen grid lg:grid-cols-2 bg-background">
       <div className="hidden lg:flex flex-col justify-between p-12 bg-primary text-primary-foreground">
         <div className="flex items-center gap-3">
-          <img src="/dash-logo.png" alt="DASH" className="h-8 w-auto" style={{ filter: "brightness(0) invert(1)" }} />
+          <img
+            src="/dash-logo.png"
+            alt="DASH"
+            className="h-8 w-auto"
+            style={{ filter: "brightness(0) invert(1)" }}
+          />
           <div className="text-xs opacity-80">PT. Dash Elektrik Indonesia</div>
         </div>
         <div>
           <h2 className="text-3xl font-semibold leading-tight mb-3">
-            Sistem payroll terpadu<br />untuk operasional rider.
+            Sistem payroll terpadu
+            <br />
+            untuk operasional rider.
           </h2>
           <p className="text-sm opacity-80 max-w-sm">
             Kelola skema pricing, attendance, potongan, dan slip gaji dari satu tempat.
           </p>
         </div>
-        <div className="text-xs opacity-70">© {new Date().getFullYear()} PT. Dash Elektrik Indonesia</div>
+        <div className="text-xs opacity-70">
+          © {new Date().getFullYear()} PT. Dash Elektrik Indonesia
+        </div>
       </div>
 
       <div className="flex items-center justify-center p-6">
@@ -97,9 +116,23 @@ function LoginPage() {
           </p>
 
           <div className="flex gap-1 p-1 bg-muted rounded-md mb-4 max-w-[220px]">
-            {([["admin", "Admin"], ["rider", "Rider"]] as const).map(([k, l]) => (
-              <button key={k} type="button" onClick={() => { setMode(k); setRiderSubMode("login"); }}
-                className={`flex-1 px-3 py-1.5 text-sm rounded ${mode === k ? "bg-card shadow-sm font-medium" : "text-muted-foreground"}`}>{l}</button>
+            {(
+              [
+                ["admin", "Admin"],
+                ["rider", "Rider"],
+              ] as const
+            ).map(([k, l]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => {
+                  setMode(k);
+                  setRiderSubMode("login");
+                }}
+                className={`flex-1 px-3 py-1.5 text-sm rounded ${mode === k ? "bg-card shadow-sm font-medium" : "text-muted-foreground"}`}
+              >
+                {l}
+              </button>
             ))}
           </div>
 
@@ -148,7 +181,11 @@ function LoginPage() {
                   className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
-              <button type="button" onClick={() => setRiderSubMode("firstTime")} className="text-xs text-primary hover:underline">
+              <button
+                type="button"
+                onClick={() => setRiderSubMode("firstTime")}
+                className="text-xs text-primary hover:underline"
+              >
                 Belum pernah login? Buat PIN pertama kali
               </button>
             </div>
@@ -194,7 +231,11 @@ function LoginPage() {
                   className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
-              <button type="button" onClick={() => setRiderSubMode("login")} className="text-xs text-primary hover:underline">
+              <button
+                type="button"
+                onClick={() => setRiderSubMode("login")}
+                className="text-xs text-primary hover:underline"
+              >
                 Sudah pernah buat PIN? Masuk di sini
               </button>
             </div>
