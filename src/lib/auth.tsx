@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { usePostHog } from "@posthog/react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Session } from "@supabase/supabase-js";
 
@@ -42,9 +43,19 @@ async function hydrateUser(session: Session | null): Promise<AppUser | null> {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const posthog = usePostHog();
   const [user, setUser] = useState<AppUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (user) {
+      posthog.identify(user.id, {
+        role: user.role,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
@@ -81,11 +92,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw new Error(error.message);
     },
     loginRider: async (employeeId, pin) => {
-      const slug = employeeId.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
-      const { error } = await supabase.auth.signInWithPassword({ email: `rider-${slug}@dash.internal`, password: pin });
+      const slug = employeeId
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+      const { error } = await supabase.auth.signInWithPassword({
+        email: `rider-${slug}@dash.internal`,
+        password: pin,
+      });
       if (error) throw new Error("Kode Mitra atau PIN salah");
     },
     logout: async () => {
+      posthog.capture("user_logged_out", { role: user?.role });
+      posthog.reset();
       await supabase.auth.signOut();
       setUser(null);
       setSession(null);
