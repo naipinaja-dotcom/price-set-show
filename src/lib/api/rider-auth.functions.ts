@@ -92,6 +92,44 @@ function normalizePhone(p: string) {
   return p.replace(/[^0-9]/g, "").replace(/^0/, "62");
 }
 
+// Admin: aktifkan login untuk banyak rider sekaligus (dipanggil setelah
+// import CSV — rider yang statusnya masih kerja langsung bisa self-service
+// bikin PIN, ga perlu di-klik "Aktifkan Login" satu-satu). Loop di server
+// (bukan N request terpisah dari client) karena Supabase Admin API cuma
+// bisa createUser 1-per-1, tidak ada endpoint bulk-nya.
+export const activateRiderLoginsBulk = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    adminToken: z.string().min(1),
+    riders: z.array(z.object({
+      riderId: z.string().uuid(),
+      employeeId: z.string().min(1),
+      fullName: z.string().min(1),
+    })).min(1).max(500),
+  }))
+  .handler(async ({ data }) => {
+    const supabaseAdmin = await requireAdmin(data.adminToken);
+    let activated = 0;
+    const failed: { employeeId: string; error: string }[] = [];
+    for (const r of data.riders) {
+      const email = syntheticEmail(r.employeeId);
+      const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: randomPlaceholder(),
+        email_confirm: true,
+        user_metadata: { full_name: r.fullName },
+      });
+      if (error) { failed.push({ employeeId: r.employeeId, error: error.message }); continue; }
+      const userId = created.user.id;
+      await supabaseAdmin.from("profiles").update({ employee_id: r.employeeId }).eq("id", userId);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: linkErr } = await (supabaseAdmin as any).from("riders")
+        .update({ user_id: userId, must_change_pin: true }).eq("id", r.riderId);
+      if (linkErr) failed.push({ employeeId: r.employeeId, error: linkErr.message });
+      else activated++;
+    }
+    return { activated, failed };
+  });
+
 // Rider self-service: verify Kode Mitra + WhatsApp number (both already on
 // file), then set their own PIN for the first time. No admin token needed —
 // the phone match IS the verification. Returns the synthetic email so the

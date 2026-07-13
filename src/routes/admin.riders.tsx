@@ -8,7 +8,7 @@ import { parseCSV, toCSV, downloadCSV } from "@/lib/csv";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { useAuth } from "@/lib/auth";
-import { activateRiderLogin, resetRiderLogin, unlinkRiderLogin } from "@/lib/api/rider-auth.functions";
+import { activateRiderLogin, activateRiderLoginsBulk, resetRiderLogin, unlinkRiderLogin } from "@/lib/api/rider-auth.functions";
 import { Plus, Pencil, Trash2, Loader2, AlertCircle, Upload, Download, X, Search, KeyRound } from "lucide-react";
 
 export const Route = createFileRoute("/admin/riders")({ component: RidersPage });
@@ -184,6 +184,7 @@ function RidersPage() {
 
 function RiderImportModal({ clients, onClose, onDone }:
   { clients: Client[]; onClose: () => void; onDone: () => void }) {
+  const { session } = useAuth();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [fileName, setFileName] = useState("");
@@ -297,9 +298,40 @@ function RiderImportModal({ clients, onClose, onDone }:
       if (error) { setImporting(false); return toast.error(`Gagal simpan: ${error.message}`); }
       ok += chunk.length;
     }
+
+    // Auto-aktifkan login rider yang masih kerja (ready_to_work/active) —
+    // admin ga perlu klik "Aktifkan Login" satu-satu lagi buat tiap rider
+    // hasil import CSV. Resign/blacklisted/withdrawn/suspend sengaja
+    // di-skip (ga boleh langsung dikasih akses login).
+    let activated = 0;
+    const activeEmployeeIds = payload
+      .filter((p) => p.status === "ready_to_work" || p.status === "active")
+      .map((p) => p.employee_id as string);
+    if (activeEmployeeIds.length > 0 && session?.access_token) {
+      const toActivate: { riderId: string; employeeId: string; fullName: string }[] = [];
+      for (let i = 0; i < activeEmployeeIds.length; i += 200) {
+        const chunk = activeEmployeeIds.slice(i, i + 200);
+        const { data: fresh } = await supabase.from("riders")
+          .select("id, employee_id, full_name, user_id").in("employee_id", chunk);
+        (fresh ?? []).forEach((r) => {
+          if (!r.user_id) toActivate.push({ riderId: r.id, employeeId: r.employee_id, fullName: r.full_name });
+        });
+      }
+      for (let i = 0; i < toActivate.length; i += 500) {
+        const chunk = toActivate.slice(i, i + 500);
+        try {
+          const result = await activateRiderLoginsBulk({ data: { adminToken: session.access_token, riders: chunk } });
+          activated += result.activated;
+          result.failed.forEach((f) => warnings.push(`Login "${f.employeeId}" gagal diaktifkan: ${f.error}`));
+        } catch (e) {
+          warnings.push(`Aktivasi login gagal: ${(e as Error).message}`);
+        }
+      }
+    }
+
     setImporting(false);
     setResult({ ok, warnings });
-    toast.success(`${ok} rider tersimpan`);
+    toast.success(`${ok} rider tersimpan` + (activated ? ` · ${activated} login rider otomatis diaktifkan` : ""));
   };
 
   return (
@@ -315,6 +347,7 @@ function RiderImportModal({ clients, onClose, onDone }:
         </p>
         <p className="text-xs text-muted-foreground mb-4 -mt-2">
           Catatan: rider TIDAK terikat 1 client — dia bisa jalan untuk banyak client. Client-nya nempel di tiap data pengiriman/absensi, bukan di rider. Import ini cuma buat lengkapi data profil (nama, bank, dll); rider baru juga otomatis kebuat sendiri saat kamu upload data pengiriman/absensi pakai kode MTR yang belum terdaftar.
+          Rider berstatus Ready to Work/Active otomatis diaktifkan login-nya (langsung bisa "Buat PIN pertama kali" pakai Kode Mitra + Nomor WhatsApp) — Resign/Blacklisted/Withdrawn/Suspend sengaja tidak.
         </p>
 
         <button onClick={template} className="inline-flex items-center gap-2 text-xs text-primary mb-3 hover:underline">
