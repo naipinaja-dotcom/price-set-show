@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { getRequest } from "@tanstack/react-start/server";
 import type {} from "@tanstack/react-start";
 import { runWeeklyPnlPush, verifyPnlPushSecret } from "@/lib/pnl-weekly-push.server";
+import { getPostHogClient } from "@/utils/posthog-server";
 
 // Endpoint buat cron mingguan manggil Weekly PNL Push (Fase 2, C.5).
 // Dipanggil via HTTP POST + header `x-pnl-push-secret` (harus sama persis
@@ -22,6 +23,13 @@ export const Route = createFileRoute("/api/pnl-weekly-push")({
         }
         try {
           const result = await runWeeklyPnlPush({ triggeredBy: "cron" });
+          const posthog = getPostHogClient();
+          posthog.capture({
+            distinctId: "system-cron",
+            event: "pnl_weekly_push_sent",
+            properties: { triggered_by: "cron", ...result },
+          });
+          await posthog.flush();
           return new Response(JSON.stringify({ ok: true, ...result }), {
             headers: { "Content-Type": "application/json" },
           });

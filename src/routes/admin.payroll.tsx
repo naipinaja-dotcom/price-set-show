@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { usePostHog } from "@posthog/react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
@@ -30,6 +31,7 @@ type Detail = {
 };
 
 function PayrollPage() {
+  const posthog = usePostHog();
   const [runs, setRuns] = useState<Run[]>([]);
   const [activeRun, setActiveRun] = useState<Run | null>(null);
   const [details, setDetails] = useState<Detail[]>([]);
@@ -128,6 +130,7 @@ function PayrollPage() {
     setLoading(true);
     try {
       const { detailCount } = await generatePayrollDetails(activeRun);
+      posthog.capture("payroll_generated", { run_id: activeRun.id, client_id: activeRun.client_id, detail_count: detailCount });
       toast.success(`Generate ${detailCount} detail`);
       loadDetails(activeRun.id);
     } catch (e) {
@@ -143,6 +146,7 @@ function PayrollPage() {
     const { error } = await supabase.from("payroll_runs").update({ status: "finalized", finalized_at: new Date().toISOString() }).eq("id", activeRun.id);
     setFinalizing(false);
     if (error) return toast.error(error.message);
+    posthog.capture("payroll_run_finalized", { run_id: activeRun.id, client_id: activeRun.client_id });
     toast.success("Payroll difinalisasi");
     loadRuns();
   };
@@ -174,6 +178,7 @@ function PayrollPage() {
     }
     const { error: e2 } = await supabase.from("payroll_runs").update({ status: "published", published_at: new Date().toISOString() }).eq("id", activeRun.id);
     if (e2) return toast.error(e2.message);
+    posthog.capture("payroll_run_published", { run_id: activeRun.id, client_id: activeRun.client_id, slip_count: slips.length });
     toast.success(`Publish ${slips.length} slip gaji`);
     loadRuns();
     } finally {

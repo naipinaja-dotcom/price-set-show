@@ -1,7 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getRequest } from "@tanstack/react-start/server";
 import type {} from "@tanstack/react-start";
-import { runPayrollReminderCheck, verifyPayrollReminderSecret } from "@/lib/payroll-reminder.server";
+import {
+  runPayrollReminderCheck,
+  verifyPayrollReminderSecret,
+} from "@/lib/payroll-reminder.server";
+import { getPostHogClient } from "@/utils/posthog-server";
 
 // Endpoint buat cron harian manggil Payroll Reminder (PRD.md §10 backlog #8).
 // Dipanggil via HTTP POST + header `x-payroll-reminder-secret` (harus sama
@@ -22,6 +26,13 @@ export const Route = createFileRoute("/api/payroll-reminder")({
         }
         try {
           const result = await runPayrollReminderCheck({ triggeredBy: "cron" });
+          const posthog = getPostHogClient();
+          posthog.capture({
+            distinctId: "system-cron",
+            event: "payroll_reminder_sent",
+            properties: { triggered_by: "cron", ...result },
+          });
+          await posthog.flush();
           return new Response(JSON.stringify({ ok: true, ...result }), {
             headers: { "Content-Type": "application/json" },
           });

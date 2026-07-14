@@ -4,6 +4,7 @@
 // pricing-form/interactive-calc.tsx. Lihat docs/pricing-engine-v2-design.md §6.
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { usePostHog } from "@posthog/react";
 import { AdminLayout } from "@/components/admin-layout";
 import {
   PRICING_CATEGORIES,
@@ -21,9 +22,29 @@ import {
   type MockClient,
 } from "@/lib/pricing-store";
 import { parseRupiah } from "@/lib/format";
-import { ArrowLeft, Info, MapPin, Truck, Ruler, Package, CalendarDays, Save, Layers } from "lucide-react";
+import {
+  ArrowLeft,
+  Info,
+  MapPin,
+  Truck,
+  Ruler,
+  Package,
+  CalendarDays,
+  Save,
+  Layers,
+} from "lucide-react";
 import { toast } from "sonner";
-import { FieldLabel, TextInput, RupiahInput, ToggleBlock, StepTierEditor, buildStepTier, stepTierToState, emptyStepTier, type StepTierState } from "./pricing-form/shared";
+import {
+  FieldLabel,
+  TextInput,
+  RupiahInput,
+  ToggleBlock,
+  StepTierEditor,
+  buildStepTier,
+  stepTierToState,
+  emptyStepTier,
+  type StepTierState,
+} from "./pricing-form/shared";
 import {
   DeliveryFields,
   emptyDeliveryState,
@@ -39,7 +60,11 @@ import {
   loadAttendanceState,
   type AttendanceState,
 } from "./pricing-form/attendance-fields";
-import { InteractiveCalc, emptyHybridState, type HybridState } from "./pricing-form/interactive-calc";
+import {
+  InteractiveCalc,
+  emptyHybridState,
+  type HybridState,
+} from "./pricing-form/interactive-calc";
 import { loadDeliveryCompState } from "./pricing-form/attendance-delivery-comp";
 
 const CATEGORY_ICONS = { Truck, CalendarDays, Layers } as const;
@@ -72,18 +97,30 @@ function emptyForm(): FormState {
   };
 }
 
-function buildEnvelope(category: PricingCategory, subtype: PricingSubtype, schemeFor: SchemeFor, f: FormState): PricingEnvelope {
+function buildEnvelope(
+  category: PricingCategory,
+  subtype: PricingSubtype,
+  schemeFor: SchemeFor,
+  f: FormState,
+): PricingEnvelope {
   const deliverySubtype = subtype ?? "flat";
-  const type = category === "delivery" ? deliveryEnvelopeType(deliverySubtype, f.delivery) : "attendance";
-  const config = category === "delivery" ? buildDeliveryConfig(deliverySubtype, f.delivery) : buildAttendanceConfig(f.attendance);
+  const type =
+    category === "delivery" ? deliveryEnvelopeType(deliverySubtype, f.delivery) : "attendance";
+  const config =
+    category === "delivery"
+      ? buildDeliveryConfig(deliverySubtype, f.delivery)
+      : buildAttendanceConfig(f.attendance);
 
   return {
     version: 1,
     type,
     config,
-    add_kg: category === "delivery" && (deliverySubtype === "flat" || deliverySubtype === "threshold") && f.addKgOn
-      ? { enabled: true, tier: buildStepTier(f.addKg) }
-      : null,
+    add_kg:
+      category === "delivery" &&
+      (deliverySubtype === "flat" || deliverySubtype === "threshold") &&
+      f.addKgOn
+        ? { enabled: true, tier: buildStepTier(f.addKg) }
+        : null,
     multi_drop: f.multiDropOn ? { fee_per_extra_shipment: parseRupiah(f.multiDropFee) } : null,
     billing_addons:
       schemeFor === "client" && f.billingOn
@@ -96,7 +133,12 @@ function buildEnvelope(category: PricingCategory, subtype: PricingSubtype, schem
   };
 }
 
-function loadForm(scheme: PricingScheme | undefined): { form: FormState; category: PricingCategory; subtype: PricingSubtype; schemeFor: SchemeFor } {
+function loadForm(scheme: PricingScheme | undefined): {
+  form: FormState;
+  category: PricingCategory;
+  subtype: PricingSubtype;
+  schemeFor: SchemeFor;
+} {
   const form = emptyForm();
   const category: PricingCategory = scheme?.category ?? "delivery";
   const subtype: PricingSubtype = scheme?.subtype ?? (category === "delivery" ? "flat" : null);
@@ -133,8 +175,14 @@ function loadForm(scheme: PricingScheme | undefined): { form: FormState; categor
   }
 
   // modifiers
-  if (env.add_kg) { form.addKgOn = true; form.addKg = stepTierToState(env.add_kg.tier); }
-  if (env.multi_drop) { form.multiDropOn = true; form.multiDropFee = String(env.multi_drop.fee_per_extra_shipment ?? ""); }
+  if (env.add_kg) {
+    form.addKgOn = true;
+    form.addKg = stepTierToState(env.add_kg.tier);
+  }
+  if (env.multi_drop) {
+    form.multiDropOn = true;
+    form.multiDropFee = String(env.multi_drop.fee_per_extra_shipment ?? "");
+  }
   if (env.billing_addons) {
     form.billingOn = true;
     form.billing = {
@@ -173,11 +221,20 @@ export function PricingForm({ mode, schemeId }: { mode: "create" | "edit"; schem
     );
   }
 
-  return <PricingFormInner key={existing?.id ?? "new"} mode={mode} existing={existing ?? undefined} />;
+  return (
+    <PricingFormInner key={existing?.id ?? "new"} mode={mode} existing={existing ?? undefined} />
+  );
 }
 
-function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existing?: PricingScheme }) {
+function PricingFormInner({
+  mode,
+  existing,
+}: {
+  mode: "create" | "edit";
+  existing?: PricingScheme;
+}) {
   const navigate = useNavigate();
+  const posthog = usePostHog();
   const [clients, setClients] = useState<MockClient[]>([]);
 
   const loaded = useMemo(() => loadForm(existing), [existing]);
@@ -185,7 +242,9 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
   const [name, setName] = useState(existing?.name ?? "");
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [schemeFor, setSchemeFor] = useState<SchemeFor>(loaded.schemeFor);
-  const [effFrom, setEffFrom] = useState(existing?.effective_from ?? new Date().toISOString().slice(0, 10));
+  const [effFrom, setEffFrom] = useState(
+    existing?.effective_from ?? new Date().toISOString().slice(0, 10),
+  );
   const [effTo, setEffTo] = useState(existing?.effective_to ?? "");
   const [category, setCategory] = useState<PricingCategory>(loaded.category);
   const [subtype, setSubtype] = useState<PricingSubtype>(loaded.subtype);
@@ -225,6 +284,12 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
         effective_to: effTo || null,
         params: buildEnvelope(category, subtype, schemeFor, f),
       });
+      posthog.capture("pricing_scheme_saved", {
+        mode,
+        category,
+        subtype: subtype ?? null,
+        scheme_for: schemeFor,
+      });
       toast.success(mode === "create" ? "Skema berhasil dibuat" : "Skema berhasil diperbarui");
       navigate({ to: "/admin/pricing" });
     } catch (e) {
@@ -251,8 +316,14 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
       <div className="rounded-xl border border-border bg-card p-5 mb-4 shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div className="flex flex-col gap-1.5">
-            <FieldLabel>Nama Skema <span className="font-normal text-muted-foreground">(opsional)</span></FieldLabel>
-            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Kosongin = otomatis dari client + sisi + tipe" />
+            <FieldLabel>
+              Nama Skema <span className="font-normal text-muted-foreground">(opsional)</span>
+            </FieldLabel>
+            <TextInput
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Kosongin = otomatis dari client + sisi + tipe"
+            />
           </div>
           <div className="flex flex-col gap-1.5">
             <FieldLabel>Client</FieldLabel>
@@ -263,7 +334,9 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
             >
               <option value="">Semua Client</option>
               {clients.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
               ))}
             </select>
           </div>
@@ -274,7 +347,9 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
             <TextInput type="date" value={effFrom} onChange={(e) => setEffFrom(e.target.value)} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <FieldLabel>Berlaku Sampai <span className="font-normal">(opsional)</span></FieldLabel>
+            <FieldLabel>
+              Berlaku Sampai <span className="font-normal">(opsional)</span>
+            </FieldLabel>
             <TextInput type="date" value={effTo} onChange={(e) => setEffTo(e.target.value)} />
           </div>
         </div>
@@ -290,11 +365,17 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
                 onClick={() => setSchemeFor(sf)}
                 className={
                   "text-left rounded-md px-3 py-2.5 border transition-colors " +
-                  (schemeFor === sf ? "border-2 border-primary bg-primary-soft" : "border-border hover:border-primary-border hover:bg-primary-soft/40")
+                  (schemeFor === sf
+                    ? "border-2 border-primary bg-primary-soft"
+                    : "border-border hover:border-primary-border hover:bg-primary-soft/40")
                 }
               >
-                <span className="text-xs font-medium block">{sf === "rider" ? "Rider (Cost)" : "Client (Revenue)"}</span>
-                <span className="text-[11px] text-muted-foreground">{sf === "rider" ? "Fee yang dibayar ke rider" : "Harga yang ditagih ke client"}</span>
+                <span className="text-xs font-medium block">
+                  {sf === "rider" ? "Rider (Cost)" : "Client (Revenue)"}
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  {sf === "rider" ? "Fee yang dibayar ke rider" : "Harga yang ditagih ke client"}
+                </span>
               </button>
             ))}
           </div>
@@ -303,7 +384,9 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
 
       {/* Category + subtype chooser + dynamic params */}
       <div className="rounded-xl border border-border bg-card p-5 mb-4 shadow-sm">
-        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest mb-3">Pilih kategori</p>
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest mb-3">
+          Pilih kategori
+        </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
           {PRICING_CATEGORIES.map((cat) => {
             const Icon = CATEGORY_ICONS[cat.icon as keyof typeof CATEGORY_ICONS] ?? Truck;
@@ -358,13 +441,20 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
         <div className="rounded-md border border-primary-border bg-primary-soft px-3.5 py-2.5 mb-4 flex items-start gap-2.5">
           <Info className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
           <p className="text-xs text-primary-soft-foreground leading-relaxed">
-            {category === "delivery" ? (DELIVERY_SUBTYPES.find((s) => s.key === subtype)?.callout ?? PRICING_CATEGORIES.find((c) => c.key === category)!.callout) : PRICING_CATEGORIES.find((c) => c.key === category)!.callout}
+            {category === "delivery"
+              ? (DELIVERY_SUBTYPES.find((s) => s.key === subtype)?.callout ??
+                PRICING_CATEGORIES.find((c) => c.key === category)!.callout)
+              : PRICING_CATEGORIES.find((c) => c.key === category)!.callout}
           </p>
         </div>
 
         {/* ===== DELIVERY ===== */}
         {category === "delivery" && subtype && (
-          <DeliveryFields subtype={subtype} value={f.delivery} onChange={(v) => patch({ delivery: v })} />
+          <DeliveryFields
+            subtype={subtype}
+            value={f.delivery}
+            onChange={(v) => patch({ delivery: v })}
+          />
         )}
 
         {/* ===== ATTENDANCE ===== */}
@@ -388,7 +478,9 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
 
       {/* ===== MODIFIERS ===== */}
       <div className="rounded-xl border border-border bg-card p-5 mb-4 space-y-3 shadow-sm">
-        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">Modifier (opsional)</p>
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
+          Modifier (opsional)
+        </p>
 
         {category === "delivery" && (subtype === "flat" || subtype === "threshold") && (
           <ToggleBlock
@@ -423,15 +515,27 @@ function PricingFormInner({ mode, existing }: { mode: "create" | "edit"; existin
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="flex flex-col gap-1.5">
                 <FieldLabel>Min Charge (Rp)</FieldLabel>
-                <RupiahInput value={f.billing.min_charge} onChange={(v) => patch({ billing: { ...f.billing, min_charge: v } })} />
+                <RupiahInput
+                  value={f.billing.min_charge}
+                  onChange={(v) => patch({ billing: { ...f.billing, min_charge: v } })}
+                />
               </div>
               <div className="flex flex-col gap-1.5">
                 <FieldLabel>Admin Fee (Rp)</FieldLabel>
-                <RupiahInput value={f.billing.admin_fee_flat} onChange={(v) => patch({ billing: { ...f.billing, admin_fee_flat: v } })} />
+                <RupiahInput
+                  value={f.billing.admin_fee_flat}
+                  onChange={(v) => patch({ billing: { ...f.billing, admin_fee_flat: v } })}
+                />
               </div>
               <div className="flex flex-col gap-1.5">
                 <FieldLabel>PPN (%)</FieldLabel>
-                <TextInput value={f.billing.ppn_percent} inputMode="decimal" onChange={(e) => patch({ billing: { ...f.billing, ppn_percent: e.target.value } })} />
+                <TextInput
+                  value={f.billing.ppn_percent}
+                  inputMode="decimal"
+                  onChange={(e) =>
+                    patch({ billing: { ...f.billing, ppn_percent: e.target.value } })
+                  }
+                />
               </div>
             </div>
           </ToggleBlock>
