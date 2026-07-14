@@ -135,7 +135,7 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
       {(!collapsed || mobile) ? (
         <div className="px-3 pt-3">
           <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-muted">
-            {([["payroll", "Payroll"], ["intelligence", "Intelijen"]] as const).map(([m, label]) => (
+            {([["payroll", "Payroll"], ["intelligence", "PnL"]] as const).map(([m, label]) => (
               <button key={m} type="button" onClick={() => switchMode(m)}
                 className={"text-[12px] font-semibold py-1.5 rounded-md transition-colors " +
                   (mode === m ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
@@ -148,7 +148,7 @@ export function AdminLayout({ children, title, subtitle }: { children: ReactNode
         <div className="px-2 pt-3 flex flex-col gap-1">
           {([["payroll", LayoutDashboard], ["intelligence", TrendingUp]] as const).map(([m, Icon]) => (
             <button key={m} type="button" onClick={() => switchMode(m)}
-              title={m === "payroll" ? "Payroll Mode" : "Intelligence Mode"}
+              title={m === "payroll" ? "Payroll Mode" : "PnL Mode"}
               className={"w-full flex justify-center p-2 rounded-lg transition-colors " +
                 (mode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
               <Icon className="w-4 h-4" />

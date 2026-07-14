@@ -6,15 +6,22 @@ import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
-import { Plus, Loader2, CheckCircle2, Send, X, Download, ExternalLink } from "lucide-react";
-import { fetchAllRows } from "@/lib/fetch-all";
-import { getLastFeePeriod, type LastFeePeriod } from "@/lib/last-fee-period";
-import { resolveRiderIdentities } from "@/lib/rider-lookup";
+import { Plus, Loader2, CheckCircle2, Send, Download, ExternalLink, ChevronDown } from "lucide-react";
+import { generatePayrollDetails } from "@/lib/payroll-generate";
 import { downloadBulkPaymentCSV, downloadBulkPaymentXLS, type BulkPaymentRow } from "@/lib/bulk-payment-export";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 
 export const Route = createFileRoute("/admin/payroll")({ component: PayrollPage });
 
-type Run = { id: string; name: string; period_type: string; period_start: string; period_end: string; status: string };
+type Run = { id: string; name: string; period_type: string; period_start: string; period_end: string; status: string; client_id: string | null };
+type Client = { id: string; name: string };
+type FeeAuditEntry = {
+  id: string; action: string; client_id: string | null; scheme_name: string | null;
+  period_start: string; period_end: string; row_count: number; total_amount: number; created_at: string;
+  calc_table: string | null; affected_row_ids: string[] | null; rejected_at: string | null;
+};
 type Detail = {
   id: string; rider_id: string; client_id: string | null;
   delivery_count: number; delivery_fee: number; attendance_fee: number;
@@ -27,13 +34,12 @@ function PayrollPage() {
   const [activeRun, setActiveRun] = useState<Run | null>(null);
   const [details, setDetails] = useState<Detail[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [newRunOpen, setNewRunOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [exportingBulk, setExportingBulk] = useState(false);
-  const [lastPeriod, setLastPeriod] = useState<LastFeePeriod | null>(null);
-  const [prefill, setPrefill] = useState<{ start: string; end: string } | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [feeAuditLog, setFeeAuditLog] = useState<FeeAuditEntry[]>([]);
   const {
     pageSize: detailPageSize, setPageSize: setDetailPageSize, page: detailPage, setPage: setDetailPage,
     totalPages: detailTotalPages, paged: pagedDetails, from: detailFrom, to: detailTo, total: detailTotal,
@@ -41,11 +47,17 @@ function PayrollPage() {
 
   const loadRuns = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from("payroll_runs").select("*").order("created_at", { ascending: false });
+    // (supabase as any): kolom client_id belum ke-generate di types.ts sampai
+    // migration 20260714000000 di-apply + `supabase gen types` dijalanin ulang.
+    const { data, error } = await (supabase as any).from("payroll_runs").select("*").order("created_at", { ascending: false });
     if (error) toast.error(error.message); else setRuns(data ?? []);
     setLoading(false);
   };
-  useEffect(() => { loadRuns(); setLastPeriod(getLastFeePeriod()); }, []);
+
+  useEffect(() => {
+    loadRuns();
+    supabase.from("clients").select("id, name").order("name").then(({ data }) => setClients(data ?? []));
+  }, []);
 
   const loadDetails = async (runId: string) => {
     const { data, error } = await supabase.from("payroll_details")
@@ -53,128 +65,71 @@ function PayrollPage() {
     if (error) toast.error(error.message); else setDetails((data ?? []) as any);
   };
 
-  useEffect(() => { if (activeRun) loadDetails(activeRun.id); }, [activeRun]);
-
-  const createRun = async (input: { name: string; period_type: string; period_start: string; period_end: string }) => {
-    setCreating(true);
-    const { data, error } = await supabase.from("payroll_runs")
-      .insert({ name: input.name, period_type: input.period_type as any, period_start: input.period_start, period_end: input.period_end })
-      .select().single();
-    setCreating(false);
-    if (error) { toast.error(error.message); return; }
-    toast.success("Run dibuat"); setRuns([data, ...runs]); setActiveRun(data); setNewRunOpen(false); setPrefill(null);
+  // Riwayat "Hitung Fee" (commit dari admin.calculate.tsx) yang periodenya
+  // overlap sama run ini — biar admin bisa REVIEW client mana aja yang udah
+  // dihitung sebelum Generate/Finalize, bukan cuma andalin toast sekali doang.
+  // Kalau run ini scoped ke 1 client (client_id keisi), filter juga per client
+  // itu — run "Semua Client" (client_id null) tetap nampilin semua.
+  const loadFeeAuditLog = async (run: Run) => {
+    let q = (supabase as any).from("fee_calculation_audit_log")
+      .select("id, action, client_id, scheme_name, period_start, period_end, row_count, total_amount, created_at, calc_table, affected_row_ids, rejected_at")
+      .lte("period_start", run.period_end).gte("period_end", run.period_start)
+      .order("created_at", { ascending: false });
+    if (run.client_id) q = q.eq("client_id", run.client_id);
+    const { data, error } = await q;
+    if (error) { toast.error(`Gagal muat riwayat hitung fee: ${error.message}`); return; }
+    setFeeAuditLog(data ?? []);
   };
 
+  useEffect(() => {
+    if (activeRun) { loadDetails(activeRun.id); loadFeeAuditLog(activeRun); }
+  }, [activeRun]);
+
+  // Reject: salah pilih tanggal/client, udah keburu commit — reset PERSIS
+  // baris yang kena commit itu (affected_row_ids) balik ke fee=0, dan tandain
+  // entry-nya rejected biar gak dipakai lagi buat "Buat Run". Cuma untuk
+  // action "commit_payroll" (commit_invoice beda mekanisme — insert row baru
+  // di invoice_details, bukan update fee, jadi di luar scope reject ini).
+  const rejectCalculation = async (entry: FeeAuditEntry) => {
+    if (entry.action !== "commit_payroll" || !entry.calc_table || !entry.affected_row_ids?.length) {
+      return toast.error("Entry ini gak bisa di-reject (bukan commit fee, atau data baris kena-nya gak lengkap).");
+    }
+    if (!(await confirmDialog({
+      title: "Reject hasil Hitung Fee ini?",
+      description: `${entry.row_count} baris yang kena commit ini akan dikembalikan ke fee = 0. Pastikan belum ada Payroll Run yang di-Finalize/Publish dari data ini — reject TIDAK otomatis mengoreksi run yang sudah kebentuk.`,
+      confirmText: "Reject", danger: true,
+    }))) return;
+    try {
+      const ids = entry.affected_row_ids;
+      for (let i = 0; i < ids.length; i += 200) {
+        const chunk = ids.slice(i, i + 200);
+        const { error } = await (supabase as any).from(entry.calc_table).update({ fee: 0 }).in("id", chunk);
+        if (error) throw error;
+      }
+      const { error: markErr } = await (supabase as any).from("fee_calculation_audit_log")
+        .update({ rejected_at: new Date().toISOString(), rejected_by: (await supabase.auth.getUser()).data.user?.id ?? null })
+        .eq("id", entry.id);
+      if (markErr) throw markErr;
+      toast.success(`${ids.length} baris di-reset ke fee = 0. Hitung ulang lewat Hitung Fee kalau perlu.`);
+      if (activeRun) loadFeeAuditLog(activeRun);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  // "Generate Ulang" manual — dipakai kalau ada data yang berubah setelah run
+  // ke-generate (mis. upload attendance baru, deduction ditambah) dan admin
+  // mau recompute tanpa lewat Hitung Fee lagi. Pembuatan run itu sendiri
+  // sekarang OTOMATIS (lihat commit() di admin.calculate.tsx — reuse
+  // generatePayrollDetails() yang sama).
   const generate = async () => {
     if (!activeRun) return;
     if (!(await confirmDialog({ title: "Generate ulang payroll?", description: "Detail payroll yang lama untuk run ini akan dihapus dan dihitung ulang.", confirmText: "Generate ulang", danger: false }))) return;
     setLoading(true);
     try {
-    // delete existing details for this run
-    await supabase.from("payroll_details").delete().eq("run_id", activeRun.id);
-
-    // STEP 1: Fetch semua delivery & attendance di periode ini dulu (sekalian fee-nya)
-    // Pakai fetchAllRows supaya data >1000 baris tidak terpotong diam-diam.
-    const [deliveries, attendance] = await Promise.all([
-      fetchAllRows<{ rider_id: string | null; driver_code: string | null; fee: number | null }>((sb, from, to) =>
-        sb.from("delivery_records").select("rider_id, driver_code, fee")
-          .gte("delivery_date", activeRun.period_start).lte("delivery_date", activeRun.period_end)
-          .range(from, to)),
-      fetchAllRows<{ rider_id: string | null; driver_code: string | null; fee: number | null }>((sb, from, to) =>
-        (sb as any).from("attendance_logs").select("rider_id, driver_code, fee")
-          .gte("log_date", activeRun.period_start).lte("log_date", activeRun.period_end)
-          .range(from, to)),
-    ]);
-
-    // STEP 2: resolve identitas rider dari rider_id ATAU fallback kode mitra —
-    // baris lama yang link rider_id-nya putus (upload sebelum resolveOrCreateRiders
-    // dipasang) tetap kehitung, bukan diam-diam hilang dari payroll.
-    const { resolvedIdOf } = await resolveRiderIdentities([...deliveries, ...attendance]);
-    const riderIds = [...new Set([
-      ...deliveries.map(resolvedIdOf),
-      ...attendance.map(resolvedIdOf),
-    ])].filter((id): id is string => !!id);
-
-    // STEP 3: Fetch detail rider HANYA yang ada di list rider_ids
-    let riders: any[] = [];
-    if (riderIds.length > 0) {
-      const { data, error } = await supabase.from("riders")
-        .select("id, client_id, employee_id, full_name")
-        .in("id", riderIds);
-      if (error) throw error;
-      riders = data ?? [];
-    }
-    console.log(`[Payroll Generate] ${deliveries.length} baris delivery, ${attendance.length} baris absensi, ${riderIds.length} rider_id unik, ${riders.length} rider ketemu di tabel riders.`);
-
-    // STEP 4: Fetch data pendukung lain (installments, deduction_types)
-    const [{ data: installments }, { data: autoTypes }] = await Promise.all([
-      supabase.from("rider_installments").select("*").eq("active", true)
-        .lte("next_deduction_date", activeRun.period_end),
-      (supabase as any).from("deduction_types").select("id, name, recurring_amount")
-        .eq("active", true).eq("auto_recurring", true),
-    ]);
-
-    const detailsToInsert: any[] = [];
-    const deductionsToInsert: any[] = [];
-
-    for (const rider of riders ?? []) {
-      const rDelivs = deliveries.filter((d) => resolvedIdOf(d) === rider.id);
-      const rAttend = attendance.filter((a) => resolvedIdOf(a) === rider.id);
-
-      const deliveryFee = rDelivs.reduce((s, d) => s + Number(d.fee || 0), 0);
-      const deliveryCount = rDelivs.length;
-      const attendanceFee = rAttend.reduce((s, a) => s + Number(a.fee || 0), 0);
-      // Insentif & penalty udah dianyam ke dalam attendance_fee sama Type E
-      // engine (bukan line-item terpisah lagi kayak jalur lama).
-      const incentiveTotal = 0;
-      const penalty = 0;
-      const gross = deliveryFee + attendanceFee + incentiveTotal - penalty;
-
-      const rInstall = (installments ?? []).filter((i: any) => i.rider_id === rider.id);
-      const installTotal = rInstall.reduce((s: number, i: any) => s + Number(i.per_period_amount), 0);
-
-      // potongan otomatis flat — cuma buat rider yg punya penghasilan periode ini
-      const autoTotal = gross > 0
-        ? (autoTypes ?? []).reduce((s: number, t: any) => s + (Number(t.recurring_amount) || 0), 0)
-        : 0;
-
-      const totalDed = installTotal + autoTotal;
-      const net = Math.max(0, gross - totalDed);
-      const detailId = crypto.randomUUID();
-      detailsToInsert.push({
-        id: detailId, run_id: activeRun.id, rider_id: rider.id, client_id: rider.client_id,
-        delivery_count: deliveryCount, delivery_fee: deliveryFee,
-        attendance_fee: attendanceFee, incentive: incentiveTotal, penalty,
-        gross_earning: gross, total_deduction: totalDed, net_pay: net,
-      });
-      for (const ins of rInstall) {
-        deductionsToInsert.push({
-          detail_id: detailId, deduction_type_id: ins.deduction_type_id,
-          installment_id: ins.id, description: `Cicilan ${ins.installments_paid + 1}/${ins.installment_count}`,
-          amount: ins.per_period_amount,
-        });
-      }
-      if (gross > 0) {
-        for (const t of autoTypes ?? []) {
-          const amt = Number(t.recurring_amount) || 0;
-          if (amt <= 0) continue;
-          deductionsToInsert.push({
-            detail_id: detailId, deduction_type_id: t.id,
-            installment_id: null, description: t.name, amount: amt,
-          });
-        }
-      }
-    }
-    if (detailsToInsert.length) {
-      const { error: e1 } = await supabase.from("payroll_details").insert(detailsToInsert);
-      if (e1) throw e1;
-    }
-    if (deductionsToInsert.length) {
-      const { error: e2 } = await supabase.from("payroll_deductions").insert(deductionsToInsert);
-      if (e2) throw e2;
-    }
-    toast.success(`Generate ${detailsToInsert.length} detail`);
-    loadDetails(activeRun.id);
+      const { detailCount } = await generatePayrollDetails(activeRun);
+      toast.success(`Generate ${detailCount} detail`);
+      loadDetails(activeRun.id);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -295,39 +250,49 @@ function PayrollPage() {
 
   return (
     <AdminLayout title="Payroll Run" subtitle="Proses payroll rider step by step">
-      {lastPeriod && !runs.some((r) => r.period_start === lastPeriod.from && r.period_end === lastPeriod.to) && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
-          <span>
-            Kamu baru Hitung Fee &amp; commit <b>{lastPeriod.rowCount} baris</b> untuk <b>{lastPeriod.clientName}</b>, periode <b>{lastPeriod.from} → {lastPeriod.to}</b>.
-          </span>
-          <button
-            onClick={() => { setPrefill({ start: lastPeriod.from, end: lastPeriod.to }); setNewRunOpen(true); }}
-            className="shrink-0 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-sm"
-          >
-            Buat Run periode ini
-          </button>
-        </div>
-      )}
-
       <div className="flex gap-6">
         {/* Run list sidebar */}
         <aside className="w-56 shrink-0">
-          <button onClick={() => setNewRunOpen(true)} disabled={creating}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm mb-3 disabled:opacity-50">
-            <Plus className="w-4 h-4" /> Buat Run Baru
+          {/* Run dibuat OTOMATIS begitu commit di halaman Hitung Fee — gak
+              perlu tombol "Buat Run Baru" lagi. "Refresh" di sini buat mastiin
+              daftar ini nunjukin run terbaru kalau abis commit di tab/halaman
+              lain sebelum balik ke sini. */}
+          <button onClick={loadRuns} disabled={loading}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm mb-3 disabled:opacity-50 hover:bg-muted transition-colors">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Refresh
           </button>
+
+          {/* Toggle Aktif/History — history = udah published, gak nyampur sama
+              run yang masih draft/finalized. Filter status doang, data TETAP
+              di tabel payroll_runs yang sama (gak dipindah ke tabel lain, biar
+              relasi payroll_details/deductions/payslips ke run_id gak putus). */}
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-muted mb-3">
+            {([[false, "Aktif"], [true, "History"]] as const).map(([v, label]) => (
+              <button key={label} type="button" onClick={() => { setShowHistory(v); loadRuns(); }}
+                className={"text-[12px] font-semibold py-1.5 rounded-md transition-colors " +
+                  (showHistory === v ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                {label}
+              </button>
+            ))}
+          </div>
+
           <div className="space-y-1">
             {loading && !runs.length ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> :
-              runs.map((r) => {
+              runs.filter((r) => (showHistory ? r.status === "published" : r.status !== "published")).map((r) => {
                 const statusColor = r.status === "published" ? "text-success" : r.status === "finalized" ? "text-warning" : "text-muted-foreground";
+                const clientName = r.client_id ? (clients.find((c) => c.id === r.client_id)?.name ?? "(client tak dikenal)") : "Semua Client";
                 return (
                   <button key={r.id} onClick={() => setActiveRun(r)}
                     className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors ${activeRun?.id === r.id ? "bg-primary-soft text-primary-soft-foreground font-medium" : "hover:bg-muted/60"}`}>
-                    <div className="truncate font-medium text-[13px]">{r.name}</div>
+                    <div className="truncate font-medium text-[13px]">{clientName}</div>
+                    <div className="text-[11px] mt-0.5 text-muted-foreground truncate">{r.name}</div>
                     <div className={`text-[11px] mt-0.5 ${statusColor}`}>{r.period_start} → {r.period_end} · {r.status}</div>
                   </button>
                 );
               })}
+            {!loading && runs.filter((r) => (showHistory ? r.status === "published" : r.status !== "published")).length === 0 && (
+              <p className="text-xs text-muted-foreground px-3 py-2">{showHistory ? "Belum ada run yang di-publish." : "Belum ada run aktif — hitung fee dulu di halaman Hitung Fee, run-nya otomatis muncul di sini."}</p>
+            )}
           </div>
         </aside>
 
@@ -336,8 +301,8 @@ function PayrollPage() {
           {!activeRun ? (
             <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-muted grid place-items-center text-muted-foreground"><Plus className="w-5 h-5" /></div>
-              <p className="text-sm text-muted-foreground">Pilih run dari daftar atau buat run baru untuk memulai payroll.</p>
-              <button onClick={() => setNewRunOpen(true)} className="text-sm text-primary font-medium hover:underline">Buat Payroll Run →</button>
+              <p className="text-sm text-muted-foreground max-w-sm">Pilih run dari daftar di kiri. Run baru otomatis muncul begitu kamu commit hasil hitungan di halaman Hitung Fee.</p>
+              <Link to="/admin/calculate" className="text-sm text-primary font-medium hover:underline">Buka Hitung Fee →</Link>
             </div>
           ) : (
             <>
@@ -369,8 +334,9 @@ function PayrollPage() {
                     <div className="text-[12px] text-muted-foreground mt-0.5">{activeRun.period_start} → {activeRun.period_end}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {/* Step 2: Cek Data link */}
+                    {/* Step 2: Cek Data link — bawa periode run aktif biar auto-jalan, gak perlu pilih ulang */}
                     <Link to="/admin/data-check"
+                      search={{ from: activeRun.period_start, to: activeRun.period_end }}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[13px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
                       <ExternalLink className="w-3.5 h-3.5" /> Cek Data
                     </Link>
@@ -390,22 +356,75 @@ function PayrollPage() {
                       className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-[13px] disabled:opacity-40 transition-colors">
                       {publishing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Publish
                     </button>
-                    {/* Export */}
-                    <button onClick={() => exportBulkPayment("csv")}
-                      disabled={activeRun.status === "draft" || exportingBulk || details.length === 0}
-                      title={activeRun.status === "draft" ? "Finalize dulu" : "Download CSV bank"}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[13px] disabled:opacity-40 hover:bg-muted transition-colors">
-                      {exportingBulk ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} CSV
-                    </button>
-                    <button onClick={() => exportBulkPayment("xls")}
-                      disabled={activeRun.status === "draft" || exportingBulk || details.length === 0}
-                      title={activeRun.status === "draft" ? "Finalize dulu" : "Download XLS bank"}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[13px] disabled:opacity-40 hover:bg-muted transition-colors">
-                      {exportingBulk ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} XLS
-                    </button>
+                    {/* Export — konsolidasi CSV/XLS jadi 1 dropdown */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button disabled={activeRun.status === "draft" || exportingBulk || details.length === 0}
+                          title={activeRun.status === "draft" ? "Finalize dulu" : "Download bulk payment"}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[13px] disabled:opacity-40 hover:bg-muted transition-colors">
+                          {exportingBulk ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Bulk Payment <ChevronDown className="w-3 h-3" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-64">
+                        <DropdownMenuItem onClick={() => exportBulkPayment("csv")} className="flex-col items-start gap-0.5 py-2">
+                          <span className="flex items-center gap-2 font-medium"><Download className="w-3.5 h-3.5" /> CSV</span>
+                          <span className="text-xs text-muted-foreground pl-5">Buat import ke internet banking</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => exportBulkPayment("xls")} className="flex-col items-start gap-0.5 py-2">
+                          <span className="flex items-center gap-2 font-medium"><Download className="w-3.5 h-3.5" /> XLS</span>
+                          <span className="text-xs text-muted-foreground pl-5">Format Excel, sama isinya dengan CSV</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
               </div>
+
+              {/* Riwayat Hitung Fee periode ini — review sebelum Generate/Finalize.
+                  Sumber: fee_calculation_audit_log (dicatat tiap commit di Hitung Fee). */}
+              {feeAuditLog.length > 0 && (
+                <div className="rounded-xl border border-border overflow-x-auto mb-4">
+                  <div className="px-3 py-2 bg-muted/60 text-[12px] font-medium text-muted-foreground">
+                    Riwayat Hitung Fee periode ini ({feeAuditLog.length}) — cek dulu sebelum Generate/Finalize
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40 text-left">
+                      <tr>
+                        <th className="px-3 py-2 font-medium text-[12px] text-muted-foreground">Client</th>
+                        <th className="px-2 py-2 font-medium text-[12px] text-muted-foreground">Skema</th>
+                        <th className="px-2 py-2 font-medium text-[12px] text-muted-foreground">Periode</th>
+                        <th className="px-2 py-2 font-medium text-[12px] text-muted-foreground">Baris</th>
+                        <th className="px-2 py-2 font-medium text-[12px] text-muted-foreground">Total</th>
+                        <th className="px-2 py-2 font-medium text-[12px] text-muted-foreground">Kapan</th>
+                        <th className="px-2 py-2 w-16" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {feeAuditLog.map((a) => (
+                        <tr key={a.id} className={`border-t border-border/60 ${a.rejected_at ? "opacity-50" : ""}`}>
+                          <td className="px-3 py-2 text-[13px]">{a.client_id ? (clients.find((c) => c.id === a.client_id)?.name ?? "(tidak dikenal)") : "Semua Client"}</td>
+                          <td className="px-2 py-2 text-[13px] text-muted-foreground">{a.scheme_name ?? "—"}</td>
+                          <td className="px-2 py-2 text-[13px] text-muted-foreground">{a.period_start} → {a.period_end}</td>
+                          <td className="px-2 py-2 text-[13px] tabular-nums">{a.row_count}</td>
+                          <td className="px-2 py-2 text-[13px] tabular-nums">Rp{Number(a.total_amount).toLocaleString("id-ID")}</td>
+                          <td className="px-2 py-2 text-[12px] text-muted-foreground">{new Date(a.created_at).toLocaleString("id-ID")}</td>
+                          <td className="px-2 py-2">
+                            {a.rejected_at ? (
+                              <span className="whitespace-nowrap rounded-md bg-destructive/10 text-destructive px-2 py-1 text-[11px]">Rejected</span>
+                            ) : a.action === "commit_payroll" ? (
+                              <button onClick={() => rejectCalculation(a)}
+                                title="Salah pilih tanggal/client? Reset baris ini balik ke fee=0"
+                                className="whitespace-nowrap rounded-md border border-destructive/40 text-destructive px-2 py-1 text-[11px] hover:bg-destructive/10 transition-colors">
+                                Reject
+                              </button>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {/* Detail table */}
               {details.length > 0 && (
@@ -452,87 +471,7 @@ function PayrollPage() {
           )}
         </section>
       </div>
-      {newRunOpen && (
-        <NewRunModal
-          creating={creating}
-          initialStart={prefill?.start}
-          initialEnd={prefill?.end}
-          onClose={() => { setNewRunOpen(false); setPrefill(null); }}
-          onCreate={createRun}
-        />
-      )}
     </AdminLayout>
   );
 }
 
-function NewRunModal({ creating, initialStart, initialEnd, onClose, onCreate }: {
-  creating: boolean;
-  initialStart?: string;
-  initialEnd?: string;
-  onClose: () => void;
-  onCreate: (input: { name: string; period_type: string; period_start: string; period_end: string }) => void;
-}) {
-  const today = new Date();
-  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
-  const lastOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
-  const [name, setName] = useState(`Payroll ${today.toLocaleString("id-ID", { month: "long", year: "numeric" })}`);
-  const [periodType, setPeriodType] = useState("monthly");
-  const [start, setStart] = useState(initialStart ?? firstOfMonth);
-  const [end, setEnd] = useState(initialEnd ?? lastOfMonth);
-
-  const submit = () => {
-    if (!name.trim()) return toast.error("Nama run wajib diisi");
-    if (!start || !end) return toast.error("Tanggal periode wajib diisi");
-    if (start > end) return toast.error("Tanggal mulai tidak boleh setelah tanggal akhir");
-    onCreate({ name: name.trim(), period_type: periodType, period_start: start, period_end: end });
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4" onClick={onClose}>
-      <div className="bg-card rounded-lg w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Payroll Run Baru</h2>
-          <button onClick={onClose} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
-        </div>
-        {initialStart && (
-          <p className="text-xs text-muted-foreground mb-3">Tanggal diisi otomatis dari periode Hitung Fee terakhir — bisa diubah kalau perlu.</p>
-        )}
-        <div className="space-y-3 text-sm">
-          <div>
-            <label className="font-medium">Nama Run</label>
-            <input value={name} onChange={(e) => setName(e.target.value)}
-              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
-          </div>
-          <div>
-            <label className="font-medium">Tipe Periode</label>
-            <select value={periodType} onChange={(e) => setPeriodType(e.target.value)}
-              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2">
-              <option value="weekly">Mingguan</option>
-              <option value="biweekly">Dua Mingguan</option>
-              <option value="monthly">Bulanan</option>
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="font-medium">Dari Tanggal</label>
-              <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
-                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
-            </div>
-            <div>
-              <label className="font-medium">Sampai Tanggal</label>
-              <input type="date" value={end} onChange={(e) => setEnd(e.target.value)}
-                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" />
-            </div>
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 mt-5">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded border border-border">Batal</button>
-          <button onClick={submit} disabled={creating}
-            className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50">
-            {creating ? "Membuat…" : "Buat Run"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

@@ -13,12 +13,31 @@ import {
 
 export type { AttendanceDeliveryCompState };
 
+// 1 shift = jendela jam clock-in tertentu + tarif SENDIRI. Pure penentu
+// tarif/jam kerja — insentif/ontime TETAP dari tabel Insentif di bawah
+// (satu sumber kebenaran, tidak ada penentuan ontime kedua di sini).
+// Opsional — kalau kosong, skema pakai 1 tarif flat seperti sebelumnya
+// (field full_fee/standard_hours di atas jadi fallback-nya).
+export interface ShiftRow {
+  label: string;
+  start_time: string; // "04:00"
+  end_time: string;   // "09:00"
+  full_fee: string;
+  standard_hours: string;
+}
+
+export function emptyShiftRow(n: number): ShiftRow {
+  return { label: `Shift ${n}`, start_time: "", end_time: "", full_fee: "100000", standard_hours: "8" };
+}
+
 export interface AttendanceState {
   full_fee: string;
   standard_hours: string; // ditampilkan dalam jam, disimpan sebagai menit di config
   overtimeOn: boolean;
   overtime_rate_per_hour: string;
   incentives: { label: string; amount: string; condition: "always" | "ontime_only" }[];
+  shiftsOn: boolean;
+  shifts: ShiftRow[];
   deliveryCompOn: boolean;
   deliveryComp: AttendanceDeliveryCompState;
 }
@@ -30,6 +49,8 @@ export function emptyAttendanceState(): AttendanceState {
     overtimeOn: false,
     overtime_rate_per_hour: "0",
     incentives: [{ label: "Insentif Ontime", amount: "40000", condition: "ontime_only" }],
+    shiftsOn: false,
+    shifts: [],
     deliveryCompOn: false,
     deliveryComp: emptyDeliveryCompState(),
   };
@@ -43,12 +64,21 @@ export function buildAttendanceConfig(a: AttendanceState): Record<string, unknow
     incentives: a.incentives
       .filter((c) => c.label.trim())
       .map((c) => ({ label: c.label.trim(), amount: parseRupiah(c.amount), condition: c.condition })),
+    shifts: a.shiftsOn
+      ? a.shifts.filter((s) => s.start_time && s.end_time).map((s, i) => ({
+          shift_number: i + 1, label: s.label.trim() || `Shift ${i + 1}`,
+          start_time: s.start_time, end_time: s.end_time,
+          full_fee: parseRupiah(s.full_fee), standard_minutes: (Number(s.standard_hours) || 0) * 60,
+        }))
+      : [],
     delivery_component: a.deliveryCompOn ? buildDeliveryCompConfig(a.deliveryComp) : null,
   };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function loadAttendanceState(c: any): AttendanceState {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const shifts: any[] = c.shifts ?? [];
   return {
     full_fee: String(c.full_fee ?? ""),
     standard_hours: String((Number(c.standard_minutes) || 0) / 60 || ""),
@@ -56,6 +86,11 @@ export function loadAttendanceState(c: any): AttendanceState {
     overtime_rate_per_hour: String(c.overtime?.rate_per_hour ?? "0"),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     incentives: (c.incentives ?? []).map((x: any) => ({ label: x.label ?? "", amount: String(x.amount ?? ""), condition: x.condition === "ontime_only" ? "ontime_only" : "always" })),
+    shiftsOn: shifts.length > 0,
+    shifts: shifts.map((s) => ({
+      label: s.label ?? "", start_time: s.start_time ?? "", end_time: s.end_time ?? "",
+      full_fee: String(s.full_fee ?? ""), standard_hours: String((Number(s.standard_minutes) || 0) / 60 || ""),
+    })),
     deliveryCompOn: !!c.delivery_component?.enabled,
     deliveryComp: loadDeliveryCompState(c.delivery_component ?? null),
   };
@@ -68,18 +103,23 @@ export function AttendanceFields({ value, onChange }: { value: AttendanceState; 
     <div className="space-y-4">
       <div className="rounded-md border border-primary-border bg-primary-soft px-3.5 py-2.5 text-xs text-primary-soft-foreground">
         Rumus: (fee penuh × proporsi jam kerja) {value.overtimeOn ? "+ lembur " : ""}+ insentif (nominal ditentuin di sini, data absensi cuma dipakai cek syarat — mis. OTP=ONTIME).
+        {value.shiftsOn && " Shift Configuration AKTIF di bawah — tarif/jam standar di sini cuma FALLBACK kalau clock-in rider di luar semua jendela shift. Insentif (termasuk ontime) SELALU dari tabel Insentif di bawah, berlaku sama buat semua shift."}
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1.5">
-          <FieldLabel>Fee Penuh per Shift (Rp)</FieldLabel>
+          <FieldLabel>{value.shiftsOn ? "Fee Penuh (Fallback, Rp)" : "Fee Penuh per Shift (Rp)"}</FieldLabel>
           <RupiahInput value={value.full_fee} onChange={(v) => patch({ full_fee: v })} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <FieldLabel>Jam Standar per Shift</FieldLabel>
+          <FieldLabel>{value.shiftsOn ? "Jam Standar (Fallback)" : "Jam Standar per Shift"}</FieldLabel>
           <TextInput type="number" value={value.standard_hours} onChange={(e) => patch({ standard_hours: e.target.value })} placeholder="8" />
         </div>
       </div>
-      <p className="text-[11px] text-muted-foreground -mt-2">Kerja kurang dari jam standar dibayar proporsional. Kerja pas/lebih = fee penuh (kecuali lembur dinyalain di bawah).</p>
+      <p className="text-[11px] text-muted-foreground -mt-2">
+        {value.shiftsOn
+          ? "Cuma kepakai kalau clock-in rider TIDAK cocok ke shift manapun di bawah."
+          : "Kerja kurang dari jam standar dibayar proporsional. Kerja pas/lebih = fee penuh (kecuali lembur dinyalain di bawah)."}
+      </p>
 
       <ToggleBlock
         label="Lembur (bayar kelebihan jam kerja)"
@@ -123,6 +163,45 @@ export function AttendanceFields({ value, onChange }: { value: AttendanceState; 
         <AddRowBtn onClick={() => patch({ incentives: [...value.incentives, { label: "", amount: "", condition: "always" }] })}>Tambah Insentif</AddRowBtn>
         <p className="text-[11px] text-muted-foreground mt-1.5">"Cuma kalau ONTIME" itu biner — hari LATE dapet Rp0 buat insentif ini, ga ada setengah-setengah.</p>
       </div>
+
+      <ToggleBlock
+        label="Shift Configuration (tarif beda per jam clock-in)"
+        hint="Kalau client punya beberapa shift dengan tarif beda (mis. Shift Pagi vs Shift Siang), atur di sini — pure nama, jam, & tarif. Rider otomatis kedeteksi masuk shift mana dari jam clock-in-nya. Insentif/ontime TETAP dari tabel Insentif di atas, berlaku sama buat semua shift (dan buat yang di luar semua jendela shift ini)."
+        on={value.shiftsOn}
+        onToggle={(on) => patch({ shiftsOn: on, shifts: on && value.shifts.length === 0 ? [emptyShiftRow(1)] : value.shifts })}
+      >
+        <div className="space-y-3">
+          {value.shifts.map((s, i) => (
+            <div key={i} className="rounded-md border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <TextInput value={s.label} placeholder={`Shift ${i + 1}`}
+                  onChange={(e) => patch({ shifts: value.shifts.map((x, idx) => (idx === i ? { ...x, label: e.target.value } : x)) })}
+                  className="max-w-[180px] font-medium" />
+                <RowDeleteBtn onClick={() => patch({ shifts: value.shifts.filter((_, idx) => idx !== i) })} />
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <FieldLabel>Clock-in Dari</FieldLabel>
+                  <TextInput type="time" value={s.start_time} onChange={(e) => patch({ shifts: value.shifts.map((x, idx) => (idx === i ? { ...x, start_time: e.target.value } : x)) })} />
+                </div>
+                <div>
+                  <FieldLabel>Sampai (eksklusif)</FieldLabel>
+                  <TextInput type="time" value={s.end_time} onChange={(e) => patch({ shifts: value.shifts.map((x, idx) => (idx === i ? { ...x, end_time: e.target.value } : x)) })} />
+                </div>
+                <div>
+                  <FieldLabel>Fee Penuh (Rp)</FieldLabel>
+                  <RupiahInput value={s.full_fee} onChange={(v) => patch({ shifts: value.shifts.map((x, idx) => (idx === i ? { ...x, full_fee: v } : x)) })} />
+                </div>
+                <div>
+                  <FieldLabel>Jam Standar</FieldLabel>
+                  <TextInput type="number" value={s.standard_hours} onChange={(e) => patch({ shifts: value.shifts.map((x, idx) => (idx === i ? { ...x, standard_hours: e.target.value } : x)) })} />
+                </div>
+              </div>
+            </div>
+          ))}
+          <AddRowBtn onClick={() => patch({ shifts: [...value.shifts, emptyShiftRow(value.shifts.length + 1)] })}>Tambah Shift</AddRowBtn>
+        </div>
+      </ToggleBlock>
 
       <ToggleBlock
         label="Komponen per kiriman (gabung delivery + attendance)"

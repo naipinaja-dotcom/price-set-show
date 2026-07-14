@@ -35,7 +35,7 @@ export function stepTierToState(t: StepTier | null | undefined): StepTierState {
     tiers: (t.tiers ?? []).map((x) => ({
       from: String(x.from ?? ""),
       to: x.to === null || x.to === undefined ? "" : String(x.to),
-      step: String(x.step ?? ""),
+      step: String(x.step || 1), // skema lama disimpen tanpa step -> default 1, biar keliatan (bukan placeholder abu-abu)
       add_per_step: String(x.add_per_step ?? ""),
     })),
   };
@@ -142,7 +142,7 @@ export function FieldLabel({ children }: { children: React.ReactNode }) {
 export function StepTierEditor({ value, onChange, unit }: { value: StepTierState; onChange: (v: StepTierState) => void; unit: "km" | "kg" }) {
   const setTier = (i: number, patch: Partial<StepTierState["tiers"][number]>) =>
     onChange({ ...value, tiers: value.tiers.map((t, idx) => (idx === i ? { ...t, ...patch } : t)) });
-  const addTier = () => onChange({ ...value, tiers: [...value.tiers, { from: value.base_until || "0", to: "", step: "1", add_per_step: "" }] });
+  const addTier = () => onChange({ ...value, tiers: [...value.tiers, { from: value.base_until || "0", to: "", step: "1", add_per_step: "0" }] });
   const delTier = (i: number) => onChange({ ...value, tiers: value.tiers.filter((_, idx) => idx !== i) });
 
   const inputCls = "w-full text-sm rounded border border-border/80 bg-background px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-primary/50 tabular-nums";
@@ -162,7 +162,8 @@ export function StepTierEditor({ value, onChange, unit }: { value: StepTierState
             <th className="px-3 py-2 text-left">Min ({unit})</th>
             <th className="px-3 py-2 text-left">Max ({unit})</th>
             <th className="px-3 py-2 text-left">Base Fee (Rp)</th>
-            <th className="px-3 py-2 text-left">Per {unit === "km" ? "Km" : "Kg"} (Rp)</th>
+            <th className="px-3 py-2 text-left">Step ({unit})</th>
+            <th className="px-3 py-2 text-left">Per Step (Rp)</th>
             <th className="px-3 py-2 w-10" />
           </tr>
         </thead>
@@ -179,7 +180,8 @@ export function StepTierEditor({ value, onChange, unit }: { value: StepTierState
                 inputMode="numeric" placeholder="0"
                 onChange={(e) => onChange({ ...value, base_fee: String(parseRupiah(e.target.value)) })} />
             </td>
-            <td className="px-3 py-1.5 text-muted-foreground tabular-nums">0</td>
+            <td className="px-3 py-1.5 text-muted-foreground text-center">—</td>
+            <td className="px-3 py-1.5 text-muted-foreground text-center">—</td>
             <td />
           </tr>
           {/* Tier rows */}
@@ -188,6 +190,10 @@ export function StepTierEditor({ value, onChange, unit }: { value: StepTierState
               <td className="px-3 py-1.5"><input className={inputCls} value={t.from} inputMode="decimal" onChange={(e) => setTier(i, { from: e.target.value })} /></td>
               <td className="px-3 py-1.5"><input className={inputCls} value={t.to} placeholder="∞" inputMode="decimal" onChange={(e) => setTier(i, { to: e.target.value })} /></td>
               <td className="px-3 py-1.5 text-muted-foreground text-center">—</td>
+              <td className="px-3 py-1.5">
+                <input className={inputCls} value={t.step} inputMode="decimal" placeholder="1"
+                  onChange={(e) => setTier(i, { step: e.target.value })} />
+              </td>
               <td className="px-3 py-1.5">
                 <input className={inputCls} value={t.add_per_step ? Number(t.add_per_step).toLocaleString("id-ID") : ""}
                   inputMode="numeric" placeholder="0"

@@ -168,7 +168,7 @@ function ExecutiveDashboard() {
               <Loader2 className="w-3.5 h-3.5 animate-spin" /> Menghitung…
             </span>
           ) : (
-            <span className="text-[11px] text-muted-foreground">Berlaku untuk semua halaman Intelligence Mode.</span>
+            <span className="text-[11px] text-muted-foreground">Rentang tanggal ini dipakai di semua halaman PnL.</span>
           )}
         </div>
       </div>

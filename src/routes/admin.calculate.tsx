@@ -11,8 +11,9 @@ import { calcScheme, type DeliveryRow, type CalcResult, calcAttendanceScheme, ty
 import { formatRupiah } from "@/lib/format";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
-import { saveLastFeePeriod } from "@/lib/last-fee-period";
 import { resolveRiderIdentities } from "@/lib/rider-lookup";
+import { findOrCreatePayrollRun, generatePayrollDetails } from "@/lib/payroll-generate";
+import { useAuth } from "@/lib/auth";
 import { Loader2, Play, AlertTriangle, Info, Save } from "lucide-react";
 
 export const Route = createFileRoute("/admin/calculate")({ component: CalculatePage });
@@ -28,6 +29,7 @@ function today() {
 }
 
 function CalculatePage() {
+  const { user } = useAuth();
   const [clients, setClients] = useState<ClientLite[]>([]);
   const [schemes, setSchemes] = useState<PricingScheme[]>([]);
   const [clientId, setClientId] = useState("");
@@ -83,7 +85,7 @@ function CalculatePage() {
         // Fetch attendance logs for same range
         let aq = (supabase as any)
           .from("attendance_logs")
-          .select("id, rider_id, driver_code, log_date, duration_minutes, is_late, is_absent")
+          .select("id, rider_id, driver_code, log_date, clock_in, duration_minutes, is_late, is_absent")
           .gte("log_date", from)
           .lte("log_date", to);
         if (clientId) aq = aq.eq("client_id", clientId);
@@ -115,7 +117,7 @@ function CalculatePage() {
         // STEP 1: Fetch semua attendance_logs di rentang tanggal & client ini (tanpa join riders)
         let q = (supabase as any)
           .from("attendance_logs")
-          .select("id, rider_id, driver_code, log_date, duration_minutes, is_late, is_absent")
+          .select("id, rider_id, driver_code, log_date, clock_in, duration_minutes, is_late, is_absent")
           .gte("log_date", from)
           .lte("log_date", to);
         if (clientId) q = q.eq("client_id", clientId);
@@ -220,13 +222,39 @@ function CalculatePage() {
         if (err) throw err;
         done += chunk.length;
       }
-      saveLastFeePeriod({
-        from, to,
-        clientId: clientId || null,
-        clientName: clientId ? (clients.find((c) => c.id === clientId)?.name ?? "(client tidak dikenal)") : "Semua Client",
-        rowCount: done,
+      // Audit trail: catat siapa yang commit, kapan, skema/config PERSIS yang
+      // dipakai (snapshot, bukan referensi hidup ke pricing_schemes yang bisa
+      // berubah belakangan), dan total fee — biar bisa ditelusuri kalau nanti
+      // ada yang nanya "kenapa fee-nya segini".
+      const totalFee = rows.reduce((s, r) => s + Number(r.fee || 0), 0);
+      // affected_row_ids: PERSIS baris yang barusan di-update — dipakai buat
+      // "Reject" (salah pilih tanggal/client, udah keburu commit) biar bisa
+      // di-reset balik ke fee=0 tanpa nyenggol baris lain yang gak terkait.
+      const { error: auditErr } = await (supabase as any).from("fee_calculation_audit_log").insert({
+        action: "commit_payroll",
+        client_id: clientId || null,
+        scheme_id: ranScheme.id,
+        scheme_name: ranScheme.name ?? null,
+        scheme_snapshot: ranScheme.params,
+        period_start: from, period_end: to,
+        row_count: done, total_amount: totalFee,
+        calc_table: table,
+        affected_row_ids: rows.map((r) => r.id).filter(Boolean),
+        committed_by: user?.id ?? null,
       });
-      toast.success(`Fee tersimpan ke ${done} baris. Siap dipakai Payroll Run.`);
+      // Fee-nya udah kesimpen valid (update loop di atas udah sukses & dicek
+      // errornya) — audit log gagal itu sekunder, jangan bikin user pikir fee-nya
+      // ilang. Tetep dikasih tau biar ketauan kalau tabelnya belum ke-migrate.
+      if (auditErr) toast.warning(`Fee tersimpan, tapi audit log gagal disimpan: ${auditErr.message}`);
+
+      // Auto-bikin/reuse Payroll Run buat client+periode ini, dan langsung
+      // generate detail-nya — biar begitu balik ke halaman Payroll Run, run-nya
+      // udah ADA dan udah SIAP direview, tanpa langkah "Buat Run" manual lagi.
+      const clientName = clientId ? (clients.find((c) => c.id === clientId)?.name ?? "Client") : "Semua Client";
+      const run = await findOrCreatePayrollRun({ clientId: clientId || null, clientName, periodStart: from, periodEnd: to });
+      await generatePayrollDetails(run);
+
+      toast.success(`Fee tersimpan ke ${done} baris. Payroll Run "${clientName}" siap direview.`);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -266,6 +294,18 @@ function CalculatePage() {
         },
       });
       if (error) throw error;
+      // Audit trail — sama seperti commit() di atas, snapshot skema + siapa/kapan.
+      const { error: auditErr } = await (supabase as any).from("fee_calculation_audit_log").insert({
+        action: "commit_invoice",
+        client_id: clientId,
+        scheme_id: ranScheme.id,
+        scheme_name: ranScheme.name ?? null,
+        scheme_snapshot: ranScheme.params,
+        period_start: from, period_end: to,
+        row_count: r.perRider.length, total_amount: total,
+        committed_by: user?.id ?? null,
+      });
+      if (auditErr) toast.warning(`Invoice tersimpan, tapi audit log gagal disimpan: ${auditErr.message}`);
       toast.success("Invoice tersimpan. Lihat di halaman Invoices.");
     } catch (e) {
       toast.error((e as Error).message);

@@ -353,9 +353,44 @@ export interface AttendanceLogRow {
   rider_id?: string | null;
   driver_code?: string | null;
   log_date: string;
+  clock_in?: string | null; // "HH:MM" atau "HH:MM:SS" — dipakai buat deteksi shift
   duration_minutes?: number | null;
   is_late?: boolean | null;
   is_absent?: boolean | null;
+}
+
+// Konfigurasi 1 shift (opsional, di dalam config skema attendance yang sama —
+// bukan tabel terpisah). Kalau `cfg.shifts` kosong/tidak ada, perilaku PERSIS
+// seperti sebelum shift ditambahkan (1 tarif flat, tidak ada deteksi jam).
+// Shift PURE cuma nentuin jam kerja & tarif — insentif/ontime TETAP dari
+// `incentives` di config atas (pakai `is_late` yang udah ada dari data upload),
+// satu sumber kebenaran, tidak ada penentuan ontime kedua di sini.
+export interface ShiftConfig {
+  shift_number: number;
+  label: string;
+  start_time: string; // "HH:MM" — jam clock-in mulai masuk shift ini
+  end_time: string;   // "HH:MM" — batas atas (eksklusif)
+  full_fee: number;
+  standard_minutes: number;
+}
+
+function timeToMinutes(t: string): number {
+  const [h, m] = t.split(":").map((x) => parseInt(x, 10));
+  return (h || 0) * 60 + (m || 0);
+}
+
+// Cari shift yang cocok berdasar jam clock-in. Kalau tidak ada yang cocok
+// (clock-in di luar semua jendela shift, atau clock_in kosong), return null
+// — caller fallback ke tarif flat (cfg.full_fee/standard_minutes lama).
+function findShiftFor(clockIn: string | null | undefined, shifts: ShiftConfig[]): ShiftConfig | null {
+  if (!clockIn) return null;
+  const m = timeToMinutes(clockIn);
+  for (const s of shifts) {
+    const start = timeToMinutes(s.start_time);
+    const end = timeToMinutes(s.end_time);
+    if (end > start ? (m >= start && m < end) : (m >= start || m < end)) return s; // handle shift lewat tengah malam
+  }
+  return null;
 }
 
 export interface AttendanceRowFee {
@@ -428,18 +463,30 @@ export function calcAttendanceComponent(logs: AttendanceLogRow[], cfg: any): Att
   const overtimeRatePerHour = Number(cfg.overtime?.rate_per_hour) || 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const incentives: any[] = cfg.incentives ?? [];
+  const shifts: ShiftConfig[] = Array.isArray(cfg.shifts) ? cfg.shifts : [];
 
   return logs.map((r) => {
     if (r.is_absent) {
       return { daily_base: 0, overtime: 0, incentive: 0 };
     }
     const actualMin = Number(r.duration_minutes) || 0;
-    const proportion = standardMin > 0 ? Math.min(1, actualMin / standardMin) : (actualMin > 0 ? 1 : 0);
-    const daily_base = Math.round(fullFee * proportion);
+
+    // Kalau skema punya config shift DAN clock-in-nya cocok ke salah satu
+    // jendela shift itu — shift itu CUMA nentuin tarif (full_fee) & jam
+    // standar buat proporsi daily_base. Kalau tidak cocok (skema tanpa
+    // shifts, atau clock-in di luar semua jendela) — fallback ke tarif flat
+    // (cfg.full_fee/standard_minutes lama). Insentif/ontime SELALU dari
+    // `incentives` di bawah — satu sumber kebenaran, tidak diduplikasi per shift.
+    const shift = shifts.length > 0 ? findShiftFor(r.clock_in, shifts) : null;
+    const effFullFee = shift ? (Number(shift.full_fee) || 0) : fullFee;
+    const effStandardMin = shift ? (Number(shift.standard_minutes) || 0) : standardMin;
+
+    const proportion = effStandardMin > 0 ? Math.min(1, actualMin / effStandardMin) : (actualMin > 0 ? 1 : 0);
+    const daily_base = Math.round(effFullFee * proportion);
 
     let overtime = 0;
-    if (overtimeOn && standardMin > 0 && actualMin > standardMin) {
-      overtime = Math.round(((actualMin - standardMin) / 60) * overtimeRatePerHour);
+    if (overtimeOn && effStandardMin > 0 && actualMin > effStandardMin) {
+      overtime = Math.round(((actualMin - effStandardMin) / 60) * overtimeRatePerHour);
     }
 
     let incentive = 0;

@@ -8,7 +8,10 @@ import { listPricingSchemes } from "@/lib/pricing-store";
 import { describeScheme, type RateCard } from "@/lib/rate-card";
 import { downloadXLS, rateCardsToRows, type Cell } from "@/lib/finance-export";
 import { toast } from "sonner";
-import { Download, Loader2, ChevronRight, FileSpreadsheet } from "lucide-react";
+import { Download, Loader2, ChevronRight, FileSpreadsheet, ChevronDown } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sb = supabase as any;
@@ -23,6 +26,7 @@ type RiderRow = {
   rider_id: string;
   name: string;
   employeeId: string;
+  clientName: string;
   orderCount: number;
   feeRider: number;
   activeDates: number;
@@ -54,7 +58,7 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
         // langsung ke payroll_details — biar konsisten sama ClientReport.
         // `id:detail_id` biar bentuk objeknya gak berubah dari sebelumnya.
         const { data: details, error: e1 } = await sb.from("report_summary_weekly")
-          .select("id:detail_id, rider_id, client_id, delivery_count, gross_earning, net_pay, remarks, rider_name, rider_employee_id")
+          .select("id:detail_id, rider_id, client_id, delivery_count, gross_earning, net_pay, remarks, rider_name, rider_employee_id, client_name")
           .eq("run_id", runId);
         if (e1) throw e1;
 
@@ -106,12 +110,13 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
 
         const built: RiderRow[] = (details ?? []).map((d: {
           id: string; rider_id: string; delivery_count: number; gross_earning: number; net_pay: number; remarks: string | null;
-          rider_name?: string | null; rider_employee_id?: string | null;
+          rider_name?: string | null; rider_employee_id?: string | null; client_name?: string | null;
         }) => ({
           detailId: d.id,
           rider_id: d.rider_id,
           name: d.rider_name ?? "(tanpa nama)",
           employeeId: d.rider_employee_id ?? "",
+          clientName: d.client_name ?? "(tanpa client)",
           orderCount: d.delivery_count,
           feeRider: Number(d.gross_earning),
           activeDates: datesByRider.get(d.rider_id)?.size ?? 0,
@@ -151,19 +156,19 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
 
   // ---- baris sheet ----
   const summaryRows = (): Cell[][] => {
-    const header: Cell[] = ["Driver Name", "Employee ID", "COUNTA of Order", "Fee Rider", "Active Date", ...dedTypes, "Total Fee Order", "Remarks"];
-    const body: Cell[][] = rows.map((r) => [r.name, r.employeeId, r.orderCount, r.feeRider, r.activeDates, ...dedTypes.map((ty) => r.ded[ty] ?? 0), r.total, r.remarks]);
-    const grand: Cell[] = ["GRAND TOTAL", "", t.order, t.fee, "", ...dedTypes.map((ty) => t.ded[ty] ?? 0), t.total, ""];
+    const header: Cell[] = ["Driver Name", "Employee ID", "Client", "COUNTA of Order", "Fee Rider", "Active Date", ...dedTypes, "Total Fee Order", "Remarks"];
+    const body: Cell[][] = rows.map((r) => [r.name, r.employeeId, r.clientName, r.orderCount, r.feeRider, r.activeDates, ...dedTypes.map((ty) => r.ded[ty] ?? 0), r.total, r.remarks]);
+    const grand: Cell[] = ["GRAND TOTAL", "", "", t.order, t.fee, "", ...dedTypes.map((ty) => t.ded[ty] ?? 0), t.total, ""];
     return [header, ...body, grand];
   };
   const detailRows = (): Cell[][] => {
-    const header: Cell[] = ["Driver Name", "Kode Mitra", "Tanggal", "Jenis", "Jarak (km)", "Berat (kg)", "OTP / Status", "Fee"];
+    const header: Cell[] = ["Driver Name", "Kode Mitra", "Client", "Tanggal", "Jenis", "Jarak (km)", "Berat (kg)", "OTP / Status", "Fee"];
     const out: Cell[][] = [header];
     for (const r of rows) {
-      for (const d of r.deliv) out.push([r.name, r.employeeId, d.date, "Kiriman", d.km ?? "", d.kg ?? "", d.type ?? "", d.fee]);
-      for (const a of r.att) out.push([r.name, r.employeeId, a.date, "Absensi", "", "", otpLabel(a), a.fee]);
+      for (const d of r.deliv) out.push([r.name, r.employeeId, r.clientName, d.date, "Kiriman", d.km ?? "", d.kg ?? "", d.type ?? "", d.fee]);
+      for (const a of r.att) out.push([r.name, r.employeeId, r.clientName, a.date, "Absensi", "", "", otpLabel(a), a.fee]);
       const sub = r.deliv.reduce((s, d) => s + d.fee, 0) + r.att.reduce((s, a) => s + a.fee, 0);
-      out.push(["", "", "", "", "", "", `Subtotal ${r.name}`, sub]);
+      out.push(["", "", "", "", "", "", "", `Subtotal ${r.name}`, sub]);
     }
     return out;
   };
@@ -225,21 +230,31 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
         )}
       </div>
 
-      {/* Export */}
+      {/* Export — konsolidasi ke 1 dropdown biar gak numpuk 3 tombol sejajar */}
       <div className="flex flex-wrap justify-end items-center gap-2 mb-3">
         {rows.length > 0 && <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />}
-        <button onClick={exportExcel} disabled={!rows.length}
-          className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm disabled:opacity-50">
-          <FileSpreadsheet className="w-4 h-4" /> Excel (3 sheet)
-        </button>
-        <button onClick={exportSummaryCSV} disabled={!rows.length}
-          className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50">
-          <Download className="w-4 h-4" /> CSV Ringkasan
-        </button>
-        <button onClick={exportDetailCSV} disabled={!rows.length}
-          className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50">
-          <Download className="w-4 h-4" /> CSV Detail
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button disabled={!rows.length}
+              className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm disabled:opacity-50">
+              <Download className="w-4 h-4" /> Download <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-72">
+            <DropdownMenuItem onClick={exportExcel} className="flex-col items-start gap-0.5 py-2">
+              <span className="flex items-center gap-2 font-medium"><FileSpreadsheet className="w-4 h-4" /> Excel (3 sheet)</span>
+              <span className="text-xs text-muted-foreground pl-6">Rate Card, Detail, dan Ringkasan dalam 1 file</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={exportSummaryCSV} className="flex-col items-start gap-0.5 py-2">
+              <span className="flex items-center gap-2 font-medium"><Download className="w-4 h-4" /> CSV Ringkasan</span>
+              <span className="text-xs text-muted-foreground pl-6">Total fee per rider, tanpa rincian per baris</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={exportDetailCSV} className="flex-col items-start gap-0.5 py-2">
+              <span className="flex items-center gap-2 font-medium"><Download className="w-4 h-4" /> CSV Detail</span>
+              <span className="text-xs text-muted-foreground pl-6">Rincian per kiriman/absensi per rider</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Ringkasan + drill-down */}
@@ -248,6 +263,7 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
           <thead className="bg-muted text-left">
             <tr>
               <th className="p-2 sticky left-0 bg-muted">Driver Name</th>
+              <th className="px-3">Client</th>
               <th className="text-right px-3">Order</th>
               <th className="text-right px-3">Fee Rider</th>
               <th className="text-right px-3">Active</th>
@@ -257,7 +273,7 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? <tr><td colSpan={6 + dedTypes.length} className="p-6 text-center text-muted-foreground">Tidak ada data — pastikan payroll run ini sudah di-Generate.</td></tr> :
+            {rows.length === 0 ? <tr><td colSpan={7 + dedTypes.length} className="p-6 text-center text-muted-foreground">Tidak ada data — pastikan payroll run ini sudah di-Generate.</td></tr> :
               paged.map((r) => (
                 <Fragment key={r.detailId}>
                   <tr className="border-t border-border">
@@ -270,6 +286,7 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
                         </span>
                       </button>
                     </td>
+                    <td className="px-3 text-[13px] text-muted-foreground">{r.clientName}</td>
                     <td className="text-right px-3 tabular-nums">{r.orderCount}</td>
                     <td className="text-right px-3 tabular-nums">{rp(r.feeRider)}</td>
                     <td className="text-right px-3 tabular-nums">{r.activeDates}</td>
@@ -284,7 +301,7 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
                   </tr>
                   {expanded === r.detailId && (
                     <tr className="bg-muted/30">
-                      <td colSpan={6 + dedTypes.length} className="px-4 py-3">
+                      <td colSpan={7 + dedTypes.length} className="px-4 py-3">
                         <RiderDetail r={r} />
                       </td>
                     </tr>

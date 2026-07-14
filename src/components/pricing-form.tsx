@@ -121,6 +121,8 @@ function loadForm(scheme: PricingScheme | undefined): { form: FormState; categor
       overtimeOn: false,
       overtime_rate_per_hour: "0",
       incentives: c.ontime_bonus ? [{ label: "Bonus Ontime", amount: String(c.ontime_bonus), condition: "ontime_only" as const }] : [],
+      shiftsOn: false,
+      shifts: [],
       deliveryCompOn: true,
       deliveryComp: loadDeliveryCompState({
         method: "tier",

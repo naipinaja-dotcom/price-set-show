@@ -3,11 +3,23 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
-import { usePagination } from "@/lib/use-pagination";
 import { toast } from "sonner";
 import { Loader2, Search } from "lucide-react";
 
-export const Route = createFileRoute("/admin/data-check")({ component: DataCheckPage });
+// Search params opsional — diisi otomatis kalau dibuka dari link "Cek Data"
+// di Payroll Run (bawa periode run aktif), biar gak perlu pilih ulang manual.
+interface DataCheckSearch {
+  from?: string;
+  to?: string;
+}
+
+export const Route = createFileRoute("/admin/data-check")({
+  component: DataCheckPage,
+  validateSearch: (search: Record<string, unknown>): DataCheckSearch => ({
+    from: typeof search.from === "string" ? search.from : undefined,
+    to: typeof search.to === "string" ? search.to : undefined,
+  }),
+});
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sb = supabase as any;
@@ -21,42 +33,58 @@ type Row = {
 };
 
 function DataCheckPage() {
+  const search = Route.useSearch();
   const [clients, setClients] = useState<Client[]>([]);
   const [clientId, setClientId] = useState("");
   const [q, setQ] = useState(""); // cari kode/nama rider
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [from, setFrom] = useState(search.from ?? "");
+  const [to, setTo] = useState(search.to ?? "");
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [ran, setRan] = useState(false);
+  const [total, setTotal] = useState(0);
+  const [completed, setCompleted] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   useEffect(() => {
     supabase.from("clients").select("id, name").order("name").then(({ data }) => setClients(data ?? []));
   }, []);
 
-  const run = async () => {
+  // Server-side pagination beneran — cuma tarik 1 halaman (pageSize baris)
+  // dari database per request, BUKAN tarik semua baris dulu baru dipotong di
+  // browser. Cek Data ini murni browsing data mentah (gak butuh total/agregat
+  // dari SEMUA baris kayak Reports/Payroll Run), jadi aman di-page di server —
+  // reload jadi jauh lebih cepat buat client yang datanya ribuan baris.
+  const fetchPage = async (pageNum: number) => {
     setLoading(true); setRan(true);
     try {
-      // paginasi (batas 1000/req)
-      const pageSize = 1000; let start = 0; const all: Row[] = [];
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        let query = sb.from("delivery_records")
-          .select("driver_code, delivery_date, status, delivery_type, client_id, dash_delivery_id, provider_order_id, distance_km, weight_kg, riders(full_name)")
-          .order("delivery_date", { ascending: true })
-          .range(start, start + pageSize - 1);
-        if (clientId) query = query.eq("client_id", clientId);
-        if (from) query = query.gte("delivery_date", from);
-        if (to) query = query.lte("delivery_date", to);
-        if (q.trim()) query = query.ilike("driver_code", `%${q.trim()}%`);
-        const { data, error } = await query;
-        if (error) throw error;
-        all.push(...((data ?? []) as Row[]));
-        if (!data || data.length < pageSize) break;
-        start += pageSize;
-      }
-      setRows(all);
-      if (all.length === 0) toast.message("Tidak ada baris cocok di database untuk filter ini.");
+      const baseFilter = (query: any) => {
+        let q2 = query;
+        if (clientId) q2 = q2.eq("client_id", clientId);
+        if (from) q2 = q2.gte("delivery_date", from);
+        if (to) q2 = q2.lte("delivery_date", to);
+        if (q.trim()) q2 = q2.ilike("driver_code", `%${q.trim()}%`);
+        return q2;
+      };
+
+      const start = (pageNum - 1) * pageSize;
+      const [pageRes, completedRes] = await Promise.all([
+        baseFilter(
+          sb.from("delivery_records")
+            .select("driver_code, delivery_date, status, delivery_type, client_id, dash_delivery_id, provider_order_id, distance_km, weight_kg, riders(full_name)", { count: "exact" })
+            .order("delivery_date", { ascending: true }),
+        ).range(start, start + pageSize - 1),
+        baseFilter(sb.from("delivery_records").select("id", { count: "exact", head: true })).eq("status", "completed"),
+      ]);
+      if (pageRes.error) throw pageRes.error;
+      if (completedRes.error) throw completedRes.error;
+
+      setRows((pageRes.data ?? []) as Row[]);
+      setTotal(pageRes.count ?? 0);
+      setCompleted(completedRes.count ?? 0);
+      setPage(pageNum);
+      if (pageNum === 1 && (pageRes.count ?? 0) === 0) toast.message("Tidak ada baris cocok di database untuk filter ini.");
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -64,9 +92,23 @@ function DataCheckPage() {
     }
   };
 
+  // Auto-jalanin pencarian kalau datang dari link Payroll Run yang udah
+  // bawa periode (from/to) — user gak perlu pilih ulang & klik "Cari" manual.
+  useEffect(() => {
+    if (search.from && search.to) fetchPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Ganti halaman / page size — refetch dari server, bukan slice array lokal.
+  useEffect(() => {
+    if (ran) fetchPage(page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageSize]);
+
   const clientName = (id: string | null) => (id ? clients.find((c) => c.id === id)?.name ?? "(client tak dikenal)" : "(client KOSONG)");
-  const completed = rows.filter((r) => String(r.status ?? "").trim().toLowerCase() === "completed").length;
-  const { pageSize, setPageSize, page, setPage, totalPages, paged, from: pFrom, to: pTo, total } = usePagination(rows, 50);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const rangeFrom = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeTo = Math.min(page * pageSize, total);
 
   return (
     <AdminLayout title="Cek Data" subtitle="Lihat data pengiriman yang BENERAN tersimpan di database (mentah, apa adanya).">
@@ -95,7 +137,7 @@ function DataCheckPage() {
             className="w-full rounded-md border border-border bg-background px-3 py-2" />
         </div>
         <div className="md:col-span-2">
-          <button onClick={run} disabled={loading}
+          <button onClick={() => fetchPage(1)} disabled={loading}
             className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} {loading ? "Mencari…" : "Cari di Database"}
           </button>
@@ -104,17 +146,22 @@ function DataCheckPage() {
 
       {ran && !loading && (
         <p className="text-sm text-muted-foreground mb-3">
-          Ketemu <b className="text-foreground">{rows.length}</b> baris tersimpan · <b className="text-foreground">{completed}</b> COMPLETED.
-          {rows.length === 0 && " → berarti data ini MEMANG belum ada di database (bukan salah hitung)."}
+          Ketemu <b className="text-foreground">{total}</b> baris tersimpan · <b className="text-foreground">{completed}</b> COMPLETED.
+          {total === 0 && " → berarti data ini MEMANG belum ada di database (bukan salah hitung)."}
         </p>
       )}
 
-      {rows.length > 0 && (
+      {total > 0 && (
         <>
           <div className="flex justify-end mb-2">
             <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />
           </div>
-          <div className="rounded-lg border border-border overflow-x-auto">
+          <div className="rounded-lg border border-border overflow-x-auto relative">
+            {loading && (
+              <div className="absolute inset-0 bg-background/60 grid place-items-center z-10">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-muted text-left">
                 <tr>
@@ -124,7 +171,7 @@ function DataCheckPage() {
                 </tr>
               </thead>
               <tbody>
-                {paged.map((r, i) => (
+                {rows.map((r, i) => (
                   <tr key={i} className="border-t border-border">
                     <td className="p-2 font-mono text-xs">{r.driver_code ?? "—"}</td>
                     <td className="px-3">{r.riders?.full_name ?? "—"}</td>
@@ -140,7 +187,11 @@ function DataCheckPage() {
               </tbody>
             </table>
           </div>
-          <PaginationBar page={page} totalPages={totalPages} setPage={setPage} from={pFrom} to={pTo} total={total} />
+          <PaginationBar
+            page={page} totalPages={totalPages}
+            setPage={(fn) => fetchPage(fn(page))}
+            from={rangeFrom} to={rangeTo} total={total}
+          />
         </>
       )}
     </AdminLayout>
