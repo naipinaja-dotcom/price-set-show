@@ -19,6 +19,7 @@ import { Route as RiderPayslipsRouteImport } from './routes/rider.payslips'
 import { Route as RiderDashboardRouteImport } from './routes/rider.dashboard'
 import { Route as ApiPnlWeeklyPushRouteImport } from './routes/api.pnl-weekly-push'
 import { Route as ApiPayrollReminderRouteImport } from './routes/api.payroll-reminder'
+import { Route as ApiCooInsightRouteImport } from './routes/api.coo-insight'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as AdminUploadRouteImport } from './routes/admin.upload'
 import { Route as AdminShipmentAnalyticsRouteImport } from './routes/admin.shipment-analytics'
@@ -34,6 +35,7 @@ import { Route as AdminDriverAnalyticsRouteImport } from './routes/admin.driver-
 import { Route as AdminDeductionsRouteImport } from './routes/admin.deductions'
 import { Route as AdminDataCheckRouteImport } from './routes/admin.data-check'
 import { Route as AdminDashboardRouteImport } from './routes/admin.dashboard'
+import { Route as AdminCooInsightsRouteImport } from './routes/admin.coo-insights'
 import { Route as AdminClientsRouteImport } from './routes/admin.clients'
 import { Route as AdminCalculateRouteImport } from './routes/admin.calculate'
 import { Route as AdminBcrAnalyticsRouteImport } from './routes/admin.bcr-analytics'
@@ -89,6 +91,11 @@ const ApiPnlWeeklyPushRoute = ApiPnlWeeklyPushRouteImport.update({
 const ApiPayrollReminderRoute = ApiPayrollReminderRouteImport.update({
   id: '/api/payroll-reminder',
   path: '/api/payroll-reminder',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCooInsightRoute = ApiCooInsightRouteImport.update({
+  id: '/api/coo-insight',
+  path: '/api/coo-insight',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminUsersRoute = AdminUsersRouteImport.update({
@@ -166,6 +173,11 @@ const AdminDashboardRoute = AdminDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminCooInsightsRoute = AdminCooInsightsRouteImport.update({
+  id: '/coo-insights',
+  path: '/coo-insights',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminClientsRoute = AdminClientsRouteImport.update({
   id: '/clients',
   path: '/clients',
@@ -206,6 +218,7 @@ export interface FileRoutesByFullPath {
   '/admin/bcr-analytics': typeof AdminBcrAnalyticsRoute
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
+  '/admin/coo-insights': typeof AdminCooInsightsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
@@ -221,6 +234,7 @@ export interface FileRoutesByFullPath {
   '/admin/shipment-analytics': typeof AdminShipmentAnalyticsRoute
   '/admin/upload': typeof AdminUploadRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/coo-insight': typeof ApiCooInsightRoute
   '/api/payroll-reminder': typeof ApiPayrollReminderRoute
   '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/rider/dashboard': typeof RiderDashboardRoute
@@ -239,6 +253,7 @@ export interface FileRoutesByTo {
   '/admin/bcr-analytics': typeof AdminBcrAnalyticsRoute
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
+  '/admin/coo-insights': typeof AdminCooInsightsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
@@ -254,6 +269,7 @@ export interface FileRoutesByTo {
   '/admin/shipment-analytics': typeof AdminShipmentAnalyticsRoute
   '/admin/upload': typeof AdminUploadRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/coo-insight': typeof ApiCooInsightRoute
   '/api/payroll-reminder': typeof ApiPayrollReminderRoute
   '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/rider/dashboard': typeof RiderDashboardRoute
@@ -273,6 +289,7 @@ export interface FileRoutesById {
   '/admin/bcr-analytics': typeof AdminBcrAnalyticsRoute
   '/admin/calculate': typeof AdminCalculateRoute
   '/admin/clients': typeof AdminClientsRoute
+  '/admin/coo-insights': typeof AdminCooInsightsRoute
   '/admin/dashboard': typeof AdminDashboardRoute
   '/admin/data-check': typeof AdminDataCheckRoute
   '/admin/deductions': typeof AdminDeductionsRoute
@@ -288,6 +305,7 @@ export interface FileRoutesById {
   '/admin/shipment-analytics': typeof AdminShipmentAnalyticsRoute
   '/admin/upload': typeof AdminUploadRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/coo-insight': typeof ApiCooInsightRoute
   '/api/payroll-reminder': typeof ApiPayrollReminderRoute
   '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/rider/dashboard': typeof RiderDashboardRoute
@@ -308,6 +326,7 @@ export interface FileRouteTypes {
     | '/admin/bcr-analytics'
     | '/admin/calculate'
     | '/admin/clients'
+    | '/admin/coo-insights'
     | '/admin/dashboard'
     | '/admin/data-check'
     | '/admin/deductions'
@@ -323,6 +342,7 @@ export interface FileRouteTypes {
     | '/admin/shipment-analytics'
     | '/admin/upload'
     | '/admin/users'
+    | '/api/coo-insight'
     | '/api/payroll-reminder'
     | '/api/pnl-weekly-push'
     | '/rider/dashboard'
@@ -341,6 +361,7 @@ export interface FileRouteTypes {
     | '/admin/bcr-analytics'
     | '/admin/calculate'
     | '/admin/clients'
+    | '/admin/coo-insights'
     | '/admin/dashboard'
     | '/admin/data-check'
     | '/admin/deductions'
@@ -356,6 +377,7 @@ export interface FileRouteTypes {
     | '/admin/shipment-analytics'
     | '/admin/upload'
     | '/admin/users'
+    | '/api/coo-insight'
     | '/api/payroll-reminder'
     | '/api/pnl-weekly-push'
     | '/rider/dashboard'
@@ -374,6 +396,7 @@ export interface FileRouteTypes {
     | '/admin/bcr-analytics'
     | '/admin/calculate'
     | '/admin/clients'
+    | '/admin/coo-insights'
     | '/admin/dashboard'
     | '/admin/data-check'
     | '/admin/deductions'
@@ -389,6 +412,7 @@ export interface FileRouteTypes {
     | '/admin/shipment-analytics'
     | '/admin/upload'
     | '/admin/users'
+    | '/api/coo-insight'
     | '/api/payroll-reminder'
     | '/api/pnl-weekly-push'
     | '/rider/dashboard'
@@ -405,6 +429,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RiderRoute: typeof RiderRouteWithChildren
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
+  ApiCooInsightRoute: typeof ApiCooInsightRoute
   ApiPayrollReminderRoute: typeof ApiPayrollReminderRoute
   ApiPnlWeeklyPushRoute: typeof ApiPnlWeeklyPushRoute
 }
@@ -479,6 +504,13 @@ declare module '@tanstack/react-router' {
       path: '/api/payroll-reminder'
       fullPath: '/api/payroll-reminder'
       preLoaderRoute: typeof ApiPayrollReminderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/coo-insight': {
+      id: '/api/coo-insight'
+      path: '/api/coo-insight'
+      fullPath: '/api/coo-insight'
+      preLoaderRoute: typeof ApiCooInsightRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/users': {
@@ -586,6 +618,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminDashboardRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/coo-insights': {
+      id: '/admin/coo-insights'
+      path: '/coo-insights'
+      fullPath: '/admin/coo-insights'
+      preLoaderRoute: typeof AdminCooInsightsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/clients': {
       id: '/admin/clients'
       path: '/clients'
@@ -635,6 +674,7 @@ interface AdminRouteChildren {
   AdminBcrAnalyticsRoute: typeof AdminBcrAnalyticsRoute
   AdminCalculateRoute: typeof AdminCalculateRoute
   AdminClientsRoute: typeof AdminClientsRoute
+  AdminCooInsightsRoute: typeof AdminCooInsightsRoute
   AdminDashboardRoute: typeof AdminDashboardRoute
   AdminDataCheckRoute: typeof AdminDataCheckRoute
   AdminDeductionsRoute: typeof AdminDeductionsRoute
@@ -659,6 +699,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminBcrAnalyticsRoute: AdminBcrAnalyticsRoute,
   AdminCalculateRoute: AdminCalculateRoute,
   AdminClientsRoute: AdminClientsRoute,
+  AdminCooInsightsRoute: AdminCooInsightsRoute,
   AdminDashboardRoute: AdminDashboardRoute,
   AdminDataCheckRoute: AdminDataCheckRoute,
   AdminDeductionsRoute: AdminDeductionsRoute,
@@ -701,6 +742,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RiderRoute: RiderRouteWithChildren,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
+  ApiCooInsightRoute: ApiCooInsightRoute,
   ApiPayrollReminderRoute: ApiPayrollReminderRoute,
   ApiPnlWeeklyPushRoute: ApiPnlWeeklyPushRoute,
 }

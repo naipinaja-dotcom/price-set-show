@@ -42,5 +42,15 @@ export function getServerConfig() {
     // gak bisa dipanggil orang sembarang. Pakai service-role client (bypass RLS)
     // karena cron gak punya session admin.
     ingestSecret: process.env.INGEST_SECRET,
+
+    // COO Insight Agents (lihat src/lib/coo-insight-engine.server.ts) — chain
+    // Worker->Lead->Manager->COO yang analisis pnl_weekly_snapshots pakai
+    // model Hermes (NousResearch) lewat OpenRouter (API OpenAI-compatible,
+    // lihat src/lib/agents/hermes-client.server.ts). openRouterApiKey dari
+    // openrouter.ai/keys. cooInsightSecret sama polanya dengan pnlPushSecret,
+    // header `x-coo-insight-secret` buat endpoint cron api/coo-insight.
+    openRouterApiKey: process.env.OPENROUTER_API_KEY,
+    hermesModel: process.env.HERMES_MODEL || "nousresearch/hermes-3-llama-3.1-405b",
+    cooInsightSecret: process.env.COO_INSIGHT_SECRET,
   };
 }
