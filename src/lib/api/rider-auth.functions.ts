@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase-admin.server";
+import { validatePinStrength } from "@/lib/pin-validator";
+import { checkRateLimit, resetRateLimit, PIN_ATTEMPT_LIMIT } from "@/lib/rate-limiter";
 
 // Riders log in with their Kode Mitra (employee_id) + a short PIN, not
 // email/password. Supabase Auth is email-based under the hood, so each
@@ -141,6 +143,17 @@ export const setFirstTimeRiderPin = createServerFn({ method: "POST" })
     newPin: z.string().min(4).max(8),
   }))
   .handler(async ({ data }) => {
+    // Phone match adalah satu-satunya verifikasi (lihat komentar di atas) —
+    // tanpa rate limit, ini bisa dibrute-force nebak nomor WhatsApp per rider.
+    const rateLimitKey = `rider-first-time-pin:${data.employeeId.trim().toLowerCase()}`;
+    const rate = checkRateLimit(rateLimitKey, PIN_ATTEMPT_LIMIT);
+    if (!rate.allowed) {
+      throw new Error("Terlalu banyak percobaan — coba lagi dalam beberapa menit");
+    }
+
+    const pinCheck = validatePinStrength(data.newPin);
+    if (!pinCheck.valid) throw new Error(pinCheck.error ?? "PIN tidak valid");
+
     const supabaseAdmin = getSupabaseAdmin();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: rider, error } = await (supabaseAdmin as any).from("riders")
@@ -155,5 +168,6 @@ export const setFirstTimeRiderPin = createServerFn({ method: "POST" })
     if (pwErr) throw new Error(pwErr.message);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (supabaseAdmin as any).from("riders").update({ must_change_pin: false }).eq("id", rider.id);
+    resetRateLimit(rateLimitKey); // berhasil → jangan bebankan attempt gagal sebelumnya
     return { email: syntheticEmail(data.employeeId) };
   });

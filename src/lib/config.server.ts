@@ -35,5 +35,12 @@ export function getServerConfig() {
     // Payroll Reminder (lihat src/routes/api.payroll-reminder.ts) — sama
     // polanya dengan pnlPushSecret, header `x-payroll-reminder-secret`.
     payrollReminderSecret: process.env.PAYROLL_REMINDER_SECRET,
+
+    // Ingest API (lihat src/routes/api.ingest-deliveries.ts & api.ingest-attendance.ts) —
+    // pintu intake buat agent cronjob dari backoffice eksternal POST data CSV.
+    // Header `x-ingest-secret` wajib sama persis dengan env ini, biar endpoint
+    // gak bisa dipanggil orang sembarang. Pakai service-role client (bypass RLS)
+    // karena cron gak punya session admin.
+    ingestSecret: process.env.INGEST_SECRET,
   };
 }
