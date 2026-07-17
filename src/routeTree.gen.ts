@@ -19,6 +19,7 @@ import { Route as RiderPayslipsRouteImport } from './routes/rider.payslips'
 import { Route as RiderDashboardRouteImport } from './routes/rider.dashboard'
 import { Route as ApiPnlWeeklyPushRouteImport } from './routes/api.pnl-weekly-push'
 import { Route as ApiPayrollReminderRouteImport } from './routes/api.payroll-reminder'
+import { Route as ApiExecutiveDashboardRouteImport } from './routes/api.executive-dashboard'
 import { Route as ApiCooInsightRouteImport } from './routes/api.coo-insight'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as AdminUploadRouteImport } from './routes/admin.upload'
@@ -91,6 +92,11 @@ const ApiPnlWeeklyPushRoute = ApiPnlWeeklyPushRouteImport.update({
 const ApiPayrollReminderRoute = ApiPayrollReminderRouteImport.update({
   id: '/api/payroll-reminder',
   path: '/api/payroll-reminder',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiExecutiveDashboardRoute = ApiExecutiveDashboardRouteImport.update({
+  id: '/api/executive-dashboard',
+  path: '/api/executive-dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiCooInsightRoute = ApiCooInsightRouteImport.update({
@@ -235,6 +241,7 @@ export interface FileRoutesByFullPath {
   '/admin/upload': typeof AdminUploadRoute
   '/admin/users': typeof AdminUsersRoute
   '/api/coo-insight': typeof ApiCooInsightRoute
+  '/api/executive-dashboard': typeof ApiExecutiveDashboardRoute
   '/api/payroll-reminder': typeof ApiPayrollReminderRoute
   '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/rider/dashboard': typeof RiderDashboardRoute
@@ -270,6 +277,7 @@ export interface FileRoutesByTo {
   '/admin/upload': typeof AdminUploadRoute
   '/admin/users': typeof AdminUsersRoute
   '/api/coo-insight': typeof ApiCooInsightRoute
+  '/api/executive-dashboard': typeof ApiExecutiveDashboardRoute
   '/api/payroll-reminder': typeof ApiPayrollReminderRoute
   '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/rider/dashboard': typeof RiderDashboardRoute
@@ -306,6 +314,7 @@ export interface FileRoutesById {
   '/admin/upload': typeof AdminUploadRoute
   '/admin/users': typeof AdminUsersRoute
   '/api/coo-insight': typeof ApiCooInsightRoute
+  '/api/executive-dashboard': typeof ApiExecutiveDashboardRoute
   '/api/payroll-reminder': typeof ApiPayrollReminderRoute
   '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/rider/dashboard': typeof RiderDashboardRoute
@@ -343,6 +352,7 @@ export interface FileRouteTypes {
     | '/admin/upload'
     | '/admin/users'
     | '/api/coo-insight'
+    | '/api/executive-dashboard'
     | '/api/payroll-reminder'
     | '/api/pnl-weekly-push'
     | '/rider/dashboard'
@@ -378,6 +388,7 @@ export interface FileRouteTypes {
     | '/admin/upload'
     | '/admin/users'
     | '/api/coo-insight'
+    | '/api/executive-dashboard'
     | '/api/payroll-reminder'
     | '/api/pnl-weekly-push'
     | '/rider/dashboard'
@@ -413,6 +424,7 @@ export interface FileRouteTypes {
     | '/admin/upload'
     | '/admin/users'
     | '/api/coo-insight'
+    | '/api/executive-dashboard'
     | '/api/payroll-reminder'
     | '/api/pnl-weekly-push'
     | '/rider/dashboard'
@@ -430,6 +442,7 @@ export interface RootRouteChildren {
   RiderRoute: typeof RiderRouteWithChildren
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ApiCooInsightRoute: typeof ApiCooInsightRoute
+  ApiExecutiveDashboardRoute: typeof ApiExecutiveDashboardRoute
   ApiPayrollReminderRoute: typeof ApiPayrollReminderRoute
   ApiPnlWeeklyPushRoute: typeof ApiPnlWeeklyPushRoute
 }
@@ -504,6 +517,13 @@ declare module '@tanstack/react-router' {
       path: '/api/payroll-reminder'
       fullPath: '/api/payroll-reminder'
       preLoaderRoute: typeof ApiPayrollReminderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/executive-dashboard': {
+      id: '/api/executive-dashboard'
+      path: '/api/executive-dashboard'
+      fullPath: '/api/executive-dashboard'
+      preLoaderRoute: typeof ApiExecutiveDashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/coo-insight': {
@@ -743,6 +763,7 @@ const rootRouteChildren: RootRouteChildren = {
   RiderRoute: RiderRouteWithChildren,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   ApiCooInsightRoute: ApiCooInsightRoute,
+  ApiExecutiveDashboardRoute: ApiExecutiveDashboardRoute,
   ApiPayrollReminderRoute: ApiPayrollReminderRoute,
   ApiPnlWeeklyPushRoute: ApiPnlWeeklyPushRoute,
 }
