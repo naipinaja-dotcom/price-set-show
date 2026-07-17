@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
@@ -7,7 +7,7 @@ import { usePagination } from "@/lib/use-pagination";
 import { parseRupiah } from "@/lib/format";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, X } from "lucide-react";
+import { Plus, Trash2, Loader2, X, Pencil } from "lucide-react";
 
 export const Route = createFileRoute("/admin/deductions")({ component: DeductionsPage });
 
@@ -316,6 +316,10 @@ function ActiveTab() {
   const [rows, setRows] = useState<(Inst & { rider?: Rider; type?: DType })[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [types, setTypes] = useState<DType[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [ef, setEf] = useState({ deduction_type_id: "", total_amount: 0, installment_count: 1, next_deduction_date: "", notes: "" });
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -326,7 +330,47 @@ function ActiveTab() {
     else setRows((data ?? []).map((r: any) => ({ ...r, rider: r.riders, type: r.deduction_types })));
     setLoading(false);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Filter sama persis dengan AddTab.save(): jenis apapun yang non-auto-recurring
+    // bisa dipakai di sini (installmentable cuma ngatur boleh-tidaknya dicicil,
+    // bukan syarat buat muncul di Cicilan Aktif — one-shot pun disimpan di tabel ini).
+    (supabase as any).from("deduction_types").select("*").eq("active", true).eq("auto_recurring", false).then(({ data }: any) => setTypes(data ?? []));
+  }, []);
+
+  const startEdit = (r: Inst & { rider?: Rider; type?: DType }) => {
+    setEditingId(r.id);
+    setEf({
+      deduction_type_id: r.deduction_type_id, total_amount: r.total_amount,
+      installment_count: r.installment_count, next_deduction_date: r.next_deduction_date ?? "",
+      notes: r.notes ?? "",
+    });
+  };
+
+  // Koreksi jadwal cicilan yang salah input (nominal/jumlah cicilan/jenis/
+  // tanggal potong berikutnya). per_period_amount dihitung ulang dari
+  // total_amount/installment_count — rumus sama persis dengan waktu bikin
+  // cicilan baru (AddTab.save), biar konsisten. TIDAK menyentuh riwayat
+  // payroll_deductions yang sudah tercatat dari periode sebelumnya — cuma
+  // mengubah proyeksi ke depan (potongan otomatis di run berikutnya).
+  const saveEdit = async (r: Inst) => {
+    if (!ef.deduction_type_id || !ef.total_amount) return toast.error("Lengkapi jenis & nominal potongan");
+    if (ef.installment_count < r.installments_paid) {
+      return toast.error(`Jumlah cicilan gak boleh kurang dari yang sudah terbayar (${r.installments_paid}).`);
+    }
+    setSaving(true);
+    const per = +(ef.total_amount / ef.installment_count).toFixed(2);
+    const { error } = await supabase.from("rider_installments").update({
+      deduction_type_id: ef.deduction_type_id, total_amount: ef.total_amount,
+      installment_count: ef.installment_count, per_period_amount: per,
+      next_deduction_date: ef.next_deduction_date || null, notes: ef.notes || null,
+    }).eq("id", r.id);
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    toast.success("Cicilan diperbarui — perubahan ini cuma berlaku ke potongan berikutnya, riwayat yang sudah tercatat tidak berubah.");
+    setEditingId(null);
+    load();
+  };
 
   const remove = async (r: Inst & { rider?: Rider; type?: DType }) => {
     const paid = (r.installments_paid ?? 0) > 0;
@@ -358,20 +402,74 @@ function ActiveTab() {
             {loading ? <tr><td colSpan={7} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
             : rows.length === 0 ? <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">Tidak ada cicilan aktif</td></tr>
             : paged.map((r) => (
-              <tr key={r.id} className="border-t border-border">
-                <td className="p-3"><div className="font-medium">{r.rider?.full_name}</div><div className="text-xs text-muted-foreground">{r.rider?.employee_id}</div></td>
-                <td>{r.type?.name}</td>
-                <td>Rp{Number(r.total_amount).toLocaleString("id-ID")}</td>
-                <td>Rp{Number(r.per_period_amount).toLocaleString("id-ID")}</td>
-                <td>{r.installments_paid}/{r.installment_count}</td>
-                <td>{r.next_deduction_date ?? "—"}</td>
-                <td className="text-right pr-3">
-                  <button onClick={() => remove(r)} disabled={deletingId === r.id}
-                    className="p-1.5 hover:bg-muted rounded text-destructive disabled:opacity-50" title="Hapus cicilan">
-                    {deletingId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  </button>
-                </td>
-              </tr>
+              <Fragment key={r.id}>
+                <tr className="border-t border-border">
+                  <td className="p-3"><div className="font-medium">{r.rider?.full_name}</div><div className="text-xs text-muted-foreground">{r.rider?.employee_id}</div></td>
+                  <td>{r.type?.name}</td>
+                  <td>Rp{Number(r.total_amount).toLocaleString("id-ID")}</td>
+                  <td>Rp{Number(r.per_period_amount).toLocaleString("id-ID")}</td>
+                  <td>{r.installments_paid}/{r.installment_count}</td>
+                  <td>{r.next_deduction_date ?? "—"}</td>
+                  <td className="text-right pr-3 space-x-1">
+                    <button onClick={() => startEdit(r)} className="p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-primary" title="Edit cicilan">
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => remove(r)} disabled={deletingId === r.id}
+                      className="p-1.5 hover:bg-muted rounded text-destructive disabled:opacity-50" title="Hapus cicilan">
+                      {deletingId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                    </button>
+                  </td>
+                </tr>
+                {editingId === r.id && (
+                  <tr className="border-t border-border/60 bg-muted/20">
+                    <td colSpan={7} className="p-3">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 items-end text-sm">
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Jenis</label>
+                          <select value={ef.deduction_type_id} onChange={(e) => setEf({ ...ef, deduction_type_id: e.target.value })}
+                            className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm">
+                            {/* Jenis yang lagi kepake tapi udah nonaktif/gak-bisa-dicicil tetep
+                                ditampilin (biar select-nya gak diam-diam kosong), taruh di atas. */}
+                            {r.type && !types.some((t) => t.id === r.deduction_type_id) && (
+                              <option value={r.type.id}>{r.type.name} (nonaktif)</option>
+                            )}
+                            {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Total (Rp)</label>
+                          <input inputMode="numeric" value={ef.total_amount ? ef.total_amount.toLocaleString("id-ID") : ""}
+                            onChange={(e) => setEf({ ...ef, total_amount: parseRupiah(e.target.value) })}
+                            className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Jumlah Cicilan</label>
+                          <input type="number" min={r.installments_paid || 1} value={ef.installment_count}
+                            onChange={(e) => setEf({ ...ef, installment_count: +e.target.value })}
+                            className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                          <p className="text-[11px] text-muted-foreground mt-0.5">Per periode: Rp{(ef.total_amount / Math.max(1, ef.installment_count)).toLocaleString("id-ID")}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Potong Berikutnya</label>
+                          <input type="date" value={ef.next_deduction_date} onChange={(e) => setEf({ ...ef, next_deduction_date: e.target.value })}
+                            className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Catatan</label>
+                          <input value={ef.notes} onChange={(e) => setEf({ ...ef, notes: e.target.value })}
+                            className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 mt-2.5">
+                        <button onClick={() => setEditingId(null)} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-muted">Batal</button>
+                        <button onClick={() => saveEdit(r)} disabled={saving} className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm disabled:opacity-50">
+                          {saving ? "Menyimpan…" : "Simpan"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>

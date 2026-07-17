@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { usePostHog } from "@posthog/react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
@@ -7,9 +7,10 @@ import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
-import { Plus, Loader2, CheckCircle2, Send, Download, ExternalLink, ChevronDown } from "lucide-react";
+import { Plus, Loader2, CheckCircle2, Send, Download, ExternalLink, ChevronDown, ChevronRight, Trash2, Pencil } from "lucide-react";
 import { generatePayrollDetails } from "@/lib/payroll-generate";
 import { downloadBulkPaymentCSV, downloadBulkPaymentXLS, type BulkPaymentRow } from "@/lib/bulk-payment-export";
+import { parseRupiah } from "@/lib/format";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
@@ -29,6 +30,11 @@ type Detail = {
   incentive: number; penalty: number; gross_earning: number; total_deduction: number; net_pay: number;
   riders?: { full_name: string; employee_id: string };
 };
+type Deduction = {
+  id: string; detail_id: string; deduction_type_id: string | null; installment_id: string | null;
+  description: string | null; amount: number; deduction_types?: { name: string } | null;
+};
+type DeductionType = { id: string; name: string };
 
 function PayrollPage() {
   const posthog = usePostHog();
@@ -39,9 +45,19 @@ function PayrollPage() {
   const [finalizing, setFinalizing] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [exportingBulk, setExportingBulk] = useState(false);
+  const [deletingRun, setDeletingRun] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [feeAuditLog, setFeeAuditLog] = useState<FeeAuditEntry[]>([]);
+  const [expandedDetailId, setExpandedDetailId] = useState<string | null>(null);
+  const [deductionsByDetail, setDeductionsByDetail] = useState<Record<string, Deduction[]>>({});
+  const [loadingDeductions, setLoadingDeductions] = useState(false);
+  const [dTypes, setDTypes] = useState<DeductionType[]>([]);
+  const [editingDeductionId, setEditingDeductionId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState(0);
+  const [editDescription, setEditDescription] = useState("");
+  const [editTypeId, setEditTypeId] = useState<string | null>(null);
+  const [savingDeduction, setSavingDeduction] = useState(false);
   const {
     pageSize: detailPageSize, setPageSize: setDetailPageSize, page: detailPage, setPage: setDetailPage,
     totalPages: detailTotalPages, paged: pagedDetails, from: detailFrom, to: detailTo, total: detailTotal,
@@ -65,6 +81,10 @@ function PayrollPage() {
     const { data, error } = await supabase.from("payroll_details")
       .select("*, riders(full_name, employee_id)").eq("run_id", runId).order("net_pay", { ascending: false });
     if (error) toast.error(error.message); else setDetails((data ?? []) as any);
+    // Detail lama ke-generate ulang dengan id baru tiap Generate Ulang —
+    // cache expand/deduction lama jadi basi, bersihin biar gak nunjuk ke detail_id yg udah gak ada.
+    setExpandedDetailId(null);
+    setDeductionsByDetail({});
   };
 
   // Riwayat "Hitung Fee" (commit dari admin.calculate.tsx) yang periodenya
@@ -86,6 +106,72 @@ function PayrollPage() {
   useEffect(() => {
     if (activeRun) { loadDetails(activeRun.id); loadFeeAuditLog(activeRun); }
   }, [activeRun]);
+
+  // Buka/tutup rincian potongan 1 rider (payroll_deductions per detail_id).
+  // Di-fetch on-demand & di-cache, karena tabel detail bisa banyak baris dan
+  // gak semua bakal dibuka adminnya.
+  const toggleDeductions = async (detailId: string) => {
+    if (expandedDetailId === detailId) { setExpandedDetailId(null); return; }
+    setExpandedDetailId(detailId);
+    setEditingDeductionId(null);
+    if (deductionsByDetail[detailId]) return;
+    setLoadingDeductions(true);
+    const { data, error } = await supabase.from("payroll_deductions")
+      .select("*, deduction_types(name)").eq("detail_id", detailId).order("created_at");
+    setLoadingDeductions(false);
+    if (error) return toast.error(error.message);
+    setDeductionsByDetail((prev) => ({ ...prev, [detailId]: (data ?? []) as any }));
+    if (dTypes.length === 0) {
+      const { data: types } = await (supabase as any).from("deduction_types").select("id, name").eq("active", true);
+      setDTypes(types ?? []);
+    }
+  };
+
+  const startEditDeduction = (d: Deduction) => {
+    setEditingDeductionId(d.id);
+    setEditAmount(d.amount);
+    setEditDescription(d.description ?? "");
+    setEditTypeId(d.deduction_type_id);
+  };
+
+  // Koreksi 1 baris potongan yang udah ke-generate ke payroll run. Constraint
+  // dari PRD §9.1: `payroll_deductions.amount` numpang ke `payroll_details.
+  // total_deduction`/`net_pay` — jadi tiap edit HARUS recompute & simpan ulang
+  // total di baris detail induknya, bukan cuma update baris deduction-nya.
+  // Gak ada mekanisme buat "melindungi" edit manual ini dari Generate Ulang
+  // (yang selalu hapus-total & bikin ulang semua detail+deduction dari nol) —
+  // makanya di-warning eksplisit di toast, bukan diam-diam ketimpa nanti.
+  const saveDeductionEdit = async (d: Deduction) => {
+    if (!activeRun) return;
+    setSavingDeduction(true);
+    try {
+      const { error: e1 } = await supabase.from("payroll_deductions")
+        .update({ amount: editAmount, description: editDescription.trim() || null, deduction_type_id: editTypeId })
+        .eq("id", d.id);
+      if (e1) throw e1;
+
+      const list = (deductionsByDetail[d.detail_id] ?? []).map((x) =>
+        x.id === d.id ? { ...x, amount: editAmount, description: editDescription.trim() || null, deduction_type_id: editTypeId } : x);
+      const newTotalDed = list.reduce((s, x) => s + Number(x.amount), 0);
+      const detail = details.find((x) => x.id === d.detail_id);
+      if (!detail) throw new Error("Detail payroll tidak ditemukan di halaman ini — refresh dulu.");
+      const newNet = Math.max(0, detail.gross_earning - newTotalDed);
+      const { error: e2 } = await supabase.from("payroll_details")
+        .update({ total_deduction: newTotalDed, net_pay: newNet })
+        .eq("id", d.detail_id);
+      if (e2) throw e2;
+
+      setDeductionsByDetail((prev) => ({ ...prev, [d.detail_id]: list }));
+      setDetails((prev) => prev.map((x) => x.id === d.detail_id ? { ...x, total_deduction: newTotalDed, net_pay: newNet } : x));
+      setEditingDeductionId(null);
+      posthog.capture("payroll_deduction_edited", { run_id: activeRun.id, detail_id: d.detail_id, deduction_id: d.id });
+      toast.success("Potongan diperbarui. Ingat: kalau nanti \"Generate Ulang\" dijalankan, angka ini kehitung ulang dari cicilan/potongan-otomatis dan perubahan manual ini hilang.");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSavingDeduction(false);
+    }
+  };
 
   // Reject: salah pilih tanggal/client, udah keburu commit — reset PERSIS
   // baris yang kena commit itu (affected_row_ids) balik ke fee=0, dan tandain
@@ -184,6 +270,31 @@ function PayrollPage() {
     } finally {
       setPublishing(false);
     }
+  };
+
+  // Hapus run yang salah komit (mis. salah pilih client/tanggal) sebelum
+  // sempat di-Finalize. Cuma untuk status "draft" — begitu Finalize/Publish,
+  // run dianggap sudah jadi checkpoint resmi dan gak boleh dihapus lagi.
+  // Cascade DB (payroll_details.run_id, payroll_deductions.detail_id,
+  // payslips.run_id/detail_id) beresin detail/deduction-nya otomatis. Ini
+  // TIDAK membatalkan fee yang sudah ke-commit di delivery_records/
+  // attendance_logs — fee itu tetap ada dan akan muncul lagi di run baru
+  // begitu di-Hitung Fee / Generate Ulang, makanya di-warning eksplisit.
+  const deleteRun = async () => {
+    if (!activeRun || activeRun.status !== "draft") return;
+    if (!(await confirmDialog({
+      title: "Hapus payroll run ini?",
+      description: "Detail, potongan, dan riwayat terkait run ini akan ikut terhapus. Fee yang sudah di-commit ke data pengiriman/absensi TIDAK ikut dibatalkan — akan muncul lagi kalau kamu Hitung Fee / Generate Ulang untuk periode & client yang sama.",
+      confirmText: "Hapus Run", danger: true,
+    }))) return;
+    setDeletingRun(true);
+    const { error } = await supabase.from("payroll_runs").delete().eq("id", activeRun.id);
+    setDeletingRun(false);
+    if (error) return toast.error(error.message);
+    posthog.capture("payroll_run_deleted", { run_id: activeRun.id, client_id: activeRun.client_id });
+    toast.success("Payroll run dihapus");
+    setActiveRun(null);
+    loadRuns();
   };
 
   // Bulk payment — file transfer bank buat Finance, format ngikutin persis
@@ -381,6 +492,14 @@ function PayrollPage() {
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
+                    {/* Hapus run — cuma kalau masih draft (belum Finalize) */}
+                    {activeRun.status === "draft" && (
+                      <button onClick={deleteRun} disabled={deletingRun}
+                        title="Hapus run ini (cuma bisa selagi masih draft)"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 text-destructive px-3 py-1.5 text-[13px] disabled:opacity-40 hover:bg-destructive/10 transition-colors">
+                        {deletingRun ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Hapus Run
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -454,17 +573,74 @@ function PayrollPage() {
                     {details.length === 0 ? (
                       <tr><td colSpan={9} className="p-8 text-center text-muted-foreground text-sm">Belum ada detail — klik "Hitung Fee" untuk generate</td></tr>
                     ) : pagedDetails.map((d) => (
-                      <tr key={d.id} className="border-t border-border hover:bg-muted/30 transition-colors">
-                        <td className="px-3 py-2.5"><div className="font-medium text-[13px]">{d.riders?.full_name}</div><div className="text-[11px] text-muted-foreground">{d.riders?.employee_id}</div></td>
-                        <td className="px-2 py-2.5 text-[13px]">{d.delivery_count}</td>
-                        <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.delivery_fee).toLocaleString("id-ID")}</td>
-                        <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.attendance_fee).toLocaleString("id-ID")}</td>
-                        <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.incentive).toLocaleString("id-ID")}</td>
-                        <td className="px-2 py-2.5 text-[13px] tabular-nums text-destructive">Rp{Number(d.penalty).toLocaleString("id-ID")}</td>
-                        <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.gross_earning).toLocaleString("id-ID")}</td>
-                        <td className="px-2 py-2.5 text-[13px] tabular-nums text-destructive">Rp{Number(d.total_deduction).toLocaleString("id-ID")}</td>
-                        <td className="px-2 py-2.5 text-[13px] tabular-nums font-semibold">Rp{Number(d.net_pay).toLocaleString("id-ID")}</td>
-                      </tr>
+                      <Fragment key={d.id}>
+                        <tr className="border-t border-border hover:bg-muted/30 transition-colors">
+                          <td className="px-3 py-2.5"><div className="font-medium text-[13px]">{d.riders?.full_name}</div><div className="text-[11px] text-muted-foreground">{d.riders?.employee_id}</div></td>
+                          <td className="px-2 py-2.5 text-[13px]">{d.delivery_count}</td>
+                          <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.delivery_fee).toLocaleString("id-ID")}</td>
+                          <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.attendance_fee).toLocaleString("id-ID")}</td>
+                          <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.incentive).toLocaleString("id-ID")}</td>
+                          <td className="px-2 py-2.5 text-[13px] tabular-nums text-destructive">Rp{Number(d.penalty).toLocaleString("id-ID")}</td>
+                          <td className="px-2 py-2.5 text-[13px] tabular-nums">Rp{Number(d.gross_earning).toLocaleString("id-ID")}</td>
+                          <td className="px-2 py-2.5 text-[13px] tabular-nums text-destructive">
+                            {d.total_deduction > 0 ? (
+                              <button onClick={() => toggleDeductions(d.id)} className="inline-flex items-center gap-1 hover:underline">
+                                {expandedDetailId === d.id ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                Rp{Number(d.total_deduction).toLocaleString("id-ID")}
+                              </button>
+                            ) : `Rp${Number(d.total_deduction).toLocaleString("id-ID")}`}
+                          </td>
+                          <td className="px-2 py-2.5 text-[13px] tabular-nums font-semibold">Rp{Number(d.net_pay).toLocaleString("id-ID")}</td>
+                        </tr>
+                        {expandedDetailId === d.id && (
+                          <tr className="border-t border-border/60 bg-muted/20">
+                            <td colSpan={9} className="px-4 py-3">
+                              {loadingDeductions ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <div className="space-y-1.5">
+                                  {(deductionsByDetail[d.id] ?? []).map((ded) => (
+                                    <div key={ded.id} className="flex items-center gap-3 text-[13px]">
+                                      {editingDeductionId === ded.id ? (
+                                        <>
+                                          <select value={editTypeId ?? ""} onChange={(e) => setEditTypeId(e.target.value || null)}
+                                            className="rounded-md border border-border bg-background px-2 py-1 text-[12px]">
+                                            <option value="">(tanpa jenis)</option>
+                                            {dTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                          </select>
+                                          <input value={editDescription} onChange={(e) => setEditDescription(e.target.value)}
+                                            placeholder="Deskripsi" className="flex-1 rounded-md border border-border bg-background px-2 py-1 text-[12px]" />
+                                          <input inputMode="numeric" value={editAmount ? editAmount.toLocaleString("id-ID") : ""}
+                                            onChange={(e) => setEditAmount(parseRupiah(e.target.value))}
+                                            className="w-32 rounded-md border border-border bg-background px-2 py-1 text-[12px] text-right tabular-nums" />
+                                          <button onClick={() => saveDeductionEdit(ded)} disabled={savingDeduction}
+                                            className="rounded-md bg-primary text-primary-foreground px-2.5 py-1 text-[12px] disabled:opacity-50">
+                                            {savingDeduction ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Simpan"}
+                                          </button>
+                                          <button onClick={() => setEditingDeductionId(null)} className="text-[12px] text-muted-foreground hover:text-foreground">Batal</button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className="w-40 truncate text-muted-foreground">{ded.deduction_types?.name ?? "(tanpa jenis)"}</span>
+                                          <span className="flex-1 truncate">{ded.description ?? "—"}</span>
+                                          <span className="w-32 text-right tabular-nums font-medium">Rp{Number(ded.amount).toLocaleString("id-ID")}</span>
+                                          {activeRun.status !== "published" && (
+                                            <button onClick={() => startEditDeduction(ded)} title="Edit potongan ini"
+                                              className="text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {activeRun.status === "published" && (
+                                    <p className="text-[11px] text-muted-foreground pt-1">Run sudah di-publish — potongan gak bisa diedit lagi dari sini (payslip udah jadi snapshot tetap).</p>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
