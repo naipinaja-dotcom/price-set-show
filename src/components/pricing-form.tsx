@@ -1,19 +1,20 @@
 // Shell: info card, tombol save, pemilihan kategori/subtype. Field per
 // kategori dipecah ke pricing-form/delivery-fields.tsx (kategori 1),
 // pricing-form/attendance-fields.tsx (kategori 2), kalkulator interaktif ke
-// pricing-form/interactive-calc.tsx. Lihat docs/pricing-engine-v2-design.md §6.
+// pricing-form/interactive-calc.tsx.
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { usePostHog } from "@posthog/react";
 import { AdminLayout } from "@/components/admin-layout";
 import {
   PRICING_CATEGORIES,
-  DELIVERY_SUBTYPES,
+  DELIVERY_DIMENSIONS,
   type PricingCategory,
   type PricingSubtype,
   type PricingScheme,
   type PricingEnvelope,
   type SchemeFor,
+  type DeliveryDimensions,
 } from "@/lib/pricing-types";
 import {
   getPricingScheme,
@@ -25,7 +26,6 @@ import { parseRupiah } from "@/lib/format";
 import {
   ArrowLeft,
   Info,
-  MapPin,
   Truck,
   Ruler,
   Package,
@@ -68,7 +68,7 @@ import {
 import { loadDeliveryCompState } from "./pricing-form/attendance-delivery-comp";
 
 const CATEGORY_ICONS = { Truck, CalendarDays, Layers } as const;
-const SUBTYPE_ICONS = { MapPin, Ruler, Package } as const;
+const DIMENSION_ICONS = { distance: Ruler, weight: Package } as const;
 
 // -------------------- Bentuk state form (semua string, di-parse saat simpan) --------------------
 interface FormState {
@@ -103,22 +103,21 @@ function buildEnvelope(
   schemeFor: SchemeFor,
   f: FormState,
 ): PricingEnvelope {
-  const deliverySubtype = subtype ?? "flat";
-  const type =
-    category === "delivery" ? deliveryEnvelopeType(deliverySubtype, f.delivery) : "attendance";
-  const config =
+  const type: PricingEnvelope["type"] = category === "delivery" ? deliveryEnvelopeType(subtype, f.delivery) : "attendance";
+  const config: Record<string, unknown> =
     category === "delivery"
-      ? buildDeliveryConfig(deliverySubtype, f.delivery)
+      ? (buildDeliveryConfig(subtype, f.delivery) as unknown as Record<string, unknown>)
       : buildAttendanceConfig(f.attendance);
 
   return {
     version: 1,
     type,
     config,
+    // Add-KG modifier lama nempel di luar config — sekarang Weight (dimensi
+    // modular) sudah punya kalkulasi berat sendiri, jadi modifier ini cuma
+    // relevan kalau Weight TIDAK dipakai (biar gak double-count berat).
     add_kg:
-      category === "delivery" &&
-      (deliverySubtype === "flat" || deliverySubtype === "threshold") &&
-      f.addKgOn
+      category === "delivery" && f.addKgOn && !(subtype as DeliveryDimensions | null)?.weight
         ? { enabled: true, tier: buildStepTier(f.addKg) }
         : null,
     multi_drop: f.multiDropOn ? { fee_per_extra_shipment: parseRupiah(f.multiDropFee) } : null,
@@ -141,7 +140,7 @@ function loadForm(scheme: PricingScheme | undefined): {
 } {
   const form = emptyForm();
   const category: PricingCategory = scheme?.category ?? "delivery";
-  const subtype: PricingSubtype = scheme?.subtype ?? (category === "delivery" ? "flat" : null);
+  const subtype: PricingSubtype = scheme?.subtype ?? (category === "delivery" ? { distance: true, weight: false } : null);
 
   if (!scheme || !scheme.params || scheme.params.version !== 1) {
     return { form, category, subtype, schemeFor: scheme?.scheme_for ?? "rider" };
@@ -151,7 +150,7 @@ function loadForm(scheme: PricingScheme | undefined): {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const c = env.config as any;
 
-  if (category === "delivery" && subtype) {
+  if (category === "delivery") {
     form.delivery = loadDeliveryState(subtype, env.type, c);
   } else if (category === "attendance") {
     form.attendance = loadAttendanceState(c);
@@ -259,7 +258,8 @@ function PricingFormInner({
   const handleCategoryChange = (cat: PricingCategory) => {
     setCategory(cat);
     if (cat === "attendance") setSubtype(null);
-    else if (cat === "delivery") setSubtype((prev) => prev ?? "flat");
+    else if (cat === "delivery")
+      setSubtype((prev) => (prev as DeliveryDimensions | null) ?? { distance: true, weight: false });
   };
 
   const [saving, setSaving] = useState(false);
@@ -411,29 +411,45 @@ function PricingFormInner({
           })}
         </div>
 
-        {/* Sub-tipe (cuma "Per Pengiriman" — "Kombinasi" implisit Tier, lihat handleCategoryChange) */}
+        {/* Dimensi delivery — checkbox Distance / Weight */}
         {category === "delivery" && (
-          <div className="grid grid-cols-3 gap-2 mb-4">
-            {DELIVERY_SUBTYPES.map((st) => {
-              const Icon = SUBTYPE_ICONS[st.icon as keyof typeof SUBTYPE_ICONS] ?? MapPin;
-              const active = subtype === st.key;
-              return (
-                <button
-                  key={st.key}
-                  type="button"
-                  onClick={() => setSubtype(st.key)}
-                  className={
-                    "text-left rounded-lg px-3 py-2.5 flex flex-col gap-1 transition-all duration-150 border " +
-                    (active
-                      ? "border-2 border-primary bg-primary-soft shadow-sm shadow-primary/10"
-                      : "border-border hover:border-primary-border/60 hover:bg-primary-soft/20")
-                  }
-                >
-                  <Icon className="w-3.5 h-3.5 text-primary" />
-                  <span className="text-xs font-medium leading-tight">{st.name}</span>
-                </button>
-              );
-            })}
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-2">
+              Dimensi Pricing (pilih satu atau dua):
+            </label>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {DELIVERY_DIMENSIONS.map((dim) => {
+                const Icon = DIMENSION_ICONS[dim.key];
+                const dims = (subtype as DeliveryDimensions) || { distance: false, weight: false };
+                const checked = dims[dim.key] ?? false;
+
+                return (
+                  <label
+                    key={dim.key}
+                    className={
+                      "text-left rounded-lg px-3 py-2.5 flex items-start gap-2.5 transition-all duration-150 border cursor-pointer " +
+                      (checked
+                        ? "border-primary bg-primary-soft shadow-sm shadow-primary/10"
+                        : "border-border hover:border-primary-border/60 hover:bg-primary-soft/20")
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => setSubtype({ ...dims, [dim.key]: e.target.checked })}
+                      className="w-4 h-4 mt-0.5 flex-shrink-0"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <Icon className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                        <span className="text-xs font-medium leading-tight">{dim.name}</span>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground leading-snug block mt-0.5">{dim.desc}</span>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -442,8 +458,13 @@ function PricingFormInner({
           <Info className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
           <p className="text-xs text-primary-soft-foreground leading-relaxed">
             {category === "delivery"
-              ? (DELIVERY_SUBTYPES.find((s) => s.key === subtype)?.callout ??
-                PRICING_CATEGORIES.find((c) => c.key === category)!.callout)
+              ? (() => {
+                  const dims = subtype as DeliveryDimensions | null;
+                  if (!dims || (!dims.distance && !dims.weight)) return PRICING_CATEGORIES.find((c) => c.key === category)!.callout;
+                  const enabled = DELIVERY_DIMENSIONS.filter((d) => dims[d.key]).map((d) => d.name);
+                  if (enabled.length === 1) return DELIVERY_DIMENSIONS.find((d) => d.name === enabled[0])!.callout;
+                  return "Distance + Weight aktif — masing-masing punya tabel range sendiri, hasilnya dijumlah (sum).";
+                })()
               : PRICING_CATEGORIES.find((c) => c.key === category)!.callout}
           </p>
         </div>
@@ -482,10 +503,10 @@ function PricingFormInner({
           Modifier (opsional)
         </p>
 
-        {category === "delivery" && (subtype === "flat" || subtype === "threshold") && (
+        {category === "delivery" && !(subtype as DeliveryDimensions | null)?.weight && (
           <ToggleBlock
             label="Add-KG (surcharge berat)"
-            hint="Biaya tambahan berdasarkan berat, bertingkat. Buat tipe yang belum punya hitungan berat sendiri."
+            hint="Biaya tambahan berdasarkan berat, bertingkat. Nonaktif otomatis kalau dimensi Weight sudah dipakai (biar gak double-count)."
             on={f.addKgOn}
             onToggle={(on) => patch({ addKgOn: on })}
           >

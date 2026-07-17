@@ -17,10 +17,16 @@ const SELECT_COLS = "id, name, client_id, scheme_for, calc_type, effective_from,
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalize(r: any): PricingScheme {
-  // Kolom fisik tabel masih `calc_type` (belum dimigrasi, lihat
-  // docs/pricing-engine-v2-design.md §7) — di-mapping ke category/subtype
-  // di boundary ini supaya sisa aplikasi pakai taksonomi baru.
-  const { category, subtype } = calcTypeToCategory(r.calc_type);
+  // Kolom fisik tabel masih `calc_type` (belum dimigrasi) — di-mapping ke
+  // category/subtype di boundary ini supaya sisa aplikasi pakai taksonomi baru.
+  let { category, subtype } = calcTypeToCategory(r.calc_type);
+  // Skema modular_v2 nyimpen dimensi aktif sebenarnya di config._dims —
+  // calcTypeToCategory gak bisa baca config (cuma terima string calc_type),
+  // jadi override di sini pakai data asli biar checkbox Distance/Weight di
+  // form kebuka sesuai apa yang beneran disimpan.
+  if (r.calc_type === "modular_v2" && r.params?.config?._dims) {
+    subtype = r.params.config._dims;
+  }
   return {
     id: r.id,
     name: r.name,

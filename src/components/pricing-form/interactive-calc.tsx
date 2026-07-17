@@ -1,15 +1,28 @@
 // Kalkulator interaktif — preview hasil hitung tanpa perlu commit data.
-// Sudah cukup berdiri sendiri di kode lama, dipindah nyaris apa adanya per
-// docs/pricing-engine-v2-design.md §6 (cuma nama field "calcType" 6-way
-// diganti jadi kombinasi category+subtype).
+// Sudah cukup berdiri sendiri di kode lama, dipindah nyaris apa adanya
+// (cuma nama field "calcType" 6-way diganti jadi kombinasi category+subtype).
 import { useEffect, useMemo, useState } from "react";
 import { Calculator, Plus, Trash2 } from "lucide-react";
-import type { PricingCategory, PricingSubtype, SchemeFor, PricingEnvelope } from "@/lib/pricing-types";
-import { calcAttendanceScheme } from "@/lib/pricing-calc";
+import type { PricingCategory, PricingSubtype, SchemeFor, PricingEnvelope, DeliveryDimensions } from "@/lib/pricing-types";
+import { calcAttendanceScheme, bandLookupFee } from "@/lib/pricing-calc";
 import { formatRupiah, parseRupiah } from "@/lib/format";
-import { type DeliveryState } from "./delivery-fields";
+import { type DeliveryState, type RangeRowState } from "./delivery-fields";
+import type { RangeRow } from "@/lib/pricing-types";
 import { type AttendanceState, buildAttendanceConfig } from "./attendance-fields";
 import { stepTierBreakdown, type ExStep } from "./shared";
+
+const norm = (s: unknown) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
+function numericRows(rows: RangeRowState[]): RangeRow[] {
+  return rows.map((r) => ({
+    type: r.type,
+    from: Number(r.from) || 0,
+    to: r.to.trim() === "" ? null : Number(r.to),
+    base_fee: parseRupiah(r.base_fee),
+    step: r.type === "tier" ? Number(r.step) || 1 : 0,
+    add_per_step: r.type === "tier" ? parseRupiah(r.add_per_step) : 0,
+  }));
+}
 
 export interface HybridState {
   daily_fee: string;
@@ -58,12 +71,14 @@ interface InteractiveCalcProps {
 }
 
 function defaultCalcInputs(p: InteractiveCalcProps): CalcInputs {
+  const firstDistTo = Number(p.delivery.distance.rows[0]?.to) || 5;
+  const firstWeightTo = Number(p.delivery.weight.rows[0]?.to) || 5;
   return {
     units: "3",
-    area: p.delivery.flatUnit.rates.find((r) => r.key.trim())?.key ?? "",
-    distance: String((Number(p.delivery.tier.distance.base_until) || 0) + 3),
-    weight: String((Number(p.delivery.tier.weight.base_until) || 0) + 3),
-    totalKg: String((Number(p.delivery.threshold.default_threshold) || 10) * 2 + 1),
+    area: p.delivery.rates.find((r) => r.key.trim())?.key ?? "",
+    distance: String(firstDistTo + 3),
+    weight: String(firstWeightTo + 3),
+    totalKg: String((Number(p.delivery.weight.threshold.default_threshold) || 10) * 2 + 1),
     hours: p.category === "hybrid" ? (p.hybrid.standard_hours || "8") : (p.attendance.standard_hours || "8"),
     isLate: false,
     orders: [{ val: String((Number(p.hybrid.order_tier.base_until) || 0) + 3) }],
@@ -72,66 +87,62 @@ function defaultCalcInputs(p: InteractiveCalcProps): CalcInputs {
 
 function computeInteractive(p: InteractiveCalcProps, inp: CalcInputs): WorkedExample {
   const notes: string[] = [];
+  const dims = (p.subtype as DeliveryDimensions) || { distance: false, weight: false };
   const modNotes = () => {
-    if ((p.category === "delivery") && (p.subtype === "flat" || p.subtype === "threshold") && p.addKgOn)
-      notes.push("Add-KG nyala: biaya berat ditambah DI ATAS hasil ini.");
+    if (p.category === "delivery" && p.addKgOn) notes.push("Add-KG nyala: biaya berat ditambah DI ATAS hasil ini.");
     if (p.multiDropOn)
       notes.push(`Multi-drop nyala: kiriman ke-2 dst +${formatRupiah(parseRupiah(p.multiDropFee))} per kiriman.`);
     if (p.schemeFor === "client" && p.billingOn)
       notes.push("Billing add-ons belum termasuk di sini (min charge / admin fee / PPN).");
   };
 
-  if (p.category === "delivery" && p.subtype === "flat") {
-    const f = p.delivery.flatUnit;
-    const n = Math.max(1, Number(inp.units) || 1);
-    const unitWord = f.unit === "unique_address" ? "alamat" : "kiriman";
-    if (f.rate_by === "flat") {
-      const rate = parseRupiah(f.flat_rate);
-      modNotes();
-      return { steps: [{ text: `Tarif per ${unitWord}`, amount: rate }, { text: `${n} × ${formatRupiah(rate)}`, amount: rate * n }], total: { label: `Total ${n} ${unitWord}`, amount: rate * n }, notes };
-    }
-    const hit = f.rates.find((r) => r.key.trim().toLowerCase() === (inp.area || "").toLowerCase());
-    const rate = parseRupiah(hit ? hit.rate : f.default_rate);
-    const label = hit ? hit.key : "(default)";
-    modNotes();
-    return { steps: [{ text: `${f.match_column || "Area"}: "${label}" → tarif`, amount: rate }, { text: `${n} kiriman × ${formatRupiah(rate)}`, amount: rate * n }], total: { label: `Total ${n} kiriman`, amount: rate * n }, notes };
-  }
-
-  if (p.category === "delivery" && p.subtype === "tier") {
-    const t = p.delivery.tier;
+  if (p.category === "delivery" && (dims.distance || dims.weight)) {
     const steps: ExStep[] = [];
     let total = 0;
-    if (t.distanceOn) {
-      const { steps: s, total: tt } = stepTierBreakdown(t.distance, Number(inp.distance) || 0, "km");
-      steps.push(...s);
-      total += tt;
+
+    // Sama seperti calcRangeComponent.flatFee() di pricing-calc.ts: band "flat"
+    // bisa punya override tarif per-kolom/delivery-return, bukan langsung base_fee.
+    const flatOverrideFee = (band: RangeRow): { fee: number; overridden: boolean } => {
+      if (p.delivery.rate_by === "flat") return { fee: Number(band.base_fee) || 0, overridden: false };
+      const hit = p.delivery.rates.find((r) => norm(r.key) === norm(inp.area));
+      return hit ? { fee: parseRupiah(hit.rate), overridden: true } : { fee: Number(band.base_fee) || 0, overridden: false };
+    };
+
+    if (dims.distance) {
+      const km = Number(inp.distance) || 0;
+      const { fee: bandFee, band } = bandLookupFee(numericRows(p.delivery.distance.rows), km);
+      const { fee, overridden } = band && band.type === "flat" ? flatOverrideFee(band) : { fee: bandFee, overridden: false };
+      steps.push({
+        text: `Distance: ${km} km → band ${band ? `[${band.from}-${band.to ?? "∞"}) (${band.type})` : "(tidak ada band cocok)"}${overridden ? ` (rate override: ${inp.area})` : ""}`,
+        amount: fee,
+      });
+      total += fee;
     }
-    if (t.weightOn) {
-      const { steps: s, total: tt } = stepTierBreakdown(t.weight, Number(inp.weight) || 0, "kg");
-      steps.push(...s.map((x) => ({ ...x, text: `[Berat] ${x.text}` })));
-      total += tt;
+
+    if (dims.weight) {
+      const kg = Number(inp.weight || inp.totalKg) || 0;
+      if (p.delivery.weight.mode === "threshold_group") {
+        const th = p.delivery.weight.threshold;
+        const t = Number(th.default_threshold) || 0;
+        const rate = parseRupiah(th.default_rate);
+        const mult = t > 0 ? Math.ceil(kg / t) : 0;
+        const fee = mult * rate;
+        steps.push({ text: `Weight (kelipatan): ${kg} kg ÷ ${t} → dibulatkan ke atas ${mult}× × ${formatRupiah(rate)}`, amount: fee });
+        total += fee;
+      } else {
+        const { fee: bandFee, band } = bandLookupFee(numericRows(p.delivery.weight.rows), kg);
+        const { fee, overridden } = band && band.type === "flat" ? flatOverrideFee(band) : { fee: bandFee, overridden: false };
+        steps.push({
+          text: `Weight: ${kg} kg → band ${band ? `[${band.from}-${band.to ?? "∞"}) (${band.type})` : "(tidak ada band cocok)"}${overridden ? ` (rate override: ${inp.area})` : ""}`,
+          amount: fee,
+        });
+        total += fee;
+      }
     }
-    if (t.distanceOn && t.weightOn) notes.push("Jarak + berat dijumlah.");
+
+    if (dims.distance && dims.weight) notes.push("Distance + Weight dijumlah.");
     modNotes();
     return { steps, total: { label: "Total", amount: total }, notes };
-  }
-
-  if (p.category === "delivery" && p.subtype === "threshold") {
-    const th = p.delivery.threshold;
-    const kg = Number(inp.totalKg) || 0;
-    const t = Number(th.default_threshold) || 0;
-    const rate = parseRupiah(th.default_rate);
-    const mult = t > 0 ? Math.ceil(kg / t) : 0;
-    const fee = mult * rate;
-    modNotes();
-    return {
-      steps: [
-        { text: `${kg} kg ÷ ${t} = ${t > 0 ? (kg / t).toFixed(2) : "-"} → dibulatkan ke atas: ${mult}×` },
-        { text: `${mult} × ${formatRupiah(rate)}`, amount: fee },
-      ],
-      total: { label: "Fee", amount: fee },
-      notes,
-    };
   }
 
   if (p.category === "attendance") {
@@ -201,52 +212,34 @@ export function InteractiveCalc(props: InteractiveCalcProps) {
 
       {/* ── Inputs per tipe ── */}
       <div className="mb-3.5 space-y-2">
-        {props.category === "delivery" && props.subtype === "flat" && (
-          <div className="flex flex-wrap gap-3 items-end">
-            {props.delivery.flatUnit.rate_by === "column" && props.delivery.flatUnit.rates.some((r) => r.key.trim()) && (
-              <div className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted-foreground">{props.delivery.flatUnit.match_column || "Area"}</span>
-                <select value={inp.area} onChange={(e) => p({ area: e.target.value })}
-                  className="text-xs rounded border border-border bg-card px-2 py-1.5">
-                  {props.delivery.flatUnit.rates.filter((r) => r.key.trim()).map((r, i) => <option key={i} value={r.key}>{r.key}</option>)}
-                  <option value="">lainnya (default)</option>
-                </select>
-              </div>
-            )}
-            <div className="flex flex-col gap-1">
-              <span className="text-[11px] text-muted-foreground">{props.delivery.flatUnit.unit === "unique_address" ? "Jumlah alamat unik" : "Jumlah kiriman"}</span>
-              <input type="number" min="1" value={inp.units} onChange={(e) => p({ units: e.target.value })}
-                className="w-20 text-xs rounded border border-border bg-card px-2 py-1.5" />
+        {props.category === "delivery" && (() => {
+          const dims = (props.subtype as { distance: boolean; weight: boolean }) || { distance: false, weight: false };
+          return (
+            <div className="flex flex-wrap gap-3">
+              {dims.distance && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-muted-foreground">{props.delivery.distance.accumulate === "daily" ? "Total jarak hari ini (km)" : "Jarak (km)"}</span>
+                  <input type="number" min="0" step="0.1" value={inp.distance} onChange={(e) => p({ distance: e.target.value })}
+                    className="w-24 text-xs rounded border border-border bg-card px-2 py-1.5" />
+                </div>
+              )}
+              {dims.weight && props.delivery.weight.mode === "range" && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-muted-foreground">{props.delivery.weight.accumulate === "daily" ? "Total berat hari ini (kg)" : "Berat (kg)"}</span>
+                  <input type="number" min="0" step="0.1" value={inp.weight} onChange={(e) => p({ weight: e.target.value })}
+                    className="w-24 text-xs rounded border border-border bg-card px-2 py-1.5" />
+                </div>
+              )}
+              {dims.weight && props.delivery.weight.mode === "threshold_group" && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-muted-foreground">Total berat sekelompok (kg)</span>
+                  <input type="number" min="0" step="0.1" value={inp.totalKg} onChange={(e) => p({ totalKg: e.target.value })}
+                    className="w-28 text-xs rounded border border-border bg-card px-2 py-1.5" />
+                </div>
+              )}
             </div>
-          </div>
-        )}
-
-        {props.category === "delivery" && props.subtype === "tier" && (
-          <div className="flex flex-wrap gap-3">
-            {props.delivery.tier.distanceOn && (
-              <div className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted-foreground">{props.delivery.tier.accumulate === "daily" ? "Total jarak hari ini (km)" : "Jarak (km)"}</span>
-                <input type="number" min="0" step="0.1" value={inp.distance} onChange={(e) => p({ distance: e.target.value })}
-                  className="w-24 text-xs rounded border border-border bg-card px-2 py-1.5" />
-              </div>
-            )}
-            {props.delivery.tier.weightOn && (
-              <div className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted-foreground">{props.delivery.tier.accumulate === "daily" ? "Total berat hari ini (kg)" : "Berat (kg)"}</span>
-                <input type="number" min="0" step="0.1" value={inp.weight} onChange={(e) => p({ weight: e.target.value })}
-                  className="w-24 text-xs rounded border border-border bg-card px-2 py-1.5" />
-              </div>
-            )}
-          </div>
-        )}
-
-        {props.category === "delivery" && props.subtype === "threshold" && (
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] text-muted-foreground">Total berat (kg)</span>
-            <input type="number" min="0" step="0.1" value={inp.totalKg} onChange={(e) => p({ totalKg: e.target.value })}
-              className="w-28 text-xs rounded border border-border bg-card px-2 py-1.5" />
-          </div>
-        )}
+          );
+        })()}
 
         {(props.category === "attendance" || props.category === "hybrid") && (
           <div className="flex flex-wrap gap-3 items-end">

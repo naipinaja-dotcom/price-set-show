@@ -1,313 +1,467 @@
-// Kategori 1 — Per Pengiriman (flat / tier / threshold). Dipecah dari
-// pricing-form.tsx per docs/pricing-engine-v2-design.md §6.
+// Kategori 1 — Per Pengiriman (Distance / Weight). Redesign v2: bukan lagi
+// 4 modul checkbox terpisah (flat/tierDistance/tierWeight/threshold), tapi 2
+// dimensi (Distance, Weight) yang masing-masing punya 1 TABEL RANGE — tiap
+// baris bisa tipe "Flat" (harga tetap per band) atau "Tier" (base + step per
+// band). Band-independent: dicari band mana yang cocok, band lain diabaikan
+// (bukan akumulasi cumulative kayak StepTier lama). Weight punya mode
+// tambahan "Kelipatan per Store" (pengganti Threshold Kelipatan lama).
 //
-// Catatan penting: `accumulate` ("per_order" | "daily") sekarang jadi flag
-// DI DALAM subtype "tier" (bukan subtype terpisah "tier_daily" lagi) sesuai
-// §3 desain. Config JSON yang dikirim ke calcScheme() tetap identik dengan
-// sebelumnya (tidak menyimpan `accumulate`) — bedanya direpresentasikan
-// lewat `PricingEnvelope.type` ("tier" vs "tier_daily"), karena
-// calcScheme() di pricing-calc.ts (tidak disentuh di tahap ini) masih
-// mendispatch berdasarkan field itu persis seperti semula.
+// Backward-compat: skema lama (flat_unit/tier/tier_daily/threshold_multiple)
+// tetap DIHITUNG dengan logic lama (pricing-calc.ts tidak menyentuh fungsi
+// lama). Begitu admin BUKA skema lama ini di form & save ulang, otomatis
+// ke-upgrade ke format modular_v2 (lihat `loadModularDeliveryState` di bawah
+// buat konversi baca, `buildModularDeliveryConfig` buat konversi tulis).
 import { useState } from "react";
-import type { DeliverySubtype, PricingCalcType } from "@/lib/pricing-types";
+import type {
+  DeliveryDimensions,
+  PricingCalcType,
+  RangeRow,
+  RangeDimensionConfig,
+  ModularDeliveryConfig,
+  StepTier,
+} from "@/lib/pricing-types";
 import { parseRupiah } from "@/lib/format";
-import {
-  AddRowBtn,
-  FieldLabel,
-  RupiahInput,
-  StepTierEditor,
-  Td,
-  TableShell,
-  TextInput,
-  Th,
-  RowDeleteBtn,
-  ToggleBlock,
-  emptyStepTier,
-  buildStepTier,
-  stepTierToState,
-  type StepTierState,
-} from "./shared";
+import { AddRowBtn, FieldLabel, RupiahInput, Td, TableShell, TextInput, Th, RowDeleteBtn } from "./shared";
+import { Plus, Ruler, Package } from "lucide-react";
 
-export interface FlatUnitState {
-  unit: "awb" | "unique_address";
-  rate_by: "flat" | "column" | "delivery_type";
-  match_column: string;
-  flat_rate: string;
-  default_rate: string;
-  rates: { key: string; rate: string }[];
+// -------------------- State shapes (semua string, di-parse saat simpan) --------------------
+export interface RangeRowState {
+  type: "flat" | "tier";
+  from: string;
+  to: string; // "" = tak terbatas (band terakhir)
+  base_fee: string;
+  step: string; // dipakai kalau type=tier
+  add_per_step: string; // dipakai kalau type=tier
 }
 
-export interface TierState {
-  distanceOn: boolean;
-  distance: StepTierState;
-  weightOn: boolean;
-  weight: StepTierState;
+export interface RangeDimensionState {
+  enabled: boolean;
   accumulate: "per_order" | "daily";
+  rows: RangeRowState[];
 }
 
-export interface ThresholdState {
+export interface ThresholdGroupState {
   group_by: string;
   default_threshold: string;
   default_rate: string;
   rules: { key: string; threshold: string; rate: string }[];
 }
 
-export interface DeliveryState {
-  flatUnit: FlatUnitState;
-  tier: TierState;
-  threshold: ThresholdState;
+export interface WeightRangeState extends RangeDimensionState {
+  mode: "range" | "threshold_group";
+  threshold: ThresholdGroupState;
 }
 
-export function emptyDeliveryState(): DeliveryState {
+export interface ModularDeliveryState {
+  distance: RangeDimensionState;
+  weight: WeightRangeState;
+  rate_by: "flat" | "column" | "delivery_type";
+  match_column: string;
+  rates: { key: string; rate: string }[];
+  unit_basis: "awb" | "unique_address";
+}
+
+// Alias dipakai pricing-form.tsx (bentuk state delivery keseluruhan)
+export type DeliveryState = ModularDeliveryState;
+
+// Cuma 2 kolom yang beneran dikenali mesin hitung (lihat resolveField() di
+// pricing-calc.ts) — mode "column" gak butuh delivery_type karena itu udah
+// jadi rate_by pilihan sendiri. Dropdown, bukan free-text, biar gak ada admin
+// ngetik nama kolom yang salah lalu diam-diam dianggap "Area".
+const MATCH_COLUMN_OPTIONS = ["Area", "Service Type"] as const;
+function canonicalMatchColumn(raw: string): string {
+  const c = String(raw ?? "").trim().toLowerCase();
+  return c.includes("service") || c.includes("layanan") ? "Service Type" : "Area";
+}
+
+function emptyRangeRow(type: "flat" | "tier", from = "0"): RangeRowState {
+  return { type, from, to: "", base_fee: "", step: type === "tier" ? "1" : "0", add_per_step: "0" };
+}
+
+export function emptyDeliveryState(): ModularDeliveryState {
   return {
-    flatUnit: {
-      unit: "awb",
-      rate_by: "flat",
-      match_column: "Area",
-      flat_rate: "10000",
-      default_rate: "10000",
-      rates: [{ key: "Jakarta Pusat", rate: "10000" }],
-    },
-    tier: {
-      distanceOn: true,
-      distance: {
-        base_fee: "13000",
-        base_until: "5",
-        tiers: [{ from: "5", to: "15", step: "1", add_per_step: "2000" }],
-      },
-      weightOn: false,
-      weight: emptyStepTier(),
+    distance: { enabled: false, accumulate: "per_order", rows: [] },
+    weight: {
+      enabled: false,
       accumulate: "per_order",
+      mode: "range",
+      rows: [],
+      threshold: { group_by: "Area", default_threshold: "10", default_rate: "40000", rules: [] },
     },
-    threshold: {
-      group_by: "Area",
-      default_threshold: "10",
-      default_rate: "40000",
-      rules: [{ key: "Store A", threshold: "4", rate: "12000" }],
-    },
+    rate_by: "flat",
+    match_column: "Area",
+    rates: [],
+    unit_basis: "awb",
   };
 }
 
-export function buildDeliveryConfig(subtype: DeliverySubtype, d: DeliveryState): Record<string, unknown> {
-  switch (subtype) {
-    case "flat":
-      return {
-        unit: d.flatUnit.unit,
-        rate_by: d.flatUnit.rate_by === "delivery_type" ? "column" : d.flatUnit.rate_by,
-        match_column: d.flatUnit.rate_by === "delivery_type" ? "Delivery Type" : d.flatUnit.match_column,
-        flat_rate: parseRupiah(d.flatUnit.flat_rate),
-        default_rate: parseRupiah(d.flatUnit.default_rate),
-        rates: d.flatUnit.rates.filter((r) => r.key.trim()).map((r) => ({ key: r.key.trim(), rate: parseRupiah(r.rate) })),
-      };
-    case "tier":
-      return {
-        distance: d.tier.distanceOn ? buildStepTier(d.tier.distance) : null,
-        weight: d.tier.weightOn ? buildStepTier(d.tier.weight) : null,
-        combine: "sum",
-      };
-    case "threshold":
-      return {
-        qty_source: "weight_kg",
-        group_by: d.threshold.group_by,
-        default: { threshold: Number(d.threshold.default_threshold) || 0, rate: parseRupiah(d.threshold.default_rate) },
-        rules: d.threshold.rules.filter((r) => r.key.trim()).map((r) => ({ key: r.key.trim(), threshold: Number(r.threshold) || 0, rate: parseRupiah(r.rate) })),
-      };
-  }
+// -------------------- Build (state -> envelope config) --------------------
+function buildRangeRow(r: RangeRowState): RangeRow {
+  return {
+    type: r.type,
+    from: Number(r.from) || 0,
+    to: r.to.trim() === "" ? null : Number(r.to),
+    base_fee: parseRupiah(r.base_fee),
+    step: r.type === "tier" ? Number(r.step) || 1 : 0,
+    add_per_step: r.type === "tier" ? parseRupiah(r.add_per_step) : 0,
+  };
 }
 
-/** Nilai `PricingEnvelope.type` yang harus dipakai — lihat catatan di atas. */
-export function deliveryEnvelopeType(subtype: DeliverySubtype, d: DeliveryState): PricingCalcType {
-  if (subtype === "flat") return "flat_unit";
-  if (subtype === "threshold") return "threshold_multiple";
-  return d.tier.accumulate === "daily" ? "tier_daily" : "tier";
+function buildRangeDimension(d: RangeDimensionState): RangeDimensionConfig {
+  return { enabled: d.enabled, accumulate: d.accumulate, rows: d.rows.map(buildRangeRow) };
+}
+
+export function deliveryEnvelopeType(_subtype: unknown, _d: DeliveryState): PricingCalcType {
+  return "modular_v2";
+}
+
+export function buildDeliveryConfig(_subtype: unknown, d: ModularDeliveryState): ModularDeliveryConfig {
+  const weightDim = buildRangeDimension(d.weight);
+  return {
+    distance: d.distance.enabled ? buildRangeDimension(d.distance) : null,
+    weight: d.weight.enabled
+      ? {
+          ...weightDim,
+          mode: d.weight.mode,
+          threshold:
+            d.weight.mode === "threshold_group"
+              ? {
+                  group_by: d.weight.threshold.group_by,
+                  default_threshold: Number(d.weight.threshold.default_threshold) || 0,
+                  default_rate: parseRupiah(d.weight.threshold.default_rate),
+                  rules: d.weight.threshold.rules.map((r) => ({
+                    key: r.key,
+                    threshold: Number(r.threshold) || 0,
+                    rate: parseRupiah(r.rate),
+                  })),
+                }
+              : undefined,
+        }
+      : null,
+    rate_by: d.rate_by,
+    match_column: d.match_column,
+    rates: d.rates.map((r) => ({ key: r.key, rate: parseRupiah(r.rate) })),
+    unit_basis: d.unit_basis,
+    _dims: { distance: d.distance.enabled, weight: d.weight.enabled },
+  };
+}
+
+// -------------------- Load (envelope config -> state), termasuk konversi legacy --------------------
+function rangeRowToState(row: RangeRow): RangeRowState {
+  return {
+    type: row.type,
+    from: String(row.from ?? 0),
+    to: row.to === null || row.to === undefined ? "" : String(row.to),
+    base_fee: String(row.base_fee ?? 0),
+    step: String(row.step ?? (row.type === "tier" ? 1 : 0)),
+    add_per_step: String(row.add_per_step ?? 0),
+  };
+}
+
+// Best-effort konversi StepTier lama (cumulative) -> RangeRow[] (band-independent).
+// BUKAN migrasi matematis sempurna — base_fee tier lanjutan dipertahankan sama
+// dengan base_fee awal (karena makna "base" beda antara 2 model), tujuannya
+// cuma biar data lama kebuka & bisa diedit ulang di editor baru, bukan
+// menjamin hasil hitung identik. Admin disarankan cek ulang angkanya.
+function stepTierToRangeRows(t: StepTier): RangeRowState[] {
+  const rows: RangeRowState[] = [
+    {
+      type: "flat",
+      from: "0",
+      to: String(t.base_until ?? 0),
+      base_fee: String(t.base_fee ?? 0),
+      step: "0",
+      add_per_step: "0",
+    },
+  ];
+  for (const tier of t.tiers ?? []) {
+    rows.push({
+      type: "tier",
+      from: String(tier.from ?? 0),
+      to: tier.to === null || tier.to === undefined ? "" : String(tier.to),
+      base_fee: String(t.base_fee ?? 0),
+      step: String(tier.step || 1),
+      add_per_step: String(tier.add_per_step ?? 0),
+    });
+  }
+  return rows;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function loadDeliveryState(subtype: DeliverySubtype, legacyType: PricingCalcType, c: any): DeliveryState {
+export function loadDeliveryState(_subtype: unknown, legacyType: PricingCalcType, c: any): ModularDeliveryState {
   const state = emptyDeliveryState();
-  if (subtype === "flat") {
-    const isDeliveryType = c.rate_by === "column" && /delivery type/i.test(c.match_column ?? "");
-    state.flatUnit = {
-      unit: c.unit ?? "awb",
-      rate_by: isDeliveryType ? "delivery_type" : (c.rate_by ?? "flat"),
-      match_column: c.match_column ?? "Area",
-      flat_rate: String(c.flat_rate ?? ""),
-      default_rate: String(c.default_rate ?? ""),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      rates: (c.rates ?? []).map((r: any) => ({ key: r.key ?? "", rate: String(r.rate ?? "") })),
-    };
-  } else if (subtype === "tier") {
-    state.tier = {
-      distanceOn: !!c.distance,
-      distance: stepTierToState(c.distance),
-      weightOn: !!c.weight,
-      weight: stepTierToState(c.weight),
-      accumulate: legacyType === "tier_daily" ? "daily" : "per_order",
-    };
-  } else if (subtype === "threshold") {
-    state.threshold = {
-      group_by: c.group_by ?? "Area",
-      default_threshold: String(c.default?.threshold ?? ""),
-      default_rate: String(c.default?.rate ?? ""),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      rules: (c.rules ?? []).map((r: any) => ({ key: r.key ?? "", threshold: String(r.threshold ?? ""), rate: String(r.rate ?? "") })),
-    };
+
+  if (legacyType === "modular_v2") {
+    if (c.distance) {
+      state.distance = {
+        enabled: true,
+        accumulate: c.distance.accumulate ?? "per_order",
+        rows: (c.distance.rows ?? []).map(rangeRowToState),
+      };
+    }
+    if (c.weight) {
+      state.weight = {
+        enabled: true,
+        accumulate: c.weight.accumulate ?? "per_order",
+        mode: c.weight.mode ?? "range",
+        rows: (c.weight.rows ?? []).map(rangeRowToState),
+        threshold: c.weight.threshold
+          ? {
+              group_by: c.weight.threshold.group_by ?? "Area",
+              default_threshold: String(c.weight.threshold.default_threshold ?? "10"),
+              default_rate: String(c.weight.threshold.default_rate ?? "40000"),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              rules: (c.weight.threshold.rules ?? []).map((r: any) => ({
+                key: r.key,
+                threshold: String(r.threshold),
+                rate: String(r.rate),
+              })),
+            }
+          : state.weight.threshold,
+      };
+    }
+    state.rate_by = c.rate_by ?? "flat";
+    state.match_column = canonicalMatchColumn(c.match_column ?? "Area");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    state.rates = (c.rates ?? []).map((r: any) => ({ key: r.key, rate: String(r.rate) }));
+    state.unit_basis = c.unit_basis ?? "awb";
+    return state;
   }
+
+  // ---- Legacy: flat_unit ----
+  if (legacyType === "flat_unit") {
+    state.distance = {
+      enabled: true,
+      accumulate: "per_order",
+      rows: [
+        {
+          type: "flat",
+          from: "0",
+          to: "",
+          base_fee: String(c.flat_rate ?? c.default_rate ?? "0"),
+          step: "0",
+          add_per_step: "0",
+        },
+      ],
+    };
+    state.rate_by = c.rate_by ?? "flat";
+    state.match_column = canonicalMatchColumn(c.match_column ?? "Area");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    state.rates = (c.rates ?? []).map((r: any) => ({ key: r.key, rate: String(r.rate) }));
+    state.unit_basis = c.unit === "unique_address" ? "unique_address" : "awb";
+    return state;
+  }
+
+  // ---- Legacy: tier / tier_daily ----
+  if (legacyType === "tier" || legacyType === "tier_daily") {
+    const accumulate = legacyType === "tier_daily" ? "daily" : "per_order";
+    if (c.distance) {
+      state.distance = { enabled: true, accumulate, rows: stepTierToRangeRows(c.distance) };
+    }
+    if (c.weight) {
+      state.weight = { ...state.weight, enabled: true, accumulate, mode: "range", rows: stepTierToRangeRows(c.weight) };
+    }
+    return state;
+  }
+
+  // ---- Legacy: threshold_multiple ----
+  if (legacyType === "threshold_multiple") {
+    state.weight = {
+      enabled: true,
+      accumulate: "per_order",
+      mode: "threshold_group",
+      rows: [],
+      threshold: {
+        group_by: c.group_by ?? "Area",
+        default_threshold: String(c.default?.threshold ?? "10"),
+        default_rate: String(c.default?.rate ?? "40000"),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        rules: (c.rules ?? []).map((r: any) => ({ key: r.key, threshold: String(r.threshold), rate: String(r.rate) })),
+      },
+    };
+    return state;
+  }
+
   return state;
 }
 
-export function DeliveryFields({ subtype, value, onChange }: { subtype: DeliverySubtype; value: DeliveryState; onChange: (v: DeliveryState) => void }) {
-  const [tierSubtab, setTierSubtab] = useState<"distance" | "weight">("distance");
+// -------------------- UI: tabel range (Flat/Tier campur), band-independent --------------------
+function RangeTableEditor({
+  rows,
+  onChange,
+  unit,
+}: {
+  rows: RangeRowState[];
+  onChange: (rows: RangeRowState[]) => void;
+  unit: "km" | "kg";
+}) {
+  const patchRow = (i: number, p: Partial<RangeRowState>) =>
+    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...p } : r)));
+  const delRow = (i: number) => onChange(rows.filter((_, idx) => idx !== i));
+  const addRow = (type: "flat" | "tier") => {
+    const last = rows[rows.length - 1];
+    const from = last && last.to.trim() !== "" ? last.to : last ? "" : "0";
+    onChange([...rows, emptyRangeRow(type, from || "0")]);
+  };
 
-  if (subtype === "flat") {
-    const f = value.flatUnit;
-    const patch = (p: Partial<FlatUnitState>) => onChange({ ...value, flatUnit: { ...f, ...p } });
-    return (
-      <div className="space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="flex flex-col gap-1.5">
-            <FieldLabel>Unit yang dihitung</FieldLabel>
-            <select
-              value={f.unit}
-              onChange={(e) => patch({ unit: e.target.value as FlatUnitState["unit"] })}
-              className="w-full text-sm rounded-md border border-border bg-card px-2.5 py-1.5"
-            >
-              <option value="awb">Per kiriman (AWB)</option>
-              <option value="unique_address">Per alamat unik</option>
-            </select>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <FieldLabel>Cara tentukan tarif</FieldLabel>
-            <select
-              value={f.rate_by}
-              onChange={(e) => patch({ rate_by: e.target.value as FlatUnitState["rate_by"] })}
-              className="w-full text-sm rounded-md border border-border bg-card px-2.5 py-1.5"
-            >
-              <option value="flat">Flat (1 tarif untuk semua)</option>
-              <option value="column">Beda per kolom (mis. Area)</option>
-              <option value="delivery_type">Antar / Kembali</option>
-            </select>
-          </div>
-        </div>
+  const inputCls =
+    "w-full text-sm rounded border border-border/80 bg-background px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-primary/50 tabular-nums";
 
-        {f.rate_by === "flat" ? (
-          <div className="flex flex-col gap-1.5 max-w-xs">
-            <FieldLabel>Flat Rate (Rp)</FieldLabel>
-            <RupiahInput value={f.flat_rate} onChange={(v) => patch({ flat_rate: v })} />
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {f.rate_by === "delivery_type" ? (
-                <p className="text-[11px] text-muted-foreground self-end">Delivery vs Return dideteksi otomatis — tidak perlu kolom di CSV.</p>
-              ) : (
-                <div className="flex flex-col gap-1.5">
-                  <FieldLabel>Nama Kolom</FieldLabel>
-                  <TextInput value={f.match_column} onChange={(e) => patch({ match_column: e.target.value })} placeholder="Area" />
-                </div>
-              )}
-              <div className="flex flex-col gap-1.5">
-                <FieldLabel>Default Rate (fallback, Rp)</FieldLabel>
-                <RupiahInput value={f.default_rate} onChange={(v) => patch({ default_rate: v })} />
-              </div>
-            </div>
-            <TableShell>
-              <>
-                <Th>{f.rate_by === "delivery_type" ? "Nilai (DELIVERY / RETURN)" : "Nilai Kolom (cth: Jakarta Pusat)"}</Th>
-                <Th className="w-44">Tarif (Rp)</Th>
-                <Th className="w-10" />
-              </>
-              {f.rates.map((r, i) => (
-                <tr key={i} className="border-t border-border/60">
-                  <Td><TextInput value={r.key} onChange={(e) => patch({ rates: f.rates.map((x, idx) => (idx === i ? { ...x, key: e.target.value } : x)) })} /></Td>
-                  <Td><RupiahInput value={r.rate} onChange={(v) => patch({ rates: f.rates.map((x, idx) => (idx === i ? { ...x, rate: v } : x)) })} /></Td>
-                  <Td className="text-center"><RowDeleteBtn onClick={() => patch({ rates: f.rates.filter((_, idx) => idx !== i) })} /></Td>
-                </tr>
-              ))}
-            </TableShell>
-            <AddRowBtn onClick={() => patch({ rates: [...f.rates, { key: "", rate: "" }] })}>Tambah Baris</AddRowBtn>
-          </>
-        )}
+  return (
+    <div className="rounded-lg border border-border overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted">
+            <th className="px-3 py-2 text-left">Variant</th>
+            <th className="px-3 py-2 text-left">From ({unit})</th>
+            <th className="px-3 py-2 text-left">To ({unit})</th>
+            <th className="px-3 py-2 text-left">Base (Rp)</th>
+            <th className="px-3 py-2 text-left">Step ({unit})</th>
+            <th className="px-3 py-2 text-left">+Rp/Step</th>
+            <th className="px-3 py-2 w-10" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={7} className="px-3 py-4 text-center text-xs text-muted-foreground">
+                Belum ada baris. Tambah Flat atau Tier di bawah.
+              </td>
+            </tr>
+          ) : (
+            rows.map((r, i) => (
+              <tr key={i} className="border-t border-border/60 hover:bg-muted/30 transition-colors">
+                <td className="px-3 py-1.5">
+                  <span
+                    className={
+                      "inline-block text-[11px] font-medium px-2 py-0.5 rounded " +
+                      (r.type === "flat" ? "bg-primary-soft text-primary-soft-foreground" : "bg-warning/15 text-warning")
+                    }
+                  >
+                    {r.type === "flat" ? "Flat" : "Tier"}
+                  </span>
+                </td>
+                <td className="px-3 py-1.5">
+                  <input className={inputCls} value={r.from} inputMode="decimal" onChange={(e) => patchRow(i, { from: e.target.value })} />
+                </td>
+                <td className="px-3 py-1.5">
+                  <input
+                    className={inputCls}
+                    value={r.to}
+                    placeholder="∞"
+                    inputMode="decimal"
+                    onChange={(e) => patchRow(i, { to: e.target.value })}
+                  />
+                </td>
+                <td className="px-3 py-1.5">
+                  <input
+                    className={inputCls}
+                    value={r.base_fee ? Number(parseRupiah(r.base_fee)).toLocaleString("id-ID") : ""}
+                    inputMode="numeric"
+                    placeholder="0"
+                    onChange={(e) => patchRow(i, { base_fee: String(parseRupiah(e.target.value)) })}
+                  />
+                </td>
+                <td className="px-3 py-1.5">
+                  {r.type === "tier" ? (
+                    <input
+                      className={inputCls}
+                      value={r.step}
+                      inputMode="decimal"
+                      placeholder="1"
+                      onChange={(e) => patchRow(i, { step: e.target.value })}
+                    />
+                  ) : (
+                    <span className="text-muted-foreground text-center block">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-1.5">
+                  {r.type === "tier" ? (
+                    <input
+                      className={inputCls}
+                      value={r.add_per_step ? Number(parseRupiah(r.add_per_step)).toLocaleString("id-ID") : ""}
+                      inputMode="numeric"
+                      placeholder="0"
+                      onChange={(e) => patchRow(i, { add_per_step: String(parseRupiah(e.target.value)) })}
+                    />
+                  ) : (
+                    <span className="text-muted-foreground text-center block">—</span>
+                  )}
+                </td>
+                <td className="px-2 text-center">
+                  <RowDeleteBtn onClick={() => delRow(i)} />
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+      <div className="flex items-center gap-2 px-3 py-2.5 border-t border-border bg-muted/20">
+        <button
+          type="button"
+          onClick={() => addRow("flat")}
+          className="inline-flex items-center gap-1.5 text-xs font-medium border border-border rounded-md px-2.5 py-1.5 hover:bg-muted transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add Flat
+        </button>
+        <span className="text-[11px] text-muted-foreground">OR</span>
+        <button
+          type="button"
+          onClick={() => addRow("tier")}
+          className="inline-flex items-center gap-1.5 text-xs font-medium border border-border rounded-md px-2.5 py-1.5 hover:bg-muted transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add Tier
+        </button>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
-  if (subtype === "tier") {
-    const t = value.tier;
-    const patch = (p: Partial<TierState>) => onChange({ ...value, tier: { ...t, ...p } });
-    return (
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-1.5 mb-1">
-          {([{ k: "per_order", l: "Per Kiriman" }, { k: "daily", l: "Akumulasi Harian" }] as const).map((opt) => (
-            <button
-              key={opt.k}
-              type="button"
-              onClick={() => patch({ accumulate: opt.k })}
-              className={
-                "text-xs px-3 py-1.5 rounded-md border transition-colors " +
-                (t.accumulate === opt.k ? "bg-primary-soft text-primary-soft-foreground border-primary-border font-medium" : "bg-card border-border text-muted-foreground hover:bg-muted")
-              }
-            >
-              {opt.l}
-            </button>
-          ))}
-        </div>
-        {t.accumulate === "daily" && (
-          <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 text-xs text-warning">
-            Akumulasi harian: jarak/berat semua kiriman 1 rider dalam 1 hari dijumlah dulu, baru dihitung.
-          </div>
-        )}
-        <div className="flex gap-1.5 mb-1">
-          {([{ k: "distance", l: "Jarak (km)" }, { k: "weight", l: "Berat (kg)" }] as const).map((opt) => (
-            <button
-              key={opt.k}
-              type="button"
-              onClick={() => setTierSubtab(opt.k)}
-              className={
-                "text-xs px-3 py-1.5 rounded-md border transition-colors " +
-                (tierSubtab === opt.k ? "bg-primary-soft text-primary-soft-foreground border-primary-border font-medium" : "bg-card border-border text-muted-foreground hover:bg-muted")
-              }
-            >
-              {opt.l}
-            </button>
-          ))}
-        </div>
+function AccumulateToggle({ value, onChange }: { value: "per_order" | "daily"; onChange: (v: "per_order" | "daily") => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {([{ k: "per_order", l: "Per Kiriman" }, { k: "daily", l: "Akumulasi Harian" }] as const).map((opt) => (
+        <button
+          key={opt.k}
+          type="button"
+          onClick={() => onChange(opt.k)}
+          className={
+            "text-xs px-3 py-1.5 rounded-md border transition-colors " +
+            (value === opt.k
+              ? "bg-primary-soft text-primary-soft-foreground border-primary-border font-medium"
+              : "bg-card border-border text-muted-foreground hover:bg-muted")
+          }
+        >
+          {opt.l}
+        </button>
+      ))}
+    </div>
+  );
+}
 
-        {tierSubtab === "distance" && (
-          <ToggleBlock label="Pakai Jarak (km)" on={t.distanceOn} onToggle={(on) => patch({ distanceOn: on })}>
-            <StepTierEditor unit="km" value={t.distance} onChange={(v) => patch({ distance: v })} />
-          </ToggleBlock>
-        )}
-        {tierSubtab === "weight" && (
-          <ToggleBlock label="Pakai Berat (kg)" on={t.weightOn} onToggle={(on) => patch({ weightOn: on })}>
-            <StepTierEditor unit="kg" value={t.weight} onChange={(v) => patch({ weight: v })} />
-          </ToggleBlock>
-        )}
-        {t.distanceOn && t.weightOn && (
-          <p className="text-[11px] text-muted-foreground">Jarak & berat dua-duanya aktif → hasilnya dijumlah.</p>
-        )}
-      </div>
-    );
-  }
-
-  // threshold
-  const th = value.threshold;
-  const patch = (p: Partial<ThresholdState>) => onChange({ ...value, threshold: { ...th, ...p } });
+function ThresholdGroupEditor({ value, onChange }: { value: ThresholdGroupState; onChange: (v: ThresholdGroupState) => void }) {
+  const patch = (p: Partial<ThresholdGroupState>) => onChange({ ...value, ...p });
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">Qty dibaca dari berat aktual (kg). Fee per grup = ceil(total kg / threshold) × rate.</p>
+      <p className="text-xs text-muted-foreground">
+        Qty dibaca dari berat aktual (kg), dikelompokkan per store/area. Fee per grup = ceil(total kg / threshold) × rate.
+      </p>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="flex flex-col gap-1.5">
           <FieldLabel>Kolom pengelompokan</FieldLabel>
-          <TextInput value={th.group_by} onChange={(e) => patch({ group_by: e.target.value })} placeholder="Area" />
+          <TextInput value={value.group_by} onChange={(e) => patch({ group_by: e.target.value })} placeholder="Area" />
         </div>
         <div className="flex flex-col gap-1.5">
           <FieldLabel>Default Threshold (kg)</FieldLabel>
-          <TextInput value={th.default_threshold} inputMode="decimal" onChange={(e) => patch({ default_threshold: e.target.value })} />
+          <TextInput
+            value={value.default_threshold}
+            inputMode="decimal"
+            onChange={(e) => patch({ default_threshold: e.target.value })}
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <FieldLabel>Default Rate (Rp)</FieldLabel>
-          <RupiahInput value={th.default_rate} onChange={(v) => patch({ default_rate: v })} />
+          <RupiahInput value={value.default_rate} onChange={(v) => patch({ default_rate: v })} />
         </div>
       </div>
       <TableShell>
@@ -317,16 +471,220 @@ export function DeliveryFields({ subtype, value, onChange }: { subtype: Delivery
           <Th className="w-44">Rate (Rp)</Th>
           <Th className="w-10" />
         </>
-        {th.rules.map((r, i) => (
+        {value.rules.map((r, i) => (
           <tr key={i} className="border-t border-border/60">
-            <Td><TextInput value={r.key} onChange={(e) => patch({ rules: th.rules.map((x, idx) => (idx === i ? { ...x, key: e.target.value } : x)) })} /></Td>
-            <Td><TextInput value={r.threshold} inputMode="decimal" onChange={(e) => patch({ rules: th.rules.map((x, idx) => (idx === i ? { ...x, threshold: e.target.value } : x)) })} /></Td>
-            <Td><RupiahInput value={r.rate} onChange={(v) => patch({ rules: th.rules.map((x, idx) => (idx === i ? { ...x, rate: v } : x)) })} /></Td>
-            <Td className="text-center"><RowDeleteBtn onClick={() => patch({ rules: th.rules.filter((_, idx) => idx !== i) })} /></Td>
+            <Td>
+              <TextInput
+                value={r.key}
+                onChange={(e) => patch({ rules: value.rules.map((x, idx) => (idx === i ? { ...x, key: e.target.value } : x)) })}
+              />
+            </Td>
+            <Td>
+              <TextInput
+                value={r.threshold}
+                inputMode="decimal"
+                onChange={(e) =>
+                  patch({ rules: value.rules.map((x, idx) => (idx === i ? { ...x, threshold: e.target.value } : x)) })
+                }
+              />
+            </Td>
+            <Td>
+              <RupiahInput
+                value={r.rate}
+                onChange={(v) => patch({ rules: value.rules.map((x, idx) => (idx === i ? { ...x, rate: v } : x)) })}
+              />
+            </Td>
+            <Td className="text-center">
+              <RowDeleteBtn onClick={() => patch({ rules: value.rules.filter((_, idx) => idx !== i) })} />
+            </Td>
           </tr>
         ))}
       </TableShell>
-      <AddRowBtn onClick={() => patch({ rules: [...th.rules, { key: "", threshold: "", rate: "" }] })}>Tambah Store</AddRowBtn>
+      <AddRowBtn onClick={() => patch({ rules: [...value.rules, { key: "", threshold: "", rate: "" }] })}>
+        Tambah Store
+      </AddRowBtn>
+    </div>
+  );
+}
+
+// -------------------- Main --------------------
+export function DeliveryFields({
+  subtype,
+  value,
+  onChange,
+}: {
+  subtype: DeliveryDimensions | null;
+  value: ModularDeliveryState;
+  onChange: (v: ModularDeliveryState) => void;
+}) {
+  const dims = subtype || { distance: false, weight: false };
+  const [rateOpen, setRateOpen] = useState(false);
+
+  const patchDistance = (p: Partial<RangeDimensionState>) => onChange({ ...value, distance: { ...value.distance, ...p } });
+  const patchWeight = (p: Partial<WeightRangeState>) => onChange({ ...value, weight: { ...value.weight, ...p } });
+
+  if (!dims.distance && !dims.weight) {
+    return <p className="text-xs text-muted-foreground">Pilih minimal satu dimensi (Distance/Weight) di atas.</p>;
+  }
+
+  return (
+    <div className="space-y-5">
+      {dims.distance && (
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Ruler className="w-3.5 h-3.5 text-primary" />
+              <span className="text-sm font-semibold">Distance</span>
+            </div>
+            <AccumulateToggle value={value.distance.accumulate} onChange={(v) => patchDistance({ accumulate: v })} />
+          </div>
+          {value.distance.accumulate === "daily" && (
+            <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 text-xs text-warning">
+              Akumulasi harian: jarak semua kiriman 1 rider dalam 1 hari dijumlah dulu, baru dicocokkan ke band.
+            </div>
+          )}
+          <RangeTableEditor rows={value.distance.rows} onChange={(rows) => patchDistance({ rows })} unit="km" />
+        </div>
+      )}
+
+      {dims.weight && (
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-1.5">
+              <Package className="w-3.5 h-3.5 text-primary" />
+              <span className="text-sm font-semibold">Weight</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {([{ k: "range", l: "Range (Flat/Tier)" }, { k: "threshold_group", l: "Kelipatan per Store" }] as const).map(
+                (opt) => (
+                  <button
+                    key={opt.k}
+                    type="button"
+                    onClick={() => patchWeight({ mode: opt.k })}
+                    className={
+                      "text-xs px-3 py-1.5 rounded-md border transition-colors " +
+                      (value.weight.mode === opt.k
+                        ? "bg-primary-soft text-primary-soft-foreground border-primary-border font-medium"
+                        : "bg-card border-border text-muted-foreground hover:bg-muted")
+                    }
+                  >
+                    {opt.l}
+                  </button>
+                ),
+              )}
+            </div>
+          </div>
+
+          {value.weight.mode === "range" ? (
+            <>
+              <div className="flex justify-end">
+                <AccumulateToggle value={value.weight.accumulate} onChange={(v) => patchWeight({ accumulate: v })} />
+              </div>
+              {value.weight.accumulate === "daily" && (
+                <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 text-xs text-warning">
+                  Akumulasi harian: berat semua kiriman 1 rider dalam 1 hari dijumlah dulu, baru dicocokkan ke band.
+                </div>
+              )}
+              <RangeTableEditor rows={value.weight.rows} onChange={(rows) => patchWeight({ rows })} unit="kg" />
+            </>
+          ) : (
+            <ThresholdGroupEditor value={value.weight.threshold} onChange={(threshold) => patchWeight({ threshold })} />
+          )}
+        </div>
+      )}
+
+      {/* Pengaturan lain — unit basis & cara penentuan rate untuk baris Flat */}
+      <div className="rounded-md border border-border bg-card">
+        <button
+          type="button"
+          onClick={() => setRateOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          Pengaturan lain (unit & rate untuk baris Flat)
+          <span className="text-[11px]">{rateOpen ? "Tutup ▲" : "Buka ▼"}</span>
+        </button>
+        {rateOpen && (
+          <div className="px-3.5 pb-3.5 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Unit dihitung (dedup & stop count)</FieldLabel>
+                <select
+                  value={value.unit_basis}
+                  onChange={(e) => onChange({ ...value, unit_basis: e.target.value as "awb" | "unique_address" })}
+                  className="w-full text-sm rounded-md border border-border bg-card px-2.5 py-1.5"
+                >
+                  <option value="awb">Per kiriman (AWB)</option>
+                  <option value="unique_address">Per alamat unik</option>
+                </select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Rate baris Flat ditentukan dari</FieldLabel>
+                <select
+                  value={value.rate_by}
+                  onChange={(e) => onChange({ ...value, rate_by: e.target.value as "flat" | "column" | "delivery_type" })}
+                  className="w-full text-sm rounded-md border border-border bg-card px-2.5 py-1.5"
+                >
+                  <option value="flat">Flat (base_fee band, tanpa override)</option>
+                  <option value="column">Beda per kolom (mis. Area)</option>
+                  <option value="delivery_type">Antar / Kembali</option>
+                </select>
+              </div>
+            </div>
+
+            {value.rate_by !== "flat" && (
+              <>
+                {value.rate_by === "column" && (
+                  <div className="flex flex-col gap-1.5 max-w-xs">
+                    <FieldLabel>Nama Kolom</FieldLabel>
+                    <select
+                      value={value.match_column}
+                      onChange={(e) => onChange({ ...value, match_column: e.target.value })}
+                      className="w-full text-sm rounded-md border border-border bg-card px-2.5 py-1.5"
+                    >
+                      {MATCH_COLUMN_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>{opt === "Area" ? "Area / Kota (District)" : "Tipe Layanan (Service Type)"}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <TableShell>
+                  <>
+                    <Th>{value.rate_by === "delivery_type" ? "Nilai (DELIVERY / RETURN)" : "Nilai Kolom (cth: Jakarta Pusat)"}</Th>
+                    <Th className="w-44">Tarif (Rp)</Th>
+                    <Th className="w-10" />
+                  </>
+                  {value.rates.map((r, i) => (
+                    <tr key={i} className="border-t border-border/60">
+                      <Td>
+                        <TextInput
+                          value={r.key}
+                          onChange={(e) =>
+                            onChange({ ...value, rates: value.rates.map((x, idx) => (idx === i ? { ...x, key: e.target.value } : x)) })
+                          }
+                        />
+                      </Td>
+                      <Td>
+                        <RupiahInput
+                          value={r.rate}
+                          onChange={(v) =>
+                            onChange({ ...value, rates: value.rates.map((x, idx) => (idx === i ? { ...x, rate: v } : x)) })
+                          }
+                        />
+                      </Td>
+                      <Td className="text-center">
+                        <RowDeleteBtn onClick={() => onChange({ ...value, rates: value.rates.filter((_, idx) => idx !== i) })} />
+                      </Td>
+                    </tr>
+                  ))}
+                </TableShell>
+                <AddRowBtn onClick={() => onChange({ ...value, rates: [...value.rates, { key: "", rate: "" }] })}>
+                  Tambah Baris
+                </AddRowBtn>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

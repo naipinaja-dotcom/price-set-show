@@ -7,7 +7,13 @@ import { confirmDialog } from "@/components/confirm-dialog";
 import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
 import { fetchAllRows } from "@/lib/fetch-all";
-import { Plus, Pencil, Trash2, Loader2, Search, Download } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Search, Download, FileSpreadsheet } from "lucide-react";
+import {
+  EXPORT_COLUMNS,
+  ALL_EXPORT_COLUMN_KEYS,
+  getClientExportTemplate,
+  saveClientExportTemplate,
+} from "@/lib/export-template";
 
 export const Route = createFileRoute("/admin/clients")({ component: ClientsPage });
 
@@ -276,6 +282,7 @@ function ClientModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [tab, setTab] = useState<"info" | "export">("info");
   const [form, setForm] = useState({
     code: initial?.code ?? "",
     name: initial?.name ?? "",
@@ -304,56 +311,164 @@ function ClientModal({
     onSaved();
   };
 
-  const FIELDS = [
-    { key: "code", label: "Kode Client" },
-    { key: "name", label: "Nama Client" },
-    { key: "address", label: "Alamat" },
-    { key: "contact_person", label: "Contact Person" },
-    { key: "No. Telepon", label: "Telepon" },
-  ] as const;
-
   return (
     <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4" onClick={onClose}>
       <div className="bg-card rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-base font-semibold mb-4">{initial ? "Edit" : "Tambah"} Client</h2>
-        <div className="space-y-3 text-sm">
-          {(["code", "name", "address", "contact_person", "phone"] as const).map((f) => (
-            <div key={f}>
-              <label className="text-xs text-muted-foreground font-medium capitalize">
-                {f.replace(/_/g, " ")}
+        <h2 className="text-base font-semibold mb-1">{initial ? "Edit" : "Tambah"} Client</h2>
+
+        {/* Tab — Export Template cuma relevan buat client yang udah ada (perlu client_id) */}
+        {initial && (
+          <div className="flex gap-1 p-1 bg-muted rounded-md mb-4 mt-3">
+            {([["info", "Info"], ["export", "Export Template"]] as const).map(([k, l]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setTab(k)}
+                className={`flex-1 px-3 py-1.5 text-xs rounded ${tab === k ? "bg-card shadow-sm font-medium" : "text-muted-foreground"}`}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+        )}
+        {!initial && <div className="mb-3" />}
+
+        {tab === "info" ? (
+          <>
+            <div className="space-y-3 text-sm">
+              {(["code", "name", "address", "contact_person", "phone"] as const).map((f) => (
+                <div key={f}>
+                  <label className="text-xs text-muted-foreground font-medium capitalize">
+                    {f.replace(/_/g, " ")}
+                  </label>
+                  <input
+                    value={(form as any)[f]}
+                    onChange={(e) => setForm({ ...form, [f]: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              ))}
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.active}
+                  onChange={(e) => setForm({ ...form, active: e.target.checked })}
+                />{" "}
+                Aktif
               </label>
-              <input
-                value={(form as any)[f]}
-                onChange={(e) => setForm({ ...form, [f]: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-              />
             </div>
-          ))}
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={form.active}
-              onChange={(e) => setForm({ ...form, active: e.target.checked })}
-            />{" "}
-            Aktif
-          </label>
-        </div>
-        <div className="flex justify-end gap-2 mt-5">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
-          >
-            Batal
-          </button>
-          <button
-            onClick={save}
-            disabled={saving}
-            className="px-3 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground disabled:opacity-50 hover:opacity-90 transition-opacity"
-          >
-            {saving ? "Menyimpan…" : "Simpan"}
-          </button>
-        </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                onClick={onClose}
+                className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={save}
+                disabled={saving}
+                className="px-3 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground disabled:opacity-50 hover:opacity-90 transition-opacity"
+              >
+                {saving ? "Menyimpan…" : "Simpan"}
+              </button>
+            </div>
+          </>
+        ) : (
+          initial && <ExportTemplateTab clientId={initial.id} onClose={onClose} />
+        )}
       </div>
     </div>
+  );
+}
+
+// Tab "Export Template" — checkbox kolom mana yang muncul di export
+// Ringkasan Finance Worksheet buat client ini. Setup sekali, reusable
+// (dipakai otomatis di finance-worksheet.tsx tiap kali export/render
+// summary utk payroll_runs yang di-scope ke client ini).
+function ExportTemplateTab({ clientId, onClose }: { clientId: string; onClose: () => void }) {
+  const [enabled, setEnabled] = useState<Set<string>>(new Set(ALL_EXPORT_COLUMN_KEYS));
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getClientExportTemplate(clientId).then((cols) => {
+      setEnabled(new Set(cols ?? ALL_EXPORT_COLUMN_KEYS));
+      setLoading(false);
+    });
+  }, [clientId]);
+
+  const toggle = (key: string) =>
+    setEnabled((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await saveClientExportTemplate(clientId, [...enabled]);
+      toast.success("Export template tersimpan");
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Gagal simpan template");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="py-8 text-center text-sm text-muted-foreground">
+        <Loader2 className="w-4 h-4 inline animate-spin mr-1" /> Memuat…
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex items-start gap-2 rounded-md border border-primary-border bg-primary-soft px-3 py-2.5 mb-3">
+        <FileSpreadsheet className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+        <p className="text-xs text-primary-soft-foreground leading-relaxed">
+          Kolom yang dicentang akan muncul di export "Ringkasan" Finance Worksheet — berlaku otomatis
+          tiap kali export payroll run yang di-scope ke client ini. Kolom "Driver Name" selalu tampil.
+        </p>
+      </div>
+      <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+        {EXPORT_COLUMNS.map((col) => (
+          <label
+            key={col.key}
+            className="flex items-start gap-2.5 rounded-md border border-border px-3 py-2 cursor-pointer hover:bg-muted/40"
+          >
+            <input
+              type="checkbox"
+              checked={enabled.has(col.key)}
+              onChange={() => toggle(col.key)}
+              className="w-4 h-4 mt-0.5 flex-shrink-0"
+            />
+            <div>
+              <span className="text-sm font-medium block">{col.label}</span>
+              <span className="text-[11px] text-muted-foreground">{col.desc}</span>
+            </div>
+          </label>
+        ))}
+      </div>
+      <div className="flex justify-end gap-2 mt-5">
+        <button
+          onClick={onClose}
+          className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+        >
+          Batal
+        </button>
+        <button
+          onClick={save}
+          disabled={saving}
+          className="px-3 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground disabled:opacity-50 hover:opacity-90 transition-opacity"
+        >
+          {saving ? "Menyimpan…" : "Simpan Template"}
+        </button>
+      </div>
+    </>
   );
 }

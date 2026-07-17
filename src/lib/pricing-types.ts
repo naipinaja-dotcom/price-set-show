@@ -1,11 +1,10 @@
 // =========================================================
 // Taksonomi baru (v2): 3 kategori, bukan 6 calc_type.
-// Lihat docs/pricing-engine-v2-design.md §3/§4 untuk rasional lengkap.
 //
 // - `PricingCategory` + `subtype` = apa yang dipilih user di UI (2 level:
 //   kategori dulu, baru sub-tipe kalau relevan) dan apa yang disimpan di
-//   kolom `calc_type` tabel `pricing_schemes` (kolom fisik BELUM diubah,
-//   lihat migration plan §7 — mapping ke/dari string lama dilakukan di
+//   kolom `calc_type` tabel `pricing_schemes` (kolom fisik BELUM diubah —
+//   mapping ke/dari string lama dilakukan di
 //   `pricing-store.ts` lewat `calcTypeToCategory` / `categoryToCalcType`).
 // - `PricingCalcType` (union lama, 6 nilai) TETAP ADA tapi jadi detail
 //   internal: `PricingEnvelope.type` masih memakainya persis seperti
@@ -17,14 +16,100 @@
 // =========================================================
 
 export type PricingCategory = "delivery" | "attendance" | "hybrid";
-export type DeliverySubtype = "flat" | "tier" | "threshold";
-// attendance tidak punya subtype. hybrid subtype SELALU "tier" untuk
-// sekarang — calcHybridScheme() cuma mendukung order-fee berbasis tier
-// (lihat docs/pricing-engine-v2-design.md §9, open question belum settle
-// buat varian flat/threshold di hybrid), jadi UI tidak menawarkan pilihan
-// lain di bawah kategori Kombinasi supaya tidak ada opsi yang keliatan
-// valid tapi diam-diam salah hitung.
+
+// =========================================================
+// Modular v2 — Distance & Weight sebagai 2 dimensi checkbox (bukan 4
+// modul flat/tierDistance/tierWeight/threshold seperti draft v1).
+// Di dalam tiap dimensi, admin isi TABEL RANGE yang barisnya bisa
+// campur tipe "flat" (harga tetap per band) atau "tier" (base + step
+// per band, band-independent — bukan cumulative dari band sebelumnya).
+// Weight punya mode tambahan: "range" (tabel biasa) atau
+// "threshold_group" (dikelompokkan per store/area, dibagi threshold,
+// dibulatkan ke atas × rate — pengganti "Threshold Kelipatan" lama).
+// Lihat pricing-calc.ts `calcModularDeliveryComponent` untuk kalkulasi.
+// =========================================================
+
+/** Checkbox tingkat atas — dimensi mana yang dipakai di skema delivery ini. */
+export interface DeliveryDimensions {
+  distance: boolean;
+  weight: boolean;
+}
+
+export type DeliverySubtype = DeliveryDimensions | null;
 export type PricingSubtype = DeliverySubtype | null;
+
+/** 1 baris di tabel range Distance/Weight. Band-independent: value dicari
+ * masuk band [from,to) mana, dihitung base_fee (+ step kalau tier) BAND
+ * ITU SAJA — band lain diabaikan (bukan akumulasi lewat semua band). */
+export interface RangeRow {
+  type: "flat" | "tier";
+  from: number;
+  to: number | null; // null = band terakhir, tak terbatas
+  base_fee: number;
+  step: number; // 0 untuk flat
+  add_per_step: number; // 0 untuk flat
+}
+
+export interface RangeDimensionConfig {
+  enabled: boolean;
+  accumulate: "per_order" | "daily"; // value (km/kg) dihitung per baris atau diakumulasi per rider per hari dulu
+  rows: RangeRow[];
+}
+
+export interface ThresholdGroupConfig {
+  group_by: string; // nama kolom buat grouping, cth "Area"
+  default_threshold: number;
+  default_rate: number;
+  rules: { key: string; threshold: number; rate: number }[];
+}
+
+export interface WeightRangeConfig extends RangeDimensionConfig {
+  mode: "range" | "threshold_group";
+  threshold?: ThresholdGroupConfig;
+}
+
+export interface ModularDeliveryConfig {
+  distance: RangeDimensionConfig | null;
+  weight: WeightRangeConfig | null;
+  // Setting global untuk baris bertipe "flat": rate bisa flat tunggal, beda
+  // per kolom (cth Area), atau beda Delivery/Return. "unit_basis" dipakai
+  // untuk dedup alamat & hitung stop count (multi-drop).
+  rate_by: "flat" | "column" | "delivery_type";
+  match_column: string;
+  rates: { key: string; rate: number }[];
+  unit_basis: "awb" | "unique_address";
+  // Tag ringan dimensi aktif — duplikat dari `distance`/`weight` di atas,
+  // disimpan supaya `pricing-store.ts` bisa reconstruct `PricingScheme.subtype`
+  // tanpa parsing config penuh (calcTypeToCategory cuma terima calc_type string).
+  _dims: DeliveryDimensions;
+}
+
+export interface DeliveryDimensionOption {
+  key: keyof DeliveryDimensions;
+  name: string;
+  desc: string;
+  icon: string;
+  callout: string;
+}
+
+export const DELIVERY_DIMENSIONS: DeliveryDimensionOption[] = [
+  {
+    key: "distance",
+    name: "Distance",
+    desc: "Tarif berdasarkan jarak (km)",
+    icon: "Ruler",
+    callout:
+      "Tabel range jarak — tiap band bisa Flat (harga tetap) atau Tier (base + naik per step). Bisa dicampur dalam 1 tabel.",
+  },
+  {
+    key: "weight",
+    name: "Weight",
+    desc: "Tarif berdasarkan berat (kg) — atau kelipatan per store",
+    icon: "Package",
+    callout:
+      "Sama seperti Distance (tabel range Flat/Tier) — atau ganti mode ke 'Kelipatan per Store' untuk grouping berat per area/store lalu dibagi threshold.",
+  },
+];
 
 /** Union lama (6 calc_type) — detail internal, lihat komentar di atas. */
 export type PricingCalcType =
@@ -33,7 +118,8 @@ export type PricingCalcType =
   | "tier_daily"
   | "threshold_multiple"
   | "attendance"
-  | "combined";
+  | "combined"
+  | "modular_v2";
 
 export type SchemeFor = "rider" | "client";
 
@@ -66,80 +152,49 @@ export const PRICING_CATEGORIES: PricingCategoryOption[] = [
   // Skema baru pakai category "attendance" + delivery_component toggle.
 ];
 
-export interface DeliverySubtypeOption {
-  key: DeliverySubtype;
-  name: string;
-  desc: string;
-  icon: string;
-  callout: string;
-}
-
-export const DELIVERY_SUBTYPES: DeliverySubtypeOption[] = [
-  {
-    key: "flat",
-    name: "Flat per Unit",
-    desc: "Tarif per kiriman / alamat",
-    icon: "MapPin",
-    callout:
-      "Dibayar per satuan. Satuannya bisa per paket (AWB) atau per alamat unik (3 paket ke 1 alamat = 1). Tarifnya boleh flat, atau beda-beda per area.",
-  },
-  {
-    key: "tier",
-    name: "Tier Jarak & Berat",
-    desc: "Tarif naik per jarak/kg",
-    icon: "Ruler",
-    callout:
-      "Tarif berjenjang. Ada tarif dasar untuk jarak/berat awal, lebihnya nambah per step. Bisa pakai jarak, berat, atau dua-duanya. Bisa juga diakumulasi per hari dulu (opsi di bawah) sebelum dihitung tarifnya.",
-  },
-  {
-    key: "threshold",
-    name: "Threshold Kelipatan",
-    desc: "Kelipatan berat per store",
-    icon: "Package",
-    callout:
-      "Dikelompokkan per area/store. Berat total (kg) dibagi threshold lalu dibulatkan ke atas × rate. Contoh: threshold 10, total 23 kg → dihitung 3×.",
-  },
-];
-
 /** Label tampil gabungan kategori+subtype, dipakai di daftar/preview skema. */
 export function pricingLabel(category: PricingCategory, subtype: PricingSubtype): string {
   if (category === "attendance") return "Daily / Attendance";
   if (category === "hybrid") return "Kombinasi (Daily + Per Order)";
-  switch (subtype) {
-    case "flat":
-      return "Flat per Unit";
-    case "tier":
-      return "Tier Jarak & Berat";
-    case "threshold":
-      return "Threshold Kelipatan";
-    default:
-      return "Per Pengiriman";
-  }
+
+  if (!subtype) return "Per Pengiriman";
+
+  const dims = subtype as DeliveryDimensions;
+  const enabled: string[] = [];
+  if (dims.distance) enabled.push("Distance");
+  if (dims.weight) enabled.push("Weight");
+
+  if (enabled.length === 0) return "Per Pengiriman";
+  return enabled.join(" + ");
 }
 
 /**
- * Mapping DARI nilai `calc_type` lama (kolom fisik di tabel, belum
- * dimigrasi — lihat docs/pricing-engine-v2-design.md §7) KE {category,
- * subtype} yang dipakai UI/aplikasi. `tier` & `tier_daily` sama-sama jadi
- * subtype "tier" — bedanya (akumulasi per-order vs per-hari) direkonstruksi
- * dari `params.type` (envelope), bukan dari sini, karena config JSON tidak
- * berubah bentuk (prinsip desain §2/§4).
+ * Mapping DARI nilai `calc_type` lama (kolom fisik di tabel) KE {category, subtype}
+ * yang dipakai UI/aplikasi. `subtype` sekarang cuma tag ringan (dimensi mana yang
+ * aktif) — detail lengkap (rows, mode, threshold) direkonstruksi terpisah saat
+ * form dibuka utk edit (lihat `loadDeliveryState` di delivery-fields.tsx).
+ *
+ * - "flat_unit" → dianggap pakai dimensi Distance (flat row 0..∞)
+ * - "tier" / "tier_daily" → Distance + Weight (tier lama support dua-duanya)
+ * - "threshold_multiple" → Weight (mode threshold_group)
  */
 export function calcTypeToCategory(calcType: string): { category: PricingCategory; subtype: PricingSubtype } {
   switch (calcType) {
     case "flat_unit":
-      return { category: "delivery", subtype: "flat" };
+      return { category: "delivery", subtype: { distance: true, weight: false } };
     case "tier":
     case "tier_daily":
-      return { category: "delivery", subtype: "tier" };
+      return { category: "delivery", subtype: { distance: true, weight: true } };
     case "threshold_multiple":
-      return { category: "delivery", subtype: "threshold" };
+      return { category: "delivery", subtype: { distance: false, weight: true } };
+    case "modular_v2":
+      return { category: "delivery", subtype: { distance: true, weight: true } }; // detail sebenarnya dibaca dari config
     case "attendance":
       return { category: "attendance", subtype: null };
     case "combined":
-      return { category: "hybrid", subtype: "tier" };
+      return { category: "hybrid", subtype: null };
     default:
-      return { category: "delivery", subtype: "flat" };
+      return { category: "delivery", subtype: { distance: true, weight: false } };
   }
 }
 
@@ -167,14 +222,12 @@ export interface BillingAddons {
   ppn_percent: number;
 }
 
-// Bentuk `params` (envelope) TIDAK BERUBAH oleh redesign ini — termasuk
-// untuk hybrid (dulu "combined"): `calcHybridScheme()` di pricing-calc.ts
-// masih membaca `config` sebagai objek flat (full_fee/standard_minutes/
-// ontime_bonus/order_by/order_tier), bukan bentuk delivery_config/
-// attendance_config yang digambarkan di docs/pricing-engine-v2-design.md §4
-// sebagai target akhir migrasi data — itu baru berlaku setelah migration
-// script (§7) benar-benar jalan DAN pricing-calc.ts diupdate mengikutinya,
-// keduanya di luar scope tahap ini (non-goal: jangan sentuh pricing-calc.ts
+// Bentuk `params` (envelope) TIDAK BERUBAH oleh redesign modular_v2 —
+// termasuk untuk hybrid (dulu "combined"): `calcHybridScheme()` di
+// pricing-calc.ts masih membaca `config` sebagai objek flat (full_fee/
+// standard_minutes/ontime_bonus/order_by/order_tier), belum diseragamkan ke
+// bentuk delivery_config/attendance_config kayak Distance/Weight — hybrid
+// sengaja belum ikut migrasi ini (non-goal: jangan sentuh pricing-calc.ts
 // atau database). `type` dipertahankan persis seperti semula karena jadi
 // kunci dispatch internal `calcScheme()`.
 export interface PricingEnvelope {

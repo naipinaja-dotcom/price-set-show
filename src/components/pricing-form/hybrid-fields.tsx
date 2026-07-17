@@ -1,6 +1,5 @@
 // Kategori 3 — Kombinasi (hybrid). Bukan sub-tipe berdiri sendiri secara
-// kalkulasi (lihat docs/pricing-engine-v2-design.md §3) — field-nya gabungan
-// kecil dari komponen harian (mirip attendance) + 1 order-tier (mirip
+// kalkulasi — field-nya gabungan kecil dari komponen harian (mirip attendance) + 1 order-tier (mirip
 // delivery subtype "tier"), jadi dikasih file kecil sendiri daripada
 // dipaksa reuse DeliveryFields/AttendanceFields yang py punya field lebih
 // banyak (overtime, incentives list, flat/threshold) yang tidak dipakai di

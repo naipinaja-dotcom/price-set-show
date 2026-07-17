@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { usePostHog } from "@posthog/react";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminLayout } from "@/components/admin-layout";
 import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
+import { RiderFeeDrilldown, type DrilldownRow } from "@/components/rider-fee-drilldown";
 import { listPricingSchemes } from "@/lib/pricing-store";
 import type { PricingScheme } from "@/lib/pricing-types";
 import { pricingLabel } from "@/lib/pricing-types";
@@ -24,7 +25,7 @@ import { confirmDialog } from "@/components/confirm-dialog";
 import { resolveRiderIdentities } from "@/lib/rider-lookup";
 import { findOrCreatePayrollRun, generatePayrollDetails } from "@/lib/payroll-generate";
 import { useAuth } from "@/lib/auth";
-import { Loader2, Play, AlertTriangle, Info, Save } from "lucide-react";
+import { Loader2, Play, AlertTriangle, Info, Save, ChevronRight } from "lucide-react";
 
 export const Route = createFileRoute("/admin/calculate")({ component: CalculatePage });
 
@@ -36,6 +37,19 @@ function firstOfMonth() {
 }
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+// Sama persis dengan `isCompleted` internal di pricing-calc.ts (norm status
+// trim+lowercase) — dipakai di sini cuma buat rekonstruksi urutan baris
+// `completed` yang dipakai calcScheme()/calcHybridScheme() waktu nge-zip
+// DeliveryRow asli (buat ambil km/kg) sama PricingCalc `perRow` hasilnya
+// (yang gak nyimpen km/kg). Kalkulasi fee-nya sendiri TETAP dari engine,
+// ini cuma buat nampilin, tidak menghitung ulang apa pun.
+function normStatus(s: unknown): string {
+  return String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+function isCompletedRow(status: unknown): boolean {
+  return normStatus(status) === "completed";
 }
 
 function CalculatePage() {
@@ -54,6 +68,10 @@ function CalculatePage() {
   const [combinedResult, setCombinedResult] = useState<CombinedCalcResult | null>(null);
   const [riderNames, setRiderNames] = useState<Record<string, string>>({});
   const [ranScheme, setRanScheme] = useState<PricingScheme | null>(null);
+  // Rincian per-baris (order/hari) per rider, dipakai buat drill-down preview
+  // sebelum commit — lihat komentar di RiderFeeDrilldown.
+  const [drilldown, setDrilldown] = useState<Record<string, DrilldownRow[]>>({});
+  const [expandedRider, setExpandedRider] = useState<string | null>(null);
   const deliveryPager = usePagination(result?.perRider ?? [], 20);
   const attPager = usePagination(attResult?.perRider ?? [], 20);
   const combinedPager = usePagination(combinedResult?.perRider ?? [], 20);
@@ -85,6 +103,8 @@ function CalculatePage() {
     setResult(null);
     setAttResult(null);
     setCombinedResult(null);
+    setDrilldown({});
+    setExpandedRider(null);
     try {
       if (scheme.category === "hybrid") {
         // Fetch delivery records
@@ -135,6 +155,19 @@ function CalculatePage() {
         const res = calcHybridScheme(scheme.params, deliveryRows, attRows);
         setCombinedResult(res);
         setRanScheme(scheme);
+
+        // Zip baris COMPLETED (urutan sama seperti dipakai calcHybridScheme
+        // secara internal) dengan res.perRow buat dapetin km/kg per baris —
+        // engine-nya sendiri gak nyimpen km/kg di output, cuma fee.
+        const completedHybrid = deliveryRows.filter((r) => isCompletedRow(r.status));
+        const ddHybrid: Record<string, DrilldownRow[]> = {};
+        completedHybrid.forEach((r, i) => {
+          const key = r.rider_id || r.driver_code || "(tanpa rider)";
+          const rf = res.perRow[i];
+          if (!rf) return;
+          (ddHybrid[key] ??= []).push({ date: r.delivery_date, km: r.distance_km, kg: r.weight_kg, fee: rf.fee });
+        });
+        setDrilldown(ddHybrid);
       } else if (scheme.category === "attendance") {
         // STEP 1: Fetch semua attendance_logs di rentang tanggal & client ini (tanpa join riders)
         let q = (supabase as any)
@@ -191,6 +224,19 @@ function CalculatePage() {
         );
         setAttResult(res);
         setRanScheme(scheme);
+
+        // attResult.perRow = logs.map(...) — 1:1 sama urutan `rows`, gak ada
+        // filter, jadi zip langsung by index (bukan km/kg, attendance pakai
+        // status hadir sebagai "note").
+        const ddAtt: Record<string, DrilldownRow[]> = {};
+        rows.forEach((r, i) => {
+          const key = r.rider_id || r.driver_code || "(tanpa rider)";
+          const rf = res.perRow[i];
+          if (!rf) return;
+          const note = r.is_absent ? "ABSEN" : r.is_late ? "LATE" : "ONTIME";
+          (ddAtt[key] ??= []).push({ date: r.log_date, note, fee: rf.fee });
+        });
+        setDrilldown(ddAtt);
       } else {
         // STEP 1: Fetch semua delivery_records di rentang tanggal & client ini (tanpa join riders)
         let q = supabase
@@ -228,6 +274,18 @@ function CalculatePage() {
         const res = calcScheme(scheme.params, rows);
         setResult(res);
         setRanScheme(scheme);
+
+        // Zip baris COMPLETED (urutan sama seperti dipakai calcScheme secara
+        // internal) dengan res.perRow buat dapetin km/kg per baris.
+        const completedDeliv = rows.filter((r) => isCompletedRow(r.status));
+        const ddDeliv: Record<string, DrilldownRow[]> = {};
+        completedDeliv.forEach((r, i) => {
+          const key = r.rider_id || r.driver_code || "(tanpa rider)";
+          const rf = res.perRow[i];
+          if (!rf) return;
+          (ddDeliv[key] ??= []).push({ date: r.delivery_date, km: r.distance_km, kg: r.weight_kg, fee: rf.fee });
+        });
+        setDrilldown(ddDeliv);
       }
       posthog.capture("fee_calculation_run", {
         category: scheme.category,
@@ -566,16 +624,35 @@ function CalculatePage() {
                   </tr>
                 ) : (
                   deliveryPager.paged.map((l) => (
-                    <tr key={l.rider} className="border-t border-border">
-                      <td className="p-3 font-medium">{riderNames[l.rider] ?? l.rider}</td>
-                      <td className="p-3 text-right text-muted-foreground">{l.units}</td>
-                      <td className="p-3 text-right">{formatRupiah(l.base)}</td>
-                      <td className="p-3 text-right">{l.add_kg ? formatRupiah(l.add_kg) : "—"}</td>
-                      <td className="p-3 text-right">
-                        {l.multi_drop ? formatRupiah(l.multi_drop) : "—"}
-                      </td>
-                      <td className="p-3 text-right font-semibold">{formatRupiah(l.total)}</td>
-                    </tr>
+                    <Fragment key={l.rider}>
+                      <tr className="border-t border-border">
+                        <td className="p-3 font-medium">
+                          <button
+                            onClick={() => setExpandedRider(expandedRider === l.rider ? null : l.rider)}
+                            className="flex items-center gap-1.5 text-left hover:text-primary"
+                          >
+                            <ChevronRight
+                              className={`w-3.5 h-3.5 flex-shrink-0 transition-transform ${expandedRider === l.rider ? "rotate-90" : ""}`}
+                            />
+                            {riderNames[l.rider] ?? l.rider}
+                          </button>
+                        </td>
+                        <td className="p-3 text-right text-muted-foreground">{l.units}</td>
+                        <td className="p-3 text-right">{formatRupiah(l.base)}</td>
+                        <td className="p-3 text-right">{l.add_kg ? formatRupiah(l.add_kg) : "—"}</td>
+                        <td className="p-3 text-right">
+                          {l.multi_drop ? formatRupiah(l.multi_drop) : "—"}
+                        </td>
+                        <td className="p-3 text-right font-semibold">{formatRupiah(l.total)}</td>
+                      </tr>
+                      {expandedRider === l.rider && (
+                        <tr className="bg-muted/30">
+                          <td colSpan={6} className="px-4 py-3">
+                            <RiderFeeDrilldown rows={drilldown[l.rider] ?? []} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))
                 )}
               </tbody>
@@ -751,17 +828,36 @@ function CalculatePage() {
                   </tr>
                 ) : (
                   combinedPager.paged.map((l) => (
-                    <tr key={l.rider} className="border-t border-border">
-                      <td className="p-3 font-medium">{riderNames[l.rider] ?? l.rider}</td>
-                      <td className="p-3 text-right text-muted-foreground">{l.daysWorked}</td>
-                      <td className="p-3 text-right text-muted-foreground">{l.units}</td>
-                      <td className="p-3 text-right">{formatRupiah(l.daily_base)}</td>
-                      <td className="p-3 text-right">
-                        {l.ontime_bonus ? formatRupiah(l.ontime_bonus) : "—"}
-                      </td>
-                      <td className="p-3 text-right">{formatRupiah(l.per_order)}</td>
-                      <td className="p-3 text-right font-semibold">{formatRupiah(l.total)}</td>
-                    </tr>
+                    <Fragment key={l.rider}>
+                      <tr className="border-t border-border">
+                        <td className="p-3 font-medium">
+                          <button
+                            onClick={() => setExpandedRider(expandedRider === l.rider ? null : l.rider)}
+                            className="flex items-center gap-1.5 text-left hover:text-primary"
+                          >
+                            <ChevronRight
+                              className={`w-3.5 h-3.5 flex-shrink-0 transition-transform ${expandedRider === l.rider ? "rotate-90" : ""}`}
+                            />
+                            {riderNames[l.rider] ?? l.rider}
+                          </button>
+                        </td>
+                        <td className="p-3 text-right text-muted-foreground">{l.daysWorked}</td>
+                        <td className="p-3 text-right text-muted-foreground">{l.units}</td>
+                        <td className="p-3 text-right">{formatRupiah(l.daily_base)}</td>
+                        <td className="p-3 text-right">
+                          {l.ontime_bonus ? formatRupiah(l.ontime_bonus) : "—"}
+                        </td>
+                        <td className="p-3 text-right">{formatRupiah(l.per_order)}</td>
+                        <td className="p-3 text-right font-semibold">{formatRupiah(l.total)}</td>
+                      </tr>
+                      {expandedRider === l.rider && (
+                        <tr className="bg-muted/30">
+                          <td colSpan={7} className="px-4 py-3">
+                            <RiderFeeDrilldown rows={drilldown[l.rider] ?? []} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))
                 )}
               </tbody>
@@ -881,25 +977,48 @@ function CalculatePage() {
                     </td>
                   </tr>
                 ) : (
-                  attPager.paged.map((l) => (
-                    <tr key={l.rider} className="border-t border-border">
-                      <td className="p-3 font-medium">{riderNames[l.rider] ?? l.rider}</td>
-                      <td className="p-3 text-right text-muted-foreground">{l.daysWorked}</td>
-                      <td className="p-3 text-right">{formatRupiah(l.base)}</td>
-                      <td className="p-3 text-right">
-                        {l.overtime ? formatRupiah(l.overtime) : "—"}
-                      </td>
-                      <td className="p-3 text-right">
-                        {l.incentive ? formatRupiah(l.incentive) : "—"}
-                      </td>
-                      {attResult.perRider.some((x) => x.delivery_component > 0) && (
-                        <td className="p-3 text-right">
-                          {l.delivery_component ? formatRupiah(l.delivery_component) : "—"}
-                        </td>
-                      )}
-                      <td className="p-3 text-right font-semibold">{formatRupiah(l.total)}</td>
-                    </tr>
-                  ))
+                  attPager.paged.map((l) => {
+                    const hasDelivComp = attResult.perRider.some((x) => x.delivery_component > 0);
+                    const colCount = hasDelivComp ? 7 : 6;
+                    return (
+                      <Fragment key={l.rider}>
+                        <tr className="border-t border-border">
+                          <td className="p-3 font-medium">
+                            <button
+                              onClick={() => setExpandedRider(expandedRider === l.rider ? null : l.rider)}
+                              className="flex items-center gap-1.5 text-left hover:text-primary"
+                            >
+                              <ChevronRight
+                                className={`w-3.5 h-3.5 flex-shrink-0 transition-transform ${expandedRider === l.rider ? "rotate-90" : ""}`}
+                              />
+                              {riderNames[l.rider] ?? l.rider}
+                            </button>
+                          </td>
+                          <td className="p-3 text-right text-muted-foreground">{l.daysWorked}</td>
+                          <td className="p-3 text-right">{formatRupiah(l.base)}</td>
+                          <td className="p-3 text-right">
+                            {l.overtime ? formatRupiah(l.overtime) : "—"}
+                          </td>
+                          <td className="p-3 text-right">
+                            {l.incentive ? formatRupiah(l.incentive) : "—"}
+                          </td>
+                          {hasDelivComp && (
+                            <td className="p-3 text-right">
+                              {l.delivery_component ? formatRupiah(l.delivery_component) : "—"}
+                            </td>
+                          )}
+                          <td className="p-3 text-right font-semibold">{formatRupiah(l.total)}</td>
+                        </tr>
+                        {expandedRider === l.rider && (
+                          <tr className="bg-muted/30">
+                            <td colSpan={colCount} className="px-4 py-3">
+                              <RiderFeeDrilldown rows={drilldown[l.rider] ?? []} />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })
                 )}
               </tbody>
             </table>

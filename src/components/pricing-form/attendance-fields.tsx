@@ -1,5 +1,4 @@
-// Kategori 2 — Per Kehadiran. Dipecah dari pricing-form.tsx per
-// docs/pricing-engine-v2-design.md §6.
+// Kategori 2 — Per Kehadiran. Dipecah dari pricing-form.tsx.
 // v2: delivery_component toggle menggantikan kategori "Kombinasi" lama.
 import { parseRupiah } from "@/lib/format";
 import { AddRowBtn, FieldLabel, RupiahInput, Td, TableShell, TextInput, Th, RowDeleteBtn, ToggleBlock } from "./shared";

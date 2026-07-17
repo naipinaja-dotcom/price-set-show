@@ -7,6 +7,7 @@ import { fetchAllRows } from "@/lib/fetch-all";
 import { listPricingSchemes } from "@/lib/pricing-store";
 import { describeScheme, type RateCard } from "@/lib/rate-card";
 import { downloadXLS, rateCardsToRows, type Cell } from "@/lib/finance-export";
+import { getClientExportTemplate, ALL_EXPORT_COLUMN_KEYS } from "@/lib/export-template";
 import { toast } from "sonner";
 import { Download, Loader2, ChevronRight, FileSpreadsheet, ChevronDown } from "lucide-react";
 import {
@@ -16,7 +17,7 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sb = supabase as any;
 
-export type Run = { id: string; name: string; period_start: string; period_end: string; status: string };
+export type Run = { id: string; name: string; period_start: string; period_end: string; status: string; client_id?: string | null };
 
 type DelivDetail = { date: string; km: number | null; kg: number | null; type: string | null; fee: number };
 type AttDetail = { date: string; clockIn: string | null; clockOut: string | null; dur: number | null; late: boolean; absent: boolean; fee: number };
@@ -48,6 +49,18 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showRates, setShowRates] = useState(true);
+  // Kolom Ringkasan yang enabled — dari client_export_templates kalau run
+  // ini di-scope ke 1 client (run.client_id), fallback semua kolom kalau
+  // run "semua client" atau client belum setup template. Lihat lib/export-template.ts.
+  const [enabledCols, setEnabledCols] = useState<Set<string>>(new Set(ALL_EXPORT_COLUMN_KEYS));
+
+  useEffect(() => {
+    if (run?.client_id) {
+      getClientExportTemplate(run.client_id).then((cols) => setEnabledCols(new Set(cols ?? ALL_EXPORT_COLUMN_KEYS)));
+    } else {
+      setEnabledCols(new Set(ALL_EXPORT_COLUMN_KEYS));
+    }
+  }, [run?.client_id]);
 
   useEffect(() => {
     if (!run) return;
@@ -155,10 +168,43 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
   }), { order: 0, fee: 0, total: 0, ded: {} as Record<string, number> }), [rows, dedTypes]);
 
   // ---- baris sheet ----
+  // Driver Name selalu tampil (identifier baris) — sisanya di-filter sesuai
+  // enabledCols (dari export template client, lihat useEffect di atas).
   const summaryRows = (): Cell[][] => {
-    const header: Cell[] = ["Driver Name", "Employee ID", "Client", "COUNTA of Order", "Fee Rider", "Active Date", ...dedTypes, "Total Fee Order", "Remarks"];
-    const body: Cell[][] = rows.map((r) => [r.name, r.employeeId, r.clientName, r.orderCount, r.feeRider, r.activeDates, ...dedTypes.map((ty) => r.ded[ty] ?? 0), r.total, r.remarks]);
-    const grand: Cell[] = ["GRAND TOTAL", "", "", t.order, t.fee, "", ...dedTypes.map((ty) => t.ded[ty] ?? 0), t.total, ""];
+    const c = enabledCols;
+    const header: Cell[] = ["Driver Name"];
+    if (c.has("employee_id")) header.push("Employee ID");
+    if (c.has("client")) header.push("Client");
+    if (c.has("order_count")) header.push("COUNTA of Order");
+    if (c.has("fee_rider")) header.push("Fee Rider");
+    if (c.has("active_date")) header.push("Active Date");
+    if (c.has("deductions")) header.push(...dedTypes);
+    if (c.has("total_fee")) header.push("Total Fee Order");
+    if (c.has("remarks")) header.push("Remarks");
+
+    const body: Cell[][] = rows.map((r) => {
+      const row: Cell[] = [r.name];
+      if (c.has("employee_id")) row.push(r.employeeId);
+      if (c.has("client")) row.push(r.clientName);
+      if (c.has("order_count")) row.push(r.orderCount);
+      if (c.has("fee_rider")) row.push(r.feeRider);
+      if (c.has("active_date")) row.push(r.activeDates);
+      if (c.has("deductions")) row.push(...dedTypes.map((ty) => r.ded[ty] ?? 0));
+      if (c.has("total_fee")) row.push(r.total);
+      if (c.has("remarks")) row.push(r.remarks);
+      return row;
+    });
+
+    const grand: Cell[] = ["GRAND TOTAL"];
+    if (c.has("employee_id")) grand.push("");
+    if (c.has("client")) grand.push("");
+    if (c.has("order_count")) grand.push(t.order);
+    if (c.has("fee_rider")) grand.push(t.fee);
+    if (c.has("active_date")) grand.push("");
+    if (c.has("deductions")) grand.push(...dedTypes.map((ty) => t.ded[ty] ?? 0));
+    if (c.has("total_fee")) grand.push(t.total);
+    if (c.has("remarks")) grand.push("");
+
     return [header, ...body, grand];
   };
   const detailRows = (): Cell[][] => {
@@ -185,6 +231,18 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
   const exportDetailCSV = () => downloadCSV(`detail-${run?.name ?? runId}.csv`, toCSV(detailRows()));
 
   const { pageSize, setPageSize, page, setPage, totalPages, paged, from, to, total } = usePagination(rows, 20);
+
+  // Jumlah kolom yang beneran tampil di tabel on-screen — dipakai buat
+  // colSpan baris kosong/drilldown, biar gak mismatch pas kolom di-toggle.
+  const visibleColCount =
+    1 + // Driver Name, selalu ada
+    (enabledCols.has("client") ? 1 : 0) +
+    (enabledCols.has("order_count") ? 1 : 0) +
+    (enabledCols.has("fee_rider") ? 1 : 0) +
+    (enabledCols.has("active_date") ? 1 : 0) +
+    (enabledCols.has("deductions") ? dedTypes.length : 0) +
+    (enabledCols.has("total_fee") ? 1 : 0) +
+    (enabledCols.has("remarks") ? 1 : 0);
 
   if (loading) return <Loader2 className="w-4 h-4 animate-spin" />;
 
@@ -263,17 +321,17 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
           <thead className="bg-muted text-left">
             <tr>
               <th className="p-2 sticky left-0 bg-muted">Driver Name</th>
-              <th className="px-3">Client</th>
-              <th className="text-right px-3">Order</th>
-              <th className="text-right px-3">Fee Rider</th>
-              <th className="text-right px-3">Active</th>
-              {dedTypes.map((ty) => <th key={ty} className="text-right px-3">{ty}</th>)}
-              <th className="text-right px-3">Total Fee</th>
-              <th className="px-3 min-w-[180px]">Remarks</th>
+              {enabledCols.has("client") && <th className="px-3">Client</th>}
+              {enabledCols.has("order_count") && <th className="text-right px-3">Order</th>}
+              {enabledCols.has("fee_rider") && <th className="text-right px-3">Fee Rider</th>}
+              {enabledCols.has("active_date") && <th className="text-right px-3">Active</th>}
+              {enabledCols.has("deductions") && dedTypes.map((ty) => <th key={ty} className="text-right px-3">{ty}</th>)}
+              {enabledCols.has("total_fee") && <th className="text-right px-3">Total Fee</th>}
+              {enabledCols.has("remarks") && <th className="px-3 min-w-[180px]">Remarks</th>}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? <tr><td colSpan={7 + dedTypes.length} className="p-6 text-center text-muted-foreground">Tidak ada data — pastikan payroll run ini sudah di-Generate.</td></tr> :
+            {rows.length === 0 ? <tr><td colSpan={visibleColCount} className="p-6 text-center text-muted-foreground">Tidak ada data — pastikan payroll run ini sudah di-Generate.</td></tr> :
               paged.map((r) => (
                 <Fragment key={r.detailId}>
                   <tr className="border-t border-border">
@@ -286,22 +344,24 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
                         </span>
                       </button>
                     </td>
-                    <td className="px-3 text-[13px] text-muted-foreground">{r.clientName}</td>
-                    <td className="text-right px-3 tabular-nums">{r.orderCount}</td>
-                    <td className="text-right px-3 tabular-nums">{rp(r.feeRider)}</td>
-                    <td className="text-right px-3 tabular-nums">{r.activeDates}</td>
-                    {dedTypes.map((ty) => (
+                    {enabledCols.has("client") && <td className="px-3 text-[13px] text-muted-foreground">{r.clientName}</td>}
+                    {enabledCols.has("order_count") && <td className="text-right px-3 tabular-nums">{r.orderCount}</td>}
+                    {enabledCols.has("fee_rider") && <td className="text-right px-3 tabular-nums">{rp(r.feeRider)}</td>}
+                    {enabledCols.has("active_date") && <td className="text-right px-3 tabular-nums">{r.activeDates}</td>}
+                    {enabledCols.has("deductions") && dedTypes.map((ty) => (
                       <td key={ty} className="text-right px-3 tabular-nums text-destructive">{r.ded[ty] ? rp(r.ded[ty]) : "—"}</td>
                     ))}
-                    <td className="text-right px-3 font-semibold tabular-nums">{rp(r.total)}</td>
-                    <td className="px-2">
-                      <input defaultValue={r.remarks} onBlur={(e) => { if (e.target.value !== r.remarks) saveRemark(r.detailId, e.target.value); }}
-                        placeholder="catatan…" className="w-full min-w-[160px] rounded border border-border bg-background px-2 py-1 text-xs" />
-                    </td>
+                    {enabledCols.has("total_fee") && <td className="text-right px-3 font-semibold tabular-nums">{rp(r.total)}</td>}
+                    {enabledCols.has("remarks") && (
+                      <td className="px-2">
+                        <input defaultValue={r.remarks} onBlur={(e) => { if (e.target.value !== r.remarks) saveRemark(r.detailId, e.target.value); }}
+                          placeholder="catatan…" className="w-full min-w-[160px] rounded border border-border bg-background px-2 py-1 text-xs" />
+                      </td>
+                    )}
                   </tr>
                   {expanded === r.detailId && (
                     <tr className="bg-muted/30">
-                      <td colSpan={7 + dedTypes.length} className="px-4 py-3">
+                      <td colSpan={visibleColCount} className="px-4 py-3">
                         <RiderDetail r={r} />
                       </td>
                     </tr>
@@ -313,12 +373,13 @@ export function FinanceWorksheet({ runId, run }: { runId: string; run?: Run }) {
             <tfoot className="bg-muted font-semibold">
               <tr>
                 <td className="p-2 sticky left-0 bg-muted">GRAND TOTAL</td>
-                <td className="text-right px-3 tabular-nums">{t.order}</td>
-                <td className="text-right px-3 tabular-nums">{rp(t.fee)}</td>
-                <td className="text-right px-3">—</td>
-                {dedTypes.map((ty) => <td key={ty} className="text-right px-3 tabular-nums">{rp(t.ded[ty] ?? 0)}</td>)}
-                <td className="text-right px-3 tabular-nums">{rp(t.total)}</td>
-                <td></td>
+                {enabledCols.has("client") && <td></td>}
+                {enabledCols.has("order_count") && <td className="text-right px-3 tabular-nums">{t.order}</td>}
+                {enabledCols.has("fee_rider") && <td className="text-right px-3 tabular-nums">{rp(t.fee)}</td>}
+                {enabledCols.has("active_date") && <td className="text-right px-3">—</td>}
+                {enabledCols.has("deductions") && dedTypes.map((ty) => <td key={ty} className="text-right px-3 tabular-nums">{rp(t.ded[ty] ?? 0)}</td>)}
+                {enabledCols.has("total_fee") && <td className="text-right px-3 tabular-nums">{rp(t.total)}</td>}
+                {enabledCols.has("remarks") && <td></td>}
               </tr>
             </tfoot>
           )}

@@ -5,7 +5,7 @@
 //  - rekap PER RIDER (buat preview)
 // Bisa dites terpisah dengan data contoh.
 // =========================================================
-import type { PricingEnvelope, StepTier } from "./pricing-types";
+import type { PricingEnvelope, StepTier, RangeRow, RangeDimensionConfig, ModularDeliveryConfig } from "./pricing-types";
 
 // Bentuk baris data pengiriman (mengikuti tabel delivery_records)
 export interface DeliveryRow {
@@ -130,7 +130,7 @@ function allocInt(total: number, weights: number[]): number[] {
 // ---------------- pure components (Kategori 1 — Per Pengiriman) ----------------
 // Terima baris (index-aligned dengan output), kembaliin FEE PER BARIS.
 // Murni: tanpa skip/anomaly/modifier logic — itu tetap tanggung jawab
-// wrapper (calcScheme). Lihat docs/pricing-engine-v2-design.md §5.
+// wrapper (calcScheme).
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function calcFlatComponent(rows: DeliveryRow[], cfg: any): number[] {
@@ -165,7 +165,6 @@ export function calcFlatComponent(rows: DeliveryRow[], cfg: any): number[] {
 // `accumulate: "per_order"` = tarif tier dihitung per baris (dulunya `tier`).
 // `accumulate: "daily"` = jarak/berat 1 rider 1 hari dijumlah dulu, baru
 // dihitung tarifnya lalu dialokasikan ke tiap baris hari itu (dulunya `tier_daily`).
-// Keputusan konsolidasi: docs/pricing-engine-v2-design.md §3 & §9.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function calcTierComponent(rows: DeliveryRow[], cfg: any, accumulate: "daily" | "per_order" = "per_order"): number[] {
   const out = new Array(rows.length).fill(0);
@@ -220,6 +219,108 @@ export function calcThresholdComponent(rows: DeliveryRow[], cfg: any): number[] 
   return out;
 }
 
+// ---------------- Modular v2 (Distance/Weight, band-independent lookup) ----------------
+// Beda dari `stepTierFee` (yang cumulative, akumulasi lewat semua band dari
+// bawah): di sini value dicari masuk band [from,to) MANA, lalu dihitung
+// base_fee (+ step kalau tipe "tier") BAND ITU SAJA — band lain diabaikan
+// total. Cocok buat rate-card ala kurir (tiap zona jarak punya tarif
+// sendiri, bukan akumulasi).
+export function bandLookupFee(rows: RangeRow[], value: number): { fee: number; band: RangeRow | null } {
+  const v = Number(value) || 0;
+  for (const band of rows) {
+    const lo = Number(band.from) || 0;
+    const hi = band.to === null || band.to === undefined ? Infinity : Number(band.to);
+    if (v >= lo && v < hi) {
+      if (band.type === "flat") return { fee: Number(band.base_fee) || 0, band };
+      const step = Number(band.step) || 1;
+      const addPerStep = Number(band.add_per_step) || 0;
+      const span = v - lo;
+      return { fee: (Number(band.base_fee) || 0) + Math.ceil(span / step) * addPerStep, band };
+    }
+  }
+  return { fee: 0, band: null };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function calcRangeComponent(
+  rows: DeliveryRow[],
+  dimCfg: RangeDimensionConfig,
+  valueOf: (r: DeliveryRow) => number,
+  rateSettings: { rate_by: "flat" | "column" | "delivery_type"; match_column: string; rates: { key: string; rate: number }[] },
+): number[] {
+  const out = new Array(rows.length).fill(0);
+  const idxOf = new Map<DeliveryRow, number>();
+  rows.forEach((r, i) => idxOf.set(r, i));
+
+  // Baris bertipe "flat" bisa punya override rate per-kolom/delivery-return
+  // (menggantikan konsep "Flat per Unit" lama) — kalau rate_by="flat" atau
+  // gak ada rule yang cocok, fallback ke base_fee band itu.
+  const flatFee = (r: DeliveryRow, band: RangeRow): number => {
+    if (rateSettings.rate_by === "flat") return Number(band.base_fee) || 0;
+    const colName = rateSettings.rate_by === "delivery_type" ? "delivery type" : rateSettings.match_column;
+    const fieldVal = resolveField(r, colName);
+    const hit = rateSettings.rates.find((x) => norm(x.key) === norm(fieldVal));
+    return hit ? Number(hit.rate) || 0 : Number(band.base_fee) || 0;
+  };
+
+  if (dimCfg.accumulate === "per_order") {
+    rows.forEach((r) => {
+      const { fee, band } = bandLookupFee(dimCfg.rows, valueOf(r));
+      out[idxOf.get(r)!] = band && band.type === "flat" ? flatFee(r, band) : fee;
+    });
+    return out;
+  }
+
+  // accumulate === "daily": jumlahin value (km/kg) 1 rider 1 hari dulu, band
+  // lookup SEKALI buat hari itu, baru dialokasikan proporsional ke tiap baris
+  // (rate-per-kolom override tidak berlaku di mode ini — nilainya udah gabungan).
+  const byRider = groupBy(rows, riderKey);
+  for (const [, rrows] of byRider) {
+    const byDay = groupBy(rrows, (r) => r.delivery_date);
+    for (const [, drows] of byDay) {
+      const sumVal = drows.reduce((s, r) => s + (valueOf(r) || 0), 0);
+      const { fee: dayFee } = bandLookupFee(dimCfg.rows, sumVal);
+      const weights = drows.map((r) => valueOf(r) || 0);
+      const parts = allocInt(dayFee, weights);
+      drows.forEach((r, i) => (out[idxOf.get(r)!] = parts[i]));
+    }
+  }
+  return out;
+}
+
+/** Gabungan Distance + Weight (sum) — pengganti calcFlatComponent/calcTierComponent/
+ * calcThresholdComponent untuk skema baru (`env.type === "modular_v2"`). Skema lama
+ * tetap dihitung lewat 3 fungsi component di atas, tidak disentuh. */
+export function calcModularDeliveryComponent(rows: DeliveryRow[], cfg: ModularDeliveryConfig): number[] {
+  const out = new Array(rows.length).fill(0);
+  const rateSettings = { rate_by: cfg.rate_by, match_column: cfg.match_column, rates: cfg.rates ?? [] };
+
+  if (cfg.distance?.enabled) {
+    calcRangeComponent(rows, cfg.distance, (r) => Number(r.distance_km) || 0, rateSettings).forEach(
+      (f, i) => (out[i] += f),
+    );
+  }
+
+  if (cfg.weight?.enabled) {
+    if (cfg.weight.mode === "threshold_group" && cfg.weight.threshold) {
+      const th = cfg.weight.threshold;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const thCfg: any = {
+        group_by: th.group_by,
+        default: { threshold: th.default_threshold, rate: th.default_rate },
+        rules: th.rules,
+      };
+      calcThresholdComponent(rows, thCfg).forEach((f, i) => (out[i] += f));
+    } else {
+      calcRangeComponent(rows, cfg.weight, (r) => Number(r.weight_kg) || 0, rateSettings).forEach(
+        (f, i) => (out[i] += f),
+      );
+    }
+  }
+
+  return out;
+}
+
 // ---------------- main ----------------
 export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResult {
   const warnings: string[] = [];
@@ -255,6 +356,8 @@ export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResul
     baseByRow = calcTierComponent(completed, cfg, "daily");
   } else if (env.type === "threshold_multiple") {
     baseByRow = calcThresholdComponent(completed, cfg);
+  } else if (env.type === "modular_v2") {
+    baseByRow = calcModularDeliveryComponent(completed, cfg as ModularDeliveryConfig);
   } else {
     baseByRow = new Array(completed.length).fill(0);
   }
@@ -291,7 +394,10 @@ export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResul
   }));
 
   // ---- deteksi anomali sederhana — jangan gagalin komputasi, cuma diflag ----
-  const dependsOnWeight = !!env.add_kg || (["tier", "tier_daily"].includes(env.type) && !!cfg?.weight);
+  const dependsOnWeight =
+    !!env.add_kg ||
+    (["tier", "tier_daily"].includes(env.type) && !!cfg?.weight) ||
+    (env.type === "modular_v2" && !!(cfg as ModularDeliveryConfig)?.weight?.enabled);
   const anomalies: RowAnomaly[] = [];
   completed.forEach((r, i) => {
     const fee = perRow[i].fee;
@@ -506,7 +612,6 @@ export function calcAttendanceComponent(logs: AttendanceLogRow[], cfg: any): Att
 // ada. Bukan engine baru — cuma pemanggil component + alokasi.
 // Dulunya `calcCombinedScheme()` (reimplementasi ulang rumus proporsi jam +
 // tier per-order); sekarang reuse calcTierComponent()/calcAttendanceComponent().
-// docs/pricing-engine-v2-design.md §3, §5.
 // =========================================================
 export function calcHybridScheme(
   env: PricingEnvelope,

@@ -11,7 +11,7 @@ import { FinanceWorksheet } from "@/components/finance-worksheet";
 
 export const Route = createFileRoute("/admin/reports")({ component: ReportsPage });
 
-type Run = { id: string; name: string; period_start: string; period_end: string; status: string };
+type Run = { id: string; name: string; period_start: string; period_end: string; status: string; client_id: string | null };
 
 function ReportsPage() {
   const [runs, setRuns] = useState<Run[]>([]);
@@ -19,8 +19,12 @@ function ReportsPage() {
   const [mode, setMode] = useState<"client" | "rider">("rider");
 
   useEffect(() => {
-    supabase.from("payroll_runs").select("id, name, period_start, period_end, status")
-      .order("created_at", { ascending: false }).then(({ data }) => {
+    // client_id dipakai finance-worksheet.tsx buat nentuin export template
+    // mana yang berlaku (lihat src/lib/export-template.ts) — kolom ini belum
+    // ada di types.ts generated Supabase (ditambah via migration terpisah,
+    // sama pola kayak pricing_schemes), jadi cast `as any` di select-nya.
+    (supabase as any).from("payroll_runs").select("id, name, period_start, period_end, status, client_id")
+      .order("created_at", { ascending: false }).then(({ data }: { data: Run[] | null }) => {
         setRuns(data ?? []); if (data?.length) setRunId(data[0].id);
       });
   }, []);

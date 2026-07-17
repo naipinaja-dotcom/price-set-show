@@ -2,7 +2,7 @@
 // dipakai di halaman Reports (tampil ke Finance) + ikut di-export.
 // Dirender JUJUR sesuai yang tersimpan di scheme, jadi angkanya = angka yang
 // beneran dipakai engine ngitung fee. Tidak ada input manual di sini.
-import type { PricingScheme, PricingEnvelope, StepTier } from "./pricing-types";
+import type { PricingScheme, PricingEnvelope, StepTier, RangeRow, ModularDeliveryConfig } from "./pricing-types";
 
 export interface RateRow {
   variable: string;
@@ -31,6 +31,7 @@ const CALC_LABEL: Record<PricingEnvelope["type"], string> = {
   tier: "Tier Jarak & Berat",
   tier_daily: "Akumulasi Harian",
   threshold_multiple: "Threshold Kelipatan",
+  modular_v2: "Distance / Weight",
   attendance: "Daily / Attendance",
   combined: "Combined (Daily + Per Order)",
 };
@@ -58,6 +59,23 @@ function stepTierRows(tier: StepTier | null | undefined, unit: string): RateRow[
     });
   }
   return rows;
+}
+
+// RangeRow[] (band-independent, dipakai skema modular_v2) → baris yang kebaca.
+function rangeRowsToRateRows(rows: RangeRow[], unit: string): RateRow[] {
+  return rows.map((r) => {
+    const variable = r.to === null ? `> ${num(r.from)} ${unit}` : `${num(r.from)} – ${num(r.to)} ${unit}`;
+    if (r.type === "flat") {
+      return { variable, rate: rp(r.base_fee), unit: "flat", remarks: "" };
+    }
+    const step = r.step || 1;
+    return {
+      variable,
+      rate: `${rp(r.base_fee)} +${rp(r.add_per_step)}`,
+      unit: step === 1 ? `per ${unit}` : `per ${num(step)} ${unit}`,
+      remarks: "Base + kelipatan step dari awal band",
+    };
+  });
 }
 
 // Modifier universal (add_kg / multi_drop / billing) → section tambahan.
@@ -116,6 +134,39 @@ export function describeScheme(scheme: PricingScheme): RateCard {
       const note = env.type === "tier_daily" ? " (akumulasi 1 hari dijumlah dulu)" : "";
       if (cfg.distance) sections.push({ title: "Tarif jarak" + note, rows: stepTierRows(cfg.distance, "km") });
       if (cfg.weight) sections.push({ title: "Tarif berat" + note, rows: stepTierRows(cfg.weight, "kg") });
+      break;
+    }
+    case "modular_v2": {
+      const mcfg: ModularDeliveryConfig = cfg;
+      if (mcfg.distance?.enabled) {
+        const note = mcfg.distance.accumulate === "daily" ? " (akumulasi 1 hari dijumlah dulu)" : "";
+        sections.push({ title: "Tarif jarak" + note, rows: rangeRowsToRateRows(mcfg.distance.rows, "km") });
+      }
+      if (mcfg.weight?.enabled) {
+        if (mcfg.weight.mode === "threshold_group" && mcfg.weight.threshold) {
+          const th = mcfg.weight.threshold;
+          const rows: RateRow[] = (th.rules || []).map((x) => ({
+            variable: String(x.key), rate: rp(x.rate), unit: `tiap kelipatan ${num(x.threshold)} kg`, remarks: "",
+          }));
+          rows.push({
+            variable: "(lainnya / default)",
+            rate: rp(th.default_rate),
+            unit: `tiap kelipatan ${num(th.default_threshold)} kg`,
+            remarks: `Grup: ${th.group_by ?? "-"}`,
+          });
+          sections.push({ title: "Tarif berat — Kelipatan per Store", rows });
+        } else {
+          const note = mcfg.weight.accumulate === "daily" ? " (akumulasi 1 hari dijumlah dulu)" : "";
+          sections.push({ title: "Tarif berat" + note, rows: rangeRowsToRateRows(mcfg.weight.rows, "kg") });
+        }
+      }
+      if (mcfg.rate_by !== "flat") {
+        const label = mcfg.rate_by === "delivery_type" ? "Antar / Kembali" : (mcfg.match_column || "kolom");
+        const rows: RateRow[] = (mcfg.rates || []).map((x) => ({
+          variable: String(x.key), rate: rp(x.rate), unit: "override baris Flat", remarks: "",
+        }));
+        sections.push({ title: `Override tarif per ${label} (baris Flat)`, rows });
+      }
       break;
     }
     case "threshold_multiple": {

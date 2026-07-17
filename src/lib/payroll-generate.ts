@@ -89,8 +89,12 @@ export async function generatePayrollDetails(run: PayrollRunLite): Promise<{ det
     const totalDed = installTotal + autoTotal;
     const net = Math.max(0, gross - totalDed);
     const detailId = crypto.randomUUID();
+    // Prioritaskan client dari run (deliveries/attendance di atas udah
+    // di-filter pakai run.client_id, jadi itu client yang BENERAN dihitung
+    // periode ini) — fallback ke rider.client_id cuma buat run "Semua Client"
+    // (run.client_id null) biar tetep ada label, bukan kosong.
     detailsToInsert.push({
-      id: detailId, run_id: run.id, rider_id: rider.id, client_id: rider.client_id,
+      id: detailId, run_id: run.id, rider_id: rider.id, client_id: run.client_id ?? rider.client_id,
       delivery_count: deliveryCount, delivery_fee: deliveryFee,
       attendance_fee: attendanceFee, incentive: incentiveTotal, penalty,
       gross_earning: gross, total_deduction: totalDed, net_pay: net,

@@ -1,6 +1,6 @@
 // Sub-form: komponen per kiriman di dalam skema Per Kehadiran.
 // Menggantikan kategori "Kombinasi" lama — semua method valid (flat/tier/threshold),
-// bukan cuma tier. Lihat docs/pricing-engine-v2-design.md §3 Insight 3.
+// bukan cuma tier.
 import { parseRupiah } from "@/lib/format";
 import {
   AddRowBtn, FieldLabel, RupiahInput, StepTierEditor, Td, TableShell,

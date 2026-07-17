@@ -1,6 +1,6 @@
 // Atom & helper generik dipakai bareng oleh delivery-fields.tsx,
 // attendance-fields.tsx, interactive-calc.tsx, dan shell (pricing-form.tsx).
-// Dipecah dari pricing-form.tsx per docs/pricing-engine-v2-design.md §6.
+// Dipecah dari pricing-form.tsx biar reusable antar sub-form.
 import type { StepTier } from "@/lib/pricing-types";
 import { formatRupiah, parseRupiah } from "@/lib/format";
 import { Plus, Trash2 } from "lucide-react";
