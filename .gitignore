@@ -25,6 +25,11 @@ dist-ssr
 .env
 .env.*
 
+# Export dokumen (docx/pdf) hasil convert dari .md — jangan ke-commit,
+# duplikat biner yang gampang basi. .md di /docs tetap source of truth.
+*.docx
+*.pdf
+
 # Test output (generated)
 coverage
 playwright-report
