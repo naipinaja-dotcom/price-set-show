@@ -1,0 +1,52 @@
+-- COO Insight Agents (Hermes/OpenRouter) — pg_cron scheduling
+--
+-- Ini BUKAN migration otomatis seperti file lain di folder ini. Isinya sengaja
+-- di-comment out karena butuh 2 nilai yang cuma diketahui pas deploy:
+--   1. URL production project ini (mis. https://xxxx.vercel.app)
+--   2. Isi env COO_INSIGHT_SECRET yang sama persis dengan yang di-set di server
+--
+-- Cara aktivasi (jalankan manual di Supabase SQL Editor, BUKAN lewat migration
+-- runner otomatis):
+--   1. Buka Supabase Dashboard -> Database -> Extensions -> aktifkan
+--      "pg_cron" dan "pg_net" kalau belum aktif (kemungkinan sudah aktif dari
+--      setup Weekly PNL Push / Payroll Reminder).
+--   2. Copy blok SQL di bawah, ganti dua placeholder:
+--        <PRODUCTION_URL>      -> domain production (tanpa trailing slash)
+--        <COO_INSIGHT_SECRET>  -> isi env COO_INSIGHT_SECRET
+--   3. Pastikan env berikut sudah di-set di server (Vercel) SEBELUM cron ini
+--      jalan, kalau tidak endpoint akan error terus tiap minggu:
+--        OPENROUTER_API_KEY   -> API key dari openrouter.ai/keys
+--        HERMES_MODEL         -> opsional, default nousresearch/hermes-3-llama-3.1-405b
+--        COO_INSIGHT_SECRET   -> string rahasia bebas (harus sama dgn placeholder di atas)
+--   4. Jalankan di SQL Editor. Sekali jalan, cron langsung terjadwal —
+--      tidak perlu diulang tiap deploy.
+--   5. Cek jadwal aktif: SELECT * FROM cron.job;
+--   6. Cek histori run & response: SELECT * FROM cron.job_run_details
+--      ORDER BY start_time DESC LIMIT 10;
+--
+-- Jadwal di bawah: setiap Senin jam 07:15 WIB (00:15 UTC) — SENGAJA 15 menit
+-- SETELAH cron 'weekly-pnl-push' (00:00 UTC), biar snapshot pnl_weekly_snapshots
+-- minggu ini sudah pasti ke-generate duluan sebelum COO Insight menganalisisnya.
+-- Format cron: menit jam tanggal bulan hari-minggu (semua dalam UTC).
+
+-- create extension if not exists pg_cron;
+-- create extension if not exists pg_net;
+--
+-- select cron.schedule(
+--   'weekly-coo-insight',
+--   '15 0 * * 1', -- tiap Senin 00:15 UTC (07:15 WIB)
+--   $$
+--   select net.http_post(
+--     url := '<PRODUCTION_URL>/api/coo-insight',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'x-coo-insight-secret', '<COO_INSIGHT_SECRET>'
+--     ),
+--     body := '{}'::jsonb
+--   );
+--   $$
+-- );
+
+-- Untuk ganti jadwal atau matikan cron:
+--   select cron.unschedule('weekly-coo-insight');
+--   -- lalu jalankan ulang cron.schedule(...) di atas dengan jadwal baru.
