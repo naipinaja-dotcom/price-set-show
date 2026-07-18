@@ -65,7 +65,7 @@ const NAV_INTELLIGENCE = [
     icon: LayoutPanelTop,
     section: "OVERVIEW",
   },
-  { to: "/admin/coo-insights", label: "COO Insights", icon: Sparkles, section: "OVERVIEW" },
+  { to: "/admin/coo-insights", label: "Ops Insight", icon: Sparkles, section: "OVERVIEW" },
   { to: "/admin/pnl", label: "Margin Analytics", icon: TrendingUp, section: "ANALYTICS" },
   {
     to: "/admin/revenue-analytics",

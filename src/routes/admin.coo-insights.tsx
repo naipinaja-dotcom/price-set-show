@@ -109,7 +109,7 @@ function CooInsightsPage() {
     setGenerating(true);
     try {
       await triggerCooInsightManual({ data: { adminToken: session.access_token, ...week } });
-      toast.success("Laporan COO Insight berhasil dibuat");
+      toast.success("Laporan Ops Insight berhasil dibuat");
       await loadReports();
     } catch (e) {
       toast.error((e as Error).message);
@@ -132,7 +132,7 @@ function CooInsightsPage() {
 
   return (
     <AdminLayout
-      title="COO Insights"
+      title="Ops Insight"
       subtitle="Analisis P&L mingguan otomatis (Worker → Lead → Manager → COO)"
     >
       {/* Week selector */}
@@ -220,7 +220,7 @@ function CooInsightsPage() {
 
           {!report ? (
             <div className="rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground">
-              Belum ada laporan COO Insight untuk minggu ini. Pastikan Weekly PNL Push sudah jalan
+              Belum ada laporan Ops Insight untuk minggu ini. Pastikan Weekly PNL Push sudah jalan
               buat minggu ini, lalu klik "Generate Sekarang".
             </div>
           ) : (
