@@ -49,8 +49,11 @@ export function getServerConfig() {
     // lihat src/lib/agents/hermes-client.server.ts). openRouterApiKey dari
     // openrouter.ai/keys. cooInsightSecret sama polanya dengan pnlPushSecret,
     // header `x-coo-insight-secret` buat endpoint cron api/coo-insight.
-    openRouterApiKey: process.env.OPENROUTER_API_KEY,
-    hermesModel: process.env.HERMES_MODEL || "nousresearch/hermes-3-llama-3.1-405b",
-    cooInsightSecret: process.env.COO_INSIGHT_SECRET,
+    // .trim() — copy-paste dari terminal/markdown sering nyelipin trailing
+    // newline/space yang bikin OpenRouter selalu bilang "Invalid API key"
+    // walau key-nya sendiri valid.
+    openRouterApiKey: process.env.OPENROUTER_API_KEY?.trim(),
+    hermesModel: (process.env.HERMES_MODEL || "nousresearch/hermes-3-llama-3.1-405b").trim(),
+    cooInsightSecret: process.env.COO_INSIGHT_SECRET?.trim(),
   };
 }
