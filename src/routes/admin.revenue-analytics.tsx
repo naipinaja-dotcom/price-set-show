@@ -5,7 +5,7 @@ import { AdminLayout } from "@/components/admin-layout";
 import { fetchAllRows } from "@/lib/fetch-all";
 import { listPricingSchemes } from "@/lib/pricing-store";
 import type { PricingScheme } from "@/lib/pricing-types";
-import type { DeliveryRow } from "@/lib/pricing-calc";
+import type { DeliveryRow, AttendanceLogRow } from "@/lib/pricing-calc";
 import { computePnl, buildTrend, type ClientPnl, type ClientLite } from "@/lib/pnl-engine";
 import { formatRupiah } from "@/lib/format";
 import { useIntelligenceDate } from "@/lib/use-intelligence-date";
@@ -47,12 +47,19 @@ function RevenueAnalyticsPage() {
     setRunning(true);
     setPerClient(null);
     try {
-      const data = await fetchAllRows<DeliveryRow & { client_id: string | null }>((c, f, t) =>
-        c.from("delivery_records")
-          .select("client_id, rider_id, driver_code, delivery_date, district, distance_km, weight_kg, destination_address, service_type, status, delivery_type")
-          .gte("delivery_date", from).lte("delivery_date", to).range(f, t)
-      );
-      const { perClient: pc } = computePnl(data, schemes, clients);
+      const [data, attData] = await Promise.all([
+        fetchAllRows<DeliveryRow & { client_id: string | null }>((c, f, t) =>
+          c.from("delivery_records")
+            .select("client_id, rider_id, driver_code, delivery_date, district, distance_km, weight_kg, destination_address, service_type, status, delivery_type")
+            .gte("delivery_date", from).lte("delivery_date", to).range(f, t)
+        ),
+        fetchAllRows<AttendanceLogRow & { client_name: string | null }>((c, f, t) =>
+          (c as any).from("attendance_logs")
+            .select("rider_id, driver_code, client_name, log_date, clock_in, duration_minutes, is_late, is_absent")
+            .gte("log_date", from).lte("log_date", to).range(f, t)
+        ),
+      ]);
+      const { perClient: pc } = computePnl(data, schemes, clients, attData);
       setPerClient(pc);
       if (pc.length === 0) toast.message("Tidak ada data pengiriman di rentang ini.");
     } catch (e) {

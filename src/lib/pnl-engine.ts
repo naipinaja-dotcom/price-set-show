@@ -1,13 +1,22 @@
 // =========================================================
 // PnL Engine (murni, tanpa DB/UI) — dipakai bersama oleh halaman
 // Margin Analytics (admin.pnl.tsx) & Executive Dashboard.
-// Pilih skema rider/client per client, jalanin calcScheme dua sisi,
-// keluarin ringkasan per client + rincian per-baris (buat trend harian).
+// Pilih skema rider/client per client, dispatch ke engine yang sesuai
+// KATEGORI skema-nya (delivery/attendance/hybrid — sebelumnya SELALU
+// calcScheme, jadi client yang skema aktifnya "Per Kehadiran" gak pernah
+// kehitung; kalau client itu juga gak punya delivery_records sama sekali
+// — mis. Alfagift, murni attendance — dia malah gak pernah MUNCUL di
+// perClient sama sekali, karena grouping dulu cuma dari delivery_records).
 // =========================================================
-import { calcScheme, type DeliveryRow, type RowFee } from "./pricing-calc";
+import { calcScheme, calcAttendanceScheme, calcHybridScheme, type DeliveryRow, type AttendanceLogRow } from "./pricing-calc";
 import type { PricingScheme, SchemeFor } from "./pricing-types";
 
 export type ClientLite = { id: string; name: string };
+
+// attendance_logs gak punya kolom client_id (cuma client_name teks bebas,
+// beda dari delivery_records yang punya FK client_id) — jadi client-nya
+// di-resolve lewat pencocokan nama ke clients.name di bawah.
+export type AttendanceLogWithClientName = AttendanceLogRow & { client_name: string | null };
 
 export interface ClientPnl {
   clientId: string;
@@ -16,8 +25,8 @@ export interface ClientPnl {
   cost: number;
   margin: number | null;
   marginPct: number | null;
-  costRows: RowFee[];
-  revenueRows: RowFee[];
+  costRows: { date: string; fee: number }[];
+  revenueRows: { date: string; fee: number }[];
 }
 
 export interface PnlResult {
@@ -50,10 +59,36 @@ export function pickPricingScheme(schemes: PricingScheme[], clientId: string, ki
   })[0];
 }
 
+const normName = (s: string | null | undefined) => String(s ?? "").trim().toLowerCase();
+
+// Dispatch ke engine yang sesuai kategori skema — inilah fix-nya: sebelumnya
+// SELALU calcScheme (engine delivery), yang balikin subtotal 0 buat
+// env.type "attendance"/"combined" (calcScheme gak punya case buat itu,
+// jatuh ke default array-of-0). grandTotal dipakai (bukan subtotal) karena
+// sekarang billing_addons diterapin di ketiga engine (lihat pricing-calc.ts).
+function calcForScheme(
+  scheme: PricingScheme | undefined,
+  crows: DeliveryRow[],
+  cattendance: AttendanceLogWithClientName[],
+): { grandTotal: number; perRow: { date: string; fee: number }[] } | null {
+  if (!scheme) return null;
+  if (scheme.category === "attendance") {
+    const r = calcAttendanceScheme(scheme.params, cattendance, crows);
+    return { grandTotal: r.grandTotal, perRow: r.perRow.map((x) => ({ date: x.date, fee: x.fee })) };
+  }
+  if (scheme.category === "hybrid") {
+    const r = calcHybridScheme(scheme.params, crows, cattendance);
+    return { grandTotal: r.grandTotal, perRow: r.perRow.map((x) => ({ date: x.date, fee: x.fee })) };
+  }
+  const r = calcScheme(scheme.params, crows);
+  return { grandTotal: r.grandTotal, perRow: r.perRow.map((x) => ({ date: x.date, fee: x.fee })) };
+}
+
 export function computePnl(
   rows: (DeliveryRow & { client_id: string | null })[],
   schemes: PricingScheme[],
-  clients: ClientLite[]
+  clients: ClientLite[],
+  attendanceRows: AttendanceLogWithClientName[] = [],
 ): PnlResult {
   const byClient = new Map<string, DeliveryRow[]>();
   for (const r of rows) {
@@ -61,15 +96,29 @@ export function computePnl(
     (byClient.get(cid) ?? byClient.set(cid, []).get(cid)!).push(r);
   }
 
+  const clientIdByName = new Map(clients.map((c) => [normName(c.name), c.id]));
+  const attByClient = new Map<string, AttendanceLogWithClientName[]>();
+  for (const r of attendanceRows) {
+    const cid = clientIdByName.get(normName(r.client_name)) ?? "(tanpa client)";
+    (attByClient.get(cid) ?? attByClient.set(cid, []).get(cid)!).push(r);
+  }
+
+  // Union client dari 2 sumber — client yang MURNI attendance (nol
+  // delivery_records, mis. Alfagift) sebelumnya gak pernah masuk sini sama
+  // sekali karena cuma delivery_records yang di-grouping.
+  const allClientIds = new Set([...byClient.keys(), ...attByClient.keys()]);
+
   const nameOf = new Map(clients.map((c) => [c.id, c.name]));
   const perClient: ClientPnl[] = [];
-  for (const [cid, crows] of byClient) {
+  for (const cid of allClientIds) {
+    const crows = byClient.get(cid) ?? [];
+    const cattendance = attByClient.get(cid) ?? [];
     const riderS = pickPricingScheme(schemes, cid, "rider");
     const clientS = pickPricingScheme(schemes, cid, "client");
-    const costResult = riderS ? calcScheme(riderS.params, crows) : null;
-    const revResult = clientS ? calcScheme(clientS.params, crows) : null;
-    const cost = costResult?.subtotal ?? 0;
-    const revenue = revResult ? revResult.subtotal : null;
+    const costResult = calcForScheme(riderS, crows, cattendance);
+    const revResult = calcForScheme(clientS, crows, cattendance);
+    const cost = costResult?.grandTotal ?? 0;
+    const revenue = revResult ? revResult.grandTotal : null;
     const margin = revenue === null ? null : revenue - cost;
     const marginPct = revenue && revenue > 0 && margin !== null ? (margin / revenue) * 100 : null;
     perClient.push({

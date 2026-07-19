@@ -15,8 +15,11 @@ export interface MockClient {
 
 const SELECT_COLS = "id, name, client_id, scheme_for, calc_type, effective_from, effective_to, params, created_at, clients(name)";
 
+// Exported buat caller server-only yang query pricing_schemes langsung lewat
+// admin client (mis. pnl-weekly-push.server.ts) — supaya category/subtype
+// ke-derive dari calc_type juga di sana, bukan cuma di listPricingSchemes().
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalize(r: any): PricingScheme {
+export function normalize(r: any): PricingScheme {
   // Kolom fisik tabel masih `calc_type` (belum dimigrasi) — di-mapping ke
   // category/subtype di boundary ini supaya sisa aplikasi pakai taksonomi baru.
   let { category, subtype } = calcTypeToCategory(r.calc_type);

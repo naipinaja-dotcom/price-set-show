@@ -5,8 +5,9 @@
 import { getSupabaseAdmin } from "./supabase-admin.server";
 import { getServerConfig } from "./config.server";
 import { computePnl, type ClientLite } from "./pnl-engine";
-import type { DeliveryRow } from "./pricing-calc";
+import type { DeliveryRow, AttendanceLogRow } from "./pricing-calc";
 import type { PricingScheme } from "./pricing-types";
+import { normalize } from "./pricing-store";
 import { sendSlackMessage } from "./notify/slack.server";
 import { sendEmail } from "./notify/email.server";
 
@@ -123,19 +124,26 @@ export async function runWeeklyPnlPush(opts: {
     ? { weekStart: opts.weekStart, weekEnd: opts.weekEnd }
     : defaultWeekRange();
 
-  const [deliveries, { data: schemesRaw }, { data: clientsRaw }] = await Promise.all([
+  const [deliveries, attendance, { data: schemesRaw }, { data: clientsRaw }] = await Promise.all([
     fetchAllRowsAdmin<DeliveryRow & { client_id: string | null }>(admin, (c, from, to) =>
       (c as any).from("delivery_records")
         .select("client_id, rider_id, driver_code, delivery_date, district, distance_km, weight_kg, destination_address, service_type, status, delivery_type")
         .gte("delivery_date", weekStart).lte("delivery_date", weekEnd).range(from, to)),
+    fetchAllRowsAdmin<AttendanceLogRow & { client_name: string | null }>(admin, (c, from, to) =>
+      (c as any).from("attendance_logs")
+        .select("rider_id, driver_code, client_name, log_date, clock_in, duration_minutes, is_late, is_absent")
+        .gte("log_date", weekStart).lte("log_date", weekEnd).range(from, to)),
     (admin as any).from("pricing_schemes")
       .select("id, name, client_id, scheme_for, calc_type, effective_from, effective_to, params, created_at"),
     admin.from("clients").select("id, name"),
   ]);
 
-  const schemes = (schemesRaw ?? []) as PricingScheme[];
+  // normalize() derives category/subtype from calc_type — tanpa ini semua
+  // scheme.category jadi undefined, computePnl gak akan bisa dispatch ke
+  // calcAttendanceScheme/calcHybridScheme sama sekali.
+  const schemes: PricingScheme[] = (schemesRaw ?? []).map(normalize);
   const clients = (clientsRaw ?? []) as ClientLite[];
-  const { perClient, totRevenue, totCost, totMargin, totMarginPct } = computePnl(deliveries, schemes, clients);
+  const { perClient, totRevenue, totCost, totMargin, totMarginPct } = computePnl(deliveries, schemes, clients, attendance);
 
   const slackResult = await sendSlackMessage(buildSlackText(weekStart, weekEnd, perClient));
   const emailResult = await sendEmail({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickPricingScheme } from "@/lib/pnl-engine";
+import { pickPricingScheme, computePnl } from "@/lib/pnl-engine";
 import type { PricingScheme } from "@/lib/pricing-types";
 
 function scheme(over: Partial<PricingScheme>): PricingScheme {
@@ -46,5 +46,54 @@ describe("pickPricingScheme", () => {
     const specific = scheme({ id: "specific", client_id: "goreca", effective_from: "2026-01-01" });
     const picked = pickPricingScheme([catchAll, specific], "goreca", "client");
     expect(picked?.id).toBe("specific");
+  });
+});
+
+// ==================================================================
+// computePnl — regression: client MURNI attendance (nol delivery_records,
+// mis. Alfagift) sebelumnya gak pernah muncul di perClient sama sekali
+// (grouping dulu cuma dari delivery_records), DAN kalaupun dipaksa muncul,
+// selalu dihitung calcScheme (engine delivery) yang balikin 0 buat
+// env.type="attendance" — dua bug sekaligus.
+// ==================================================================
+describe("computePnl — client attendance murni (Alfagift regression)", () => {
+  const clients = [{ id: "alfagift", name: "Alfagift" }];
+
+  const clientScheme = scheme({
+    id: "alfagift-client", client_id: "alfagift", scheme_for: "client", category: "attendance",
+    params: { version: 1, type: "attendance", add_kg: null, multi_drop: null, billing_addons: null,
+      config: { full_fee: 200000, standard_minutes: 480, incentives: [] } } as PricingScheme["params"],
+  });
+  const riderScheme = scheme({
+    id: "alfagift-rider", client_id: "alfagift", scheme_for: "rider", category: "attendance",
+    params: { version: 1, type: "attendance", add_kg: null, multi_drop: null, billing_addons: null,
+      config: { full_fee: 100000, standard_minutes: 480, incentives: [{ amount: 40000, condition: "ontime_only" }] } } as PricingScheme["params"],
+  });
+
+  const attendanceRows = [
+    { rider_id: "R1", client_name: "Alfagift", log_date: "2026-07-01", duration_minutes: 480, is_late: false, is_absent: false },
+    { rider_id: "R2", client_name: "Alfagift", log_date: "2026-07-01", duration_minutes: 480, is_late: false, is_absent: false },
+  ];
+
+  it("client shows up in perClient even with ZERO delivery_records", () => {
+    const { perClient } = computePnl([], [clientScheme, riderScheme], clients, attendanceRows);
+    expect(perClient).toHaveLength(1);
+    expect(perClient[0].clientId).toBe("alfagift");
+  });
+
+  it("dispatches to calcAttendanceScheme (not calcScheme, which would give 0)", () => {
+    const { perClient } = computePnl([], [clientScheme, riderScheme], clients, attendanceRows);
+    const c = perClient[0];
+    expect(c.revenue).toBe(400000); // 2 rider-hari x full_fee 200000
+    expect(c.cost).toBe(280000); // 2 x (100000 + insentif ontime 40000)
+    expect(c.margin).toBe(120000);
+  });
+
+  it("attendance_logs.client_name di-cocokkan ke clients.name (bukan client_id — kolomnya emang gak ada)", () => {
+    const mismatched = attendanceRows.map((r) => ({ ...r, client_name: "Nama Beda" }));
+    const { perClient } = computePnl([], [clientScheme, riderScheme], clients, mismatched);
+    // gak match client manapun -> masuk bucket "(tanpa client)", bukan "alfagift"
+    expect(perClient.find((c) => c.clientId === "alfagift")).toBeUndefined();
+    expect(perClient.find((c) => c.clientId === "(tanpa client)")).toBeDefined();
   });
 });
