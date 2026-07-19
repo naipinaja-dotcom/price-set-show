@@ -533,17 +533,24 @@ export function DeliveryFields({
   onChange: (v: ModularDeliveryState) => void;
 }) {
   const dims = subtype || { distance: false, weight: false };
-  const [rateOpen, setRateOpen] = useState(false);
+  const noDims = !dims.distance && !dims.weight;
+  // Kalau Distance/Weight dua-duanya OFF, panel di bawah ("Pengaturan lain")
+  // JADI satu-satunya cara nentuin tarif (flat per kiriman, dibedain per
+  // kolom/delivery-type) — buka otomatis, bukan disembunyiin kayak sebelumnya
+  // (skema kayak gitu dulu jadi kekunci: rates keisi tapi gak pernah kepake).
+  const [rateOpen, setRateOpen] = useState(noDims);
 
   const patchDistance = (p: Partial<RangeDimensionState>) => onChange({ ...value, distance: { ...value.distance, ...p } });
   const patchWeight = (p: Partial<WeightRangeState>) => onChange({ ...value, weight: { ...value.weight, ...p } });
 
-  if (!dims.distance && !dims.weight) {
-    return <p className="text-xs text-muted-foreground">Pilih minimal satu dimensi (Distance/Weight) di atas.</p>;
-  }
-
   return (
     <div className="space-y-5">
+      {noDims && (
+        <p className="text-xs text-muted-foreground">
+          Distance/Weight gak dipilih — skema ini flat per kiriman, atur tarifnya di "Pengaturan lain" di bawah
+          (mis. dibedain per Antar/Kembali atau per Area).
+        </p>
+      )}
       {dims.distance && (
         <div className="space-y-2.5">
           <div className="flex items-center justify-between">

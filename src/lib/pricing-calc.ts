@@ -318,6 +318,21 @@ export function calcModularDeliveryComponent(rows: DeliveryRow[], cfg: ModularDe
     }
   }
 
+  // Skema flat murni dibedain per kolom/tipe pengiriman (rate_by ≠ "flat"),
+  // TANPA tabel band Distance/Weight sama sekali — pengganti calc_type
+  // "flat_unit" lama (rate_by="column"). rate_by/rates baru kepake lewat
+  // band Distance/Weight (di atas), jadi kalau dua-duanya dimatiin, rates
+  // yang udah diisi admin bakal nyantol gak pernah dipakai — di sini
+  // diterapin langsung sebagai base fee per baris.
+  if (!cfg.distance?.enabled && !cfg.weight?.enabled && rateSettings.rate_by !== "flat") {
+    const colName = rateSettings.rate_by === "delivery_type" ? "delivery type" : rateSettings.match_column;
+    rows.forEach((r, i) => {
+      const fieldVal = resolveField(r, colName);
+      const hit = rateSettings.rates.find((x) => norm(x.key) === norm(fieldVal));
+      out[i] += hit ? Number(hit.rate) || 0 : 0;
+    });
+  }
+
   return out;
 }
 

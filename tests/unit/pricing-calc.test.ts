@@ -404,3 +404,50 @@ describe("calcHybridScheme", () => {
     expect(line.per_order).toBe(5000); // per-order still paid
   });
 });
+
+// ==================================================================
+// modular_v2 — flat per-kolom/delivery-type TANPA Distance/Weight
+// (regression: Wicked Pies — rate_by="delivery_type" nyantol gak kepake
+// kalau dua dimensi dimatiin, karena rate_by/rates cuma dibaca dari dalam
+// band Distance/Weight)
+// ==================================================================
+describe("calcScheme — modular_v2 rate_by tanpa dimensi", () => {
+  const modularEnv = (rate_by: "column" | "delivery_type", rates: { key: string; rate: number }[], match_column = "Area") =>
+    env({
+      type: "modular_v2",
+      config: {
+        distance: null,
+        weight: null,
+        rate_by,
+        match_column,
+        rates,
+        unit_basis: "awb",
+      } as never,
+    });
+
+  it("delivery_type: DELIVERY dan RETURN dapet tarif beda walau Distance/Weight off", () => {
+    const e = modularEnv("delivery_type", [
+      { key: "DELIVERY", rate: 25000 },
+      { key: "RETURN", rate: 10000 },
+    ]);
+    const res = calcScheme(e, [
+      row({ rider_id: "R1", delivery_type: "DELIVERY" }),
+      row({ rider_id: "R1", delivery_type: "RETURN" }),
+    ]);
+    expect(res.perRow[0].fee).toBe(25000);
+    expect(res.perRow[1].fee).toBe(10000);
+  });
+
+  it("column: rate per Area walau Distance/Weight off", () => {
+    const e = modularEnv("column", [{ key: "Jakarta Pusat", rate: 12000 }], "Area");
+    const res = calcScheme(e, [row({ rider_id: "R1", district: "Jakarta Pusat" })]);
+    expect(res.perRow[0].fee).toBe(12000);
+  });
+
+  it("rate_by flat tanpa dimensi tetap 0 (gak ada base fee buat di-apply)", () => {
+    const e = modularEnv("column", []);
+    (e.config as { rate_by: string }).rate_by = "flat";
+    const res = calcScheme(e, [row({ rider_id: "R1" })]);
+    expect(res.perRow[0].fee).toBe(0);
+  });
+});
