@@ -256,8 +256,12 @@ function PayrollPage() {
       if (!d.installment_id) continue;
       const { data: ins } = await supabase.from("rider_installments").select("*").eq("id", d.installment_id).single();
       if (!ins) continue;
+      // mode='daily' (sewa) open-ended — gak ada installment_count buat
+      // dibandingin, tetap aktif sampai admin nonaktifin manual pas unit
+      // dikembaliin. Cuma mode='fixed' (cicilan) yang punya progress N/M.
+      if (ins.mode === "daily") continue;
       const paid = ins.installments_paid + 1;
-      const done = paid >= ins.installment_count;
+      const done = paid >= (ins.installment_count ?? 0);
       await supabase.from("rider_installments").update({
         installments_paid: paid, active: !done,
       }).eq("id", ins.id);

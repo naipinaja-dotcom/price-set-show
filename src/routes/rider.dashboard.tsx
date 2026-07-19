@@ -23,10 +23,15 @@ function DashboardPage() {
       .then(({ data }: { data: { data: typeof latest; payroll_runs: { name: string } | null } | null }) => {
         if (data) { setLatest(data.data); setRunName(data.payroll_runs?.name ?? null); }
       });
-    supabase.from("rider_installments").select("total_amount, installments_paid, per_period_amount, installment_count")
+    supabase.from("rider_installments").select("mode, total_amount, installments_paid, per_period_amount, installment_count")
       .eq("rider_id", rider.id).eq("active", true)
       .then(({ data }) => {
-        const remaining = (data ?? []).reduce((s, i) => s + Math.max(0, (i.installment_count - i.installments_paid) * i.per_period_amount), 0);
+        // mode='daily' (sewa) open-ended, gak ada installment_count/
+        // per_period_amount buat dihitung "sisa cicilan" — cuma mode='fixed'
+        // yang punya progress N/M.
+        const remaining = (data ?? [])
+          .filter((i) => i.mode === "fixed")
+          .reduce((s, i) => s + Math.max(0, ((i.installment_count ?? 0) - i.installments_paid) * (i.per_period_amount ?? 0)), 0);
         setInstallmentTotal(remaining);
       });
   }, [rider]);

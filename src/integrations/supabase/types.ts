@@ -14,35 +14,65 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_users: {
+        Row: {
+          auth_user_id: string | null
+          created_at: string | null
+          id: string
+          rider_id: string | null
+          role: string
+        }
+        Insert: {
+          auth_user_id?: string | null
+          created_at?: string | null
+          id?: string
+          rider_id?: string | null
+          role: string
+        }
+        Update: {
+          auth_user_id?: string | null
+          created_at?: string | null
+          id?: string
+          rider_id?: string | null
+          role?: string
+        }
+        Relationships: []
+      }
       attendance_incentives: {
         Row: {
           amount: number
-          condition: string | null
-          created_at: string
+          amount_type: string | null
+          attendance_rule_id: string | null
+          condition_type: string
+          condition_value: Json | null
           id: string
-          name: string
-          rule_id: string
+          incentive_name: string
+          is_active: boolean | null
         }
         Insert: {
-          amount?: number
-          condition?: string | null
-          created_at?: string
+          amount: number
+          amount_type?: string | null
+          attendance_rule_id?: string | null
+          condition_type: string
+          condition_value?: Json | null
           id?: string
-          name: string
-          rule_id: string
+          incentive_name: string
+          is_active?: boolean | null
         }
         Update: {
           amount?: number
-          condition?: string | null
-          created_at?: string
+          amount_type?: string | null
+          attendance_rule_id?: string | null
+          condition_type?: string
+          condition_value?: Json | null
           id?: string
-          name?: string
-          rule_id?: string
+          incentive_name?: string
+          is_active?: boolean | null
         }
         Relationships: [
           {
-            foreignKeyName: "attendance_incentives_rule_id_fkey"
-            columns: ["rule_id"]
+            foreignKeyName: "attendance_incentives_attendance_rule_id_fkey"
+            columns: ["attendance_rule_id"]
             isOneToOne: false
             referencedRelation: "attendance_rules"
             referencedColumns: ["id"]
@@ -52,12 +82,14 @@ export type Database = {
       attendance_logs: {
         Row: {
           batch_id: string | null
+          client_id: string | null
           client_name: string | null
           clock_in: string | null
           clock_out: string | null
           created_at: string
           driver_code: string | null
           duration_minutes: number | null
+          fee: number
           id: string
           is_absent: boolean
           is_late: boolean
@@ -66,12 +98,14 @@ export type Database = {
         }
         Insert: {
           batch_id?: string | null
+          client_id?: string | null
           client_name?: string | null
           clock_in?: string | null
           clock_out?: string | null
           created_at?: string
           driver_code?: string | null
           duration_minutes?: number | null
+          fee?: number
           id?: string
           is_absent?: boolean
           is_late?: boolean
@@ -80,12 +114,14 @@ export type Database = {
         }
         Update: {
           batch_id?: string | null
+          client_id?: string | null
           client_name?: string | null
           clock_in?: string | null
           clock_out?: string | null
           created_at?: string
           driver_code?: string | null
           duration_minutes?: number | null
+          fee?: number
           id?: string
           is_absent?: boolean
           is_late?: boolean
@@ -101,6 +137,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "attendance_logs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "attendance_logs_rider_id_fkey"
             columns: ["rider_id"]
             isOneToOne: false
@@ -111,46 +154,49 @@ export type Database = {
       }
       attendance_rules: {
         Row: {
-          absent_penalty: number
-          active: boolean
           client_id: string | null
-          clockin_time: string
-          created_at: string
+          created_at: string | null
           daily_base_fee: number
+          expected_clockin: string | null
+          expected_duration_minutes: number | null
           id: string
-          late_penalty: number
-          late_tolerance_minutes: number
-          min_duration_minutes: number
+          incomplete_duration_penalty: number | null
+          incomplete_duration_penalty_type: string | null
+          is_active: boolean | null
+          late_penalty: number | null
+          late_penalty_type: string | null
+          late_tolerance_minutes: number | null
           name: string
-          updated_at: string
         }
         Insert: {
-          absent_penalty?: number
-          active?: boolean
           client_id?: string | null
-          clockin_time?: string
-          created_at?: string
-          daily_base_fee?: number
+          created_at?: string | null
+          daily_base_fee: number
+          expected_clockin?: string | null
+          expected_duration_minutes?: number | null
           id?: string
-          late_penalty?: number
-          late_tolerance_minutes?: number
-          min_duration_minutes?: number
+          incomplete_duration_penalty?: number | null
+          incomplete_duration_penalty_type?: string | null
+          is_active?: boolean | null
+          late_penalty?: number | null
+          late_penalty_type?: string | null
+          late_tolerance_minutes?: number | null
           name: string
-          updated_at?: string
         }
         Update: {
-          absent_penalty?: number
-          active?: boolean
           client_id?: string | null
-          clockin_time?: string
-          created_at?: string
+          created_at?: string | null
           daily_base_fee?: number
+          expected_clockin?: string | null
+          expected_duration_minutes?: number | null
           id?: string
-          late_penalty?: number
-          late_tolerance_minutes?: number
-          min_duration_minutes?: number
+          incomplete_duration_penalty?: number | null
+          incomplete_duration_penalty_type?: string | null
+          is_active?: boolean | null
+          late_penalty?: number | null
+          late_penalty_type?: string | null
+          late_tolerance_minutes?: number | null
           name?: string
-          updated_at?: string
         }
         Relationships: [
           {
@@ -168,7 +214,7 @@ export type Database = {
           address: string | null
           code: string
           contact_person: string | null
-          created_at: string
+          created_at: string | null
           id: string
           name: string
           phone: string | null
@@ -179,7 +225,7 @@ export type Database = {
           address?: string | null
           code: string
           contact_person?: string | null
-          created_at?: string
+          created_at?: string | null
           id?: string
           name: string
           phone?: string | null
@@ -190,7 +236,7 @@ export type Database = {
           address?: string | null
           code?: string
           contact_person?: string | null
-          created_at?: string
+          created_at?: string | null
           id?: string
           name?: string
           phone?: string | null
@@ -198,33 +244,140 @@ export type Database = {
         }
         Relationships: []
       }
+      coo_incident_reports: {
+        Row: {
+          created_at: string
+          description: string
+          estimated_impact: number | null
+          id: string
+          resolved_at: string | null
+          severity: string
+          status: string
+          type: string
+          week_end: string
+          week_start: string
+        }
+        Insert: {
+          created_at?: string
+          description: string
+          estimated_impact?: number | null
+          id?: string
+          resolved_at?: string | null
+          severity: string
+          status?: string
+          type: string
+          week_end: string
+          week_start: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          estimated_impact?: number | null
+          id?: string
+          resolved_at?: string | null
+          severity?: string
+          status?: string
+          type?: string
+          week_end?: string
+          week_start?: string
+        }
+        Relationships: []
+      }
+      coo_insight_reports: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          coo_analysis: Json
+          created_at: string
+          generated_at: string
+          generated_by: string
+          id: string
+          lead_analysis: Json
+          manager_analysis: Json
+          pnl_snapshot_id: string | null
+          updated_at: string
+          week_end: string
+          week_start: string
+          worker_analysis: Json
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          coo_analysis: Json
+          created_at?: string
+          generated_at?: string
+          generated_by: string
+          id?: string
+          lead_analysis: Json
+          manager_analysis: Json
+          pnl_snapshot_id?: string | null
+          updated_at?: string
+          week_end: string
+          week_start: string
+          worker_analysis: Json
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          coo_analysis?: Json
+          created_at?: string
+          generated_at?: string
+          generated_by?: string
+          id?: string
+          lead_analysis?: Json
+          manager_analysis?: Json
+          pnl_snapshot_id?: string | null
+          updated_at?: string
+          week_end?: string
+          week_start?: string
+          worker_analysis?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "coo_insight_reports_pnl_snapshot_id_fkey"
+            columns: ["pnl_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "pnl_weekly_snapshots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deduction_types: {
         Row: {
           active: boolean
-          code: string
-          created_at: string
+          auto_recurring: boolean
+          code: string | null
+          created_at: string | null
           description: string | null
           id: string
           installmentable: boolean
           name: string
+          recurring_amount: number
+          trigger_frequency: string | null
         }
         Insert: {
           active?: boolean
-          code: string
-          created_at?: string
+          auto_recurring?: boolean
+          code?: string | null
+          created_at?: string | null
           description?: string | null
           id?: string
           installmentable?: boolean
           name: string
+          recurring_amount?: number
+          trigger_frequency?: string | null
         }
         Update: {
           active?: boolean
-          code?: string
-          created_at?: string
+          auto_recurring?: boolean
+          code?: string | null
+          created_at?: string | null
           description?: string | null
           id?: string
           installmentable?: boolean
           name?: string
+          recurring_amount?: number
+          trigger_frequency?: string | null
         }
         Relationships: []
       }
@@ -236,6 +389,7 @@ export type Database = {
           created_at: string
           dash_delivery_id: string | null
           delivery_date: string
+          delivery_type: string | null
           destination_address: string | null
           distance_km: number | null
           district: string | null
@@ -245,7 +399,9 @@ export type Database = {
           provider_order_id: string | null
           receiver_name: string | null
           rider_id: string | null
+          sender_name: string | null
           service_type: string | null
+          status: string | null
           weight_kg: number | null
         }
         Insert: {
@@ -255,6 +411,7 @@ export type Database = {
           created_at?: string
           dash_delivery_id?: string | null
           delivery_date: string
+          delivery_type?: string | null
           destination_address?: string | null
           distance_km?: number | null
           district?: string | null
@@ -264,7 +421,9 @@ export type Database = {
           provider_order_id?: string | null
           receiver_name?: string | null
           rider_id?: string | null
+          sender_name?: string | null
           service_type?: string | null
+          status?: string | null
           weight_kg?: number | null
         }
         Update: {
@@ -274,6 +433,7 @@ export type Database = {
           created_at?: string
           dash_delivery_id?: string | null
           delivery_date?: string
+          delivery_type?: string | null
           destination_address?: string | null
           distance_km?: number | null
           district?: string | null
@@ -283,7 +443,9 @@ export type Database = {
           provider_order_id?: string | null
           receiver_name?: string | null
           rider_id?: string | null
+          sender_name?: string | null
           service_type?: string | null
+          status?: string | null
           weight_kg?: number | null
         }
         Relationships: [
@@ -310,6 +472,78 @@ export type Database = {
           },
         ]
       }
+      fee_calculation_audit_log: {
+        Row: {
+          action: string
+          affected_row_ids: Json | null
+          calc_table: string | null
+          client_id: string | null
+          committed_by: string | null
+          created_at: string
+          id: string
+          period_end: string
+          period_start: string
+          rejected_at: string | null
+          rejected_by: string | null
+          row_count: number
+          scheme_id: string | null
+          scheme_name: string | null
+          scheme_snapshot: Json
+          total_amount: number
+        }
+        Insert: {
+          action: string
+          affected_row_ids?: Json | null
+          calc_table?: string | null
+          client_id?: string | null
+          committed_by?: string | null
+          created_at?: string
+          id?: string
+          period_end: string
+          period_start: string
+          rejected_at?: string | null
+          rejected_by?: string | null
+          row_count: number
+          scheme_id?: string | null
+          scheme_name?: string | null
+          scheme_snapshot: Json
+          total_amount: number
+        }
+        Update: {
+          action?: string
+          affected_row_ids?: Json | null
+          calc_table?: string | null
+          client_id?: string | null
+          committed_by?: string | null
+          created_at?: string
+          id?: string
+          period_end?: string
+          period_start?: string
+          rejected_at?: string | null
+          rejected_by?: string | null
+          row_count?: number
+          scheme_id?: string | null
+          scheme_name?: string | null
+          scheme_snapshot?: Json
+          total_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fee_calculation_audit_log_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fee_calculation_audit_log_scheme_id_fkey"
+            columns: ["scheme_id"]
+            isOneToOne: false
+            referencedRelation: "pricing_schemes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_details: {
         Row: {
           base_amount: number
@@ -320,7 +554,11 @@ export type Database = {
           detail_breakdown: Json | null
           id: string
           invoice_date: string
+          period_end: string | null
+          period_start: string | null
           rider_id: string | null
+          scheme_name: string | null
+          status: string
           surcharge_amount: number
           total_amount: number
           upload_batch_id: string | null
@@ -334,7 +572,11 @@ export type Database = {
           detail_breakdown?: Json | null
           id?: string
           invoice_date: string
+          period_end?: string | null
+          period_start?: string | null
           rider_id?: string | null
+          scheme_name?: string | null
+          status?: string
           surcharge_amount?: number
           total_amount?: number
           upload_batch_id?: string | null
@@ -348,7 +590,11 @@ export type Database = {
           detail_breakdown?: Json | null
           id?: string
           invoice_date?: string
+          period_end?: string | null
+          period_start?: string | null
           rider_id?: string | null
+          scheme_name?: string | null
+          status?: string
           surcharge_amount?: number
           total_amount?: number
           upload_batch_id?: string | null
@@ -383,7 +629,7 @@ export type Database = {
           created_at: string
           deduction_type_id: string | null
           description: string | null
-          detail_id: string
+          detail_id: string | null
           id: string
           installment_id: string | null
         }
@@ -392,7 +638,7 @@ export type Database = {
           created_at?: string
           deduction_type_id?: string | null
           description?: string | null
-          detail_id: string
+          detail_id?: string | null
           id?: string
           installment_id?: string | null
         }
@@ -401,7 +647,7 @@ export type Database = {
           created_at?: string
           deduction_type_id?: string | null
           description?: string | null
-          detail_id?: string
+          detail_id?: string | null
           id?: string
           installment_id?: string | null
         }
@@ -419,6 +665,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "payroll_details"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_deductions_detail_id_fkey"
+            columns: ["detail_id"]
+            isOneToOne: false
+            referencedRelation: "report_summary_weekly"
+            referencedColumns: ["detail_id"]
           },
           {
             foreignKeyName: "payroll_deductions_installment_id_fkey"
@@ -441,8 +694,9 @@ export type Database = {
           incentive: number
           net_pay: number
           penalty: number
-          rider_id: string
-          run_id: string
+          remarks: string | null
+          rider_id: string | null
+          run_id: string | null
           total_deduction: number
         }
         Insert: {
@@ -456,8 +710,9 @@ export type Database = {
           incentive?: number
           net_pay?: number
           penalty?: number
-          rider_id: string
-          run_id: string
+          remarks?: string | null
+          rider_id?: string | null
+          run_id?: string | null
           total_deduction?: number
         }
         Update: {
@@ -471,8 +726,9 @@ export type Database = {
           incentive?: number
           net_pay?: number
           penalty?: number
-          rider_id?: string
-          run_id?: string
+          remarks?: string | null
+          rider_id?: string | null
+          run_id?: string | null
           total_deduction?: number
         }
         Relationships: [
@@ -499,72 +755,203 @@ export type Database = {
           },
         ]
       }
-      payroll_runs: {
+      payroll_reminder_log: {
         Row: {
           created_at: string
-          created_by: string | null
+          due_clients: Json
+          due_riders: Json
+          id: string
+          push_status: Json
+          reminder_date: string
+          triggered_by: string
+          triggered_by_user: string | null
+        }
+        Insert: {
+          created_at?: string
+          due_clients?: Json
+          due_riders?: Json
+          id?: string
+          push_status: Json
+          reminder_date: string
+          triggered_by: string
+          triggered_by_user?: string | null
+        }
+        Update: {
+          created_at?: string
+          due_clients?: Json
+          due_riders?: Json
+          id?: string
+          push_status?: Json
+          reminder_date?: string
+          triggered_by?: string
+          triggered_by_user?: string | null
+        }
+        Relationships: []
+      }
+      payroll_reminder_schedules: {
+        Row: {
+          active: boolean
+          client_id: string | null
+          close_same_day: boolean
+          created_at: string
+          id: string
+          label: string
+          period_end_weekday: number | null
+          period_start_weekday: number | null
+          rider_id: string | null
+          updated_at: string
+          weekdays: number[]
+        }
+        Insert: {
+          active?: boolean
+          client_id?: string | null
+          close_same_day?: boolean
+          created_at?: string
+          id?: string
+          label: string
+          period_end_weekday?: number | null
+          period_start_weekday?: number | null
+          rider_id?: string | null
+          updated_at?: string
+          weekdays: number[]
+        }
+        Update: {
+          active?: boolean
+          client_id?: string | null
+          close_same_day?: boolean
+          created_at?: string
+          id?: string
+          label?: string
+          period_end_weekday?: number | null
+          period_start_weekday?: number | null
+          rider_id?: string | null
+          updated_at?: string
+          weekdays?: number[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_reminder_schedules_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_reminder_schedules_rider_id_fkey"
+            columns: ["rider_id"]
+            isOneToOne: false
+            referencedRelation: "riders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_runs: {
+        Row: {
+          client_id: string | null
+          created_at: string
           finalized_at: string | null
           id: string
           name: string
           period_end: string
           period_start: string
-          period_type: Database["public"]["Enums"]["period_type"]
+          period_type: string
           published_at: string | null
-          status: Database["public"]["Enums"]["payroll_status"]
-          updated_at: string
+          status: string
         }
         Insert: {
+          client_id?: string | null
           created_at?: string
-          created_by?: string | null
           finalized_at?: string | null
           id?: string
           name: string
           period_end: string
           period_start: string
-          period_type?: Database["public"]["Enums"]["period_type"]
+          period_type?: string
           published_at?: string | null
-          status?: Database["public"]["Enums"]["payroll_status"]
-          updated_at?: string
+          status?: string
         }
         Update: {
+          client_id?: string | null
           created_at?: string
-          created_by?: string | null
           finalized_at?: string | null
           id?: string
           name?: string
           period_end?: string
           period_start?: string
-          period_type?: Database["public"]["Enums"]["period_type"]
+          period_type?: string
           published_at?: string | null
-          status?: Database["public"]["Enums"]["payroll_status"]
-          updated_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_runs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_workflow_runs: {
+        Row: {
+          created_at: string
+          error: string | null
+          finished_at: string
+          id: string
+          result: Json
+          started_at: string
+          status: string
+          trigger_type: string
+          triggered_by: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          finished_at: string
+          id?: string
+          result?: Json
+          started_at: string
+          status: string
+          trigger_type: string
+          triggered_by: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          finished_at?: string
+          id?: string
+          result?: Json
+          started_at?: string
+          status?: string
+          trigger_type?: string
+          triggered_by?: string
         }
         Relationships: []
       }
       payslips: {
         Row: {
           data: Json
-          detail_id: string
+          detail_id: string | null
           id: string
           published_at: string
-          rider_id: string
-          run_id: string
+          rider_id: string | null
+          run_id: string | null
         }
         Insert: {
           data?: Json
-          detail_id: string
+          detail_id?: string | null
           id?: string
           published_at?: string
-          rider_id: string
-          run_id: string
+          rider_id?: string | null
+          run_id?: string | null
         }
         Update: {
           data?: Json
-          detail_id?: string
+          detail_id?: string | null
           id?: string
           published_at?: string
-          rider_id?: string
-          run_id?: string
+          rider_id?: string | null
+          run_id?: string | null
         }
         Relationships: [
           {
@@ -573,6 +960,13 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "payroll_details"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payslips_detail_id_fkey"
+            columns: ["detail_id"]
+            isOneToOne: true
+            referencedRelation: "report_summary_weekly"
+            referencedColumns: ["detail_id"]
           },
           {
             foreignKeyName: "payslips_rider_id_fkey"
@@ -586,6 +980,98 @@ export type Database = {
             columns: ["run_id"]
             isOneToOne: false
             referencedRelation: "payroll_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pnl_weekly_snapshots: {
+        Row: {
+          computed_at: string
+          created_at: string
+          id: string
+          per_client: Json
+          push_status: Json
+          total_cost: number
+          total_margin: number
+          total_margin_pct: number
+          total_revenue: number
+          triggered_by: string
+          triggered_by_user: string | null
+          week_end: string
+          week_start: string
+        }
+        Insert: {
+          computed_at?: string
+          created_at?: string
+          id?: string
+          per_client?: Json
+          push_status?: Json
+          total_cost?: number
+          total_margin?: number
+          total_margin_pct?: number
+          total_revenue?: number
+          triggered_by?: string
+          triggered_by_user?: string | null
+          week_end: string
+          week_start: string
+        }
+        Update: {
+          computed_at?: string
+          created_at?: string
+          id?: string
+          per_client?: Json
+          push_status?: Json
+          total_cost?: number
+          total_margin?: number
+          total_margin_pct?: number
+          total_revenue?: number
+          triggered_by?: string
+          triggered_by_user?: string | null
+          week_end?: string
+          week_start?: string
+        }
+        Relationships: []
+      }
+      pricing_schemes: {
+        Row: {
+          calc_type: string | null
+          client_id: string | null
+          created_at: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          name: string
+          params: Json | null
+          scheme_for: string
+        }
+        Insert: {
+          calc_type?: string | null
+          client_id?: string | null
+          created_at?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          name: string
+          params?: Json | null
+          scheme_for?: string
+        }
+        Update: {
+          calc_type?: string | null
+          client_id?: string | null
+          created_at?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          name?: string
+          params?: Json | null
+          scheme_for?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_schemes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
             referencedColumns: ["id"]
           },
         ]
@@ -617,51 +1103,86 @@ export type Database = {
         }
         Relationships: []
       }
+      rider_attendance_rules: {
+        Row: {
+          attendance_rule_id: string | null
+          effective_from: string
+          effective_to: string | null
+          id: string
+          rider_id: string | null
+        }
+        Insert: {
+          attendance_rule_id?: string | null
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          rider_id?: string | null
+        }
+        Update: {
+          attendance_rule_id?: string | null
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          rider_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rider_attendance_rules_attendance_rule_id_fkey"
+            columns: ["attendance_rule_id"]
+            isOneToOne: false
+            referencedRelation: "attendance_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rider_installments: {
         Row: {
           active: boolean
           created_at: string
-          deduction_type_id: string
+          daily_rate: number | null
+          deduction_type_id: string | null
           id: string
-          installment_count: number
+          installment_count: number | null
           installments_paid: number
+          mode: string
           next_deduction_date: string | null
           notes: string | null
-          per_period_amount: number
+          per_period_amount: number | null
           rider_id: string
           start_date: string
-          total_amount: number
-          updated_at: string
+          total_amount: number | null
         }
         Insert: {
           active?: boolean
           created_at?: string
-          deduction_type_id: string
+          daily_rate?: number | null
+          deduction_type_id?: string | null
           id?: string
-          installment_count?: number
+          installment_count?: number | null
           installments_paid?: number
+          mode?: string
           next_deduction_date?: string | null
           notes?: string | null
-          per_period_amount: number
+          per_period_amount?: number | null
           rider_id: string
           start_date?: string
-          total_amount: number
-          updated_at?: string
+          total_amount?: number | null
         }
         Update: {
           active?: boolean
           created_at?: string
-          deduction_type_id?: string
+          daily_rate?: number | null
+          deduction_type_id?: string | null
           id?: string
-          installment_count?: number
+          installment_count?: number | null
           installments_paid?: number
+          mode?: string
           next_deduction_date?: string | null
           notes?: string | null
-          per_period_amount?: number
+          per_period_amount?: number | null
           rider_id?: string
           start_date?: string
-          total_amount?: number
-          updated_at?: string
+          total_amount?: number | null
         }
         Relationships: [
           {
@@ -683,7 +1204,11 @@ export type Database = {
       riders: {
         Row: {
           bank_account: string | null
+          bank_account_holder: string | null
+          bank_account_number: string | null
           bank_name: string | null
+          birth_date: string | null
+          birth_place: string | null
           client_id: string | null
           created_at: string
           email: string | null
@@ -691,15 +1216,22 @@ export type Database = {
           full_name: string
           id: string
           join_date: string | null
+          must_change_pin: boolean
+          nik: string | null
           notes: string | null
           phone: string | null
-          status: Database["public"]["Enums"]["rider_status"]
+          phone_number: string | null
+          status: string
           updated_at: string
           user_id: string | null
         }
         Insert: {
           bank_account?: string | null
+          bank_account_holder?: string | null
+          bank_account_number?: string | null
           bank_name?: string | null
+          birth_date?: string | null
+          birth_place?: string | null
           client_id?: string | null
           created_at?: string
           email?: string | null
@@ -707,15 +1239,22 @@ export type Database = {
           full_name: string
           id?: string
           join_date?: string | null
+          must_change_pin?: boolean
+          nik?: string | null
           notes?: string | null
           phone?: string | null
-          status?: Database["public"]["Enums"]["rider_status"]
+          phone_number?: string | null
+          status?: string
           updated_at?: string
           user_id?: string | null
         }
         Update: {
           bank_account?: string | null
+          bank_account_holder?: string | null
+          bank_account_number?: string | null
           bank_name?: string | null
+          birth_date?: string | null
+          birth_place?: string | null
           client_id?: string | null
           created_at?: string
           email?: string | null
@@ -723,9 +1262,12 @@ export type Database = {
           full_name?: string
           id?: string
           join_date?: string | null
+          must_change_pin?: boolean
+          nik?: string | null
           notes?: string | null
           phone?: string | null
-          status?: Database["public"]["Enums"]["rider_status"]
+          phone_number?: string | null
+          status?: string
           updated_at?: string
           user_id?: string | null
         }
@@ -745,7 +1287,7 @@ export type Database = {
           created_at: string
           filename: string | null
           id: string
-          kind: Database["public"]["Enums"]["upload_kind"]
+          kind: string
           row_count: number
           uploaded_by: string | null
         }
@@ -754,7 +1296,7 @@ export type Database = {
           created_at?: string
           filename?: string | null
           id?: string
-          kind: Database["public"]["Enums"]["upload_kind"]
+          kind: string
           row_count?: number
           uploaded_by?: string | null
         }
@@ -763,7 +1305,7 @@ export type Database = {
           created_at?: string
           filename?: string | null
           id?: string
-          kind?: Database["public"]["Enums"]["upload_kind"]
+          kind?: string
           row_count?: number
           uploaded_by?: string | null
         }
@@ -797,23 +1339,80 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      report_summary_weekly: {
+        Row: {
+          attendance_fee: number | null
+          bank_account: string | null
+          bank_account_holder: string | null
+          client_code: string | null
+          client_id: string | null
+          client_name: string | null
+          delivery_count: number | null
+          delivery_fee: number | null
+          detail_id: string | null
+          gross_earning: number | null
+          incentive: number | null
+          net_pay: number | null
+          penalty: number | null
+          period_end: string | null
+          period_start: string | null
+          period_type: string | null
+          remarks: string | null
+          rider_employee_id: string | null
+          rider_id: string | null
+          rider_name: string | null
+          rider_phone: string | null
+          run_id: string | null
+          run_name: string | null
+          run_published_at: string | null
+          run_status: string | null
+          total_deduction: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_details_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_details_rider_id_fkey"
+            columns: ["rider_id"]
+            isOneToOne: false
+            referencedRelation: "riders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_details_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       has_role: {
         Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _user_id: string
+          p_role: Database["public"]["Enums"]["app_role"]
+          p_user_id: string
         }
         Returns: boolean
       }
     }
     Enums: {
-      app_role: "admin" | "rider"
-      payroll_status: "draft" | "finalized" | "published"
-      period_type: "weekly" | "biweekly" | "monthly"
-      rider_status: "active" | "inactive" | "pending_review" | "suspended" | "ready_to_work" | "resign" | "blacklisted" | "withdrawn"
-      upload_kind: "delivery" | "attendance"
+      app_role: "admin" | "superadmin" | "rider"
+      calculation_type:
+        | "NORMAL_AWB"
+        | "ADDRESS_DEDUP"
+        | "KM_BASED_TIERED"
+        | "KM_BASED_PER_ORDER"
+        | "DAILY_OTP"
+      case_status: "open" | "approved" | "rejected" | "closed"
+      deduction_status: "pending" | "deducted" | "cancelled"
+      dispatch_status: "DELIVERED" | "FAILED" | "RETURNED" | "PENDING"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -941,11 +1540,17 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "rider"],
-      payroll_status: ["draft", "finalized", "published"],
-      period_type: ["weekly", "biweekly", "monthly"],
-      rider_status: ["active", "inactive", "pending_review", "suspended", "ready_to_work", "resign", "blacklisted", "withdrawn"],
-      upload_kind: ["delivery", "attendance"],
+      app_role: ["admin", "superadmin", "rider"],
+      calculation_type: [
+        "NORMAL_AWB",
+        "ADDRESS_DEDUP",
+        "KM_BASED_TIERED",
+        "KM_BASED_PER_ORDER",
+        "DAILY_OTP",
+      ],
+      case_status: ["open", "approved", "rejected", "closed"],
+      deduction_status: ["pending", "deducted", "cancelled"],
+      dispatch_status: ["DELIVERED", "FAILED", "RETURNED", "PENDING"],
     },
   },
 } as const

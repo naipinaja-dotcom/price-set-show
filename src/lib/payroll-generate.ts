@@ -40,9 +40,22 @@ export async function generatePayrollDetails(
   ]);
 
   const { resolvedIdOf } = await resolveRiderIdentities([...deliveries, ...attendance], client);
+
+  // Cicilan mode='daily' (mis. sewa motor) TETAP kepotong walau rider gak
+  // jalan sama sekali periode ini (masih megang unit sewaannya) — rider kayak
+  // gini gak akan pernah ke-discover dari delivery/attendance doang, jadi
+  // rider_id-nya di-union duluan ke riderIds di bawah.
+  const { data: dailyInstallmentsRaw } = await client
+    .from("rider_installments")
+    .select("rider_id")
+    .eq("active", true)
+    .eq("mode", "daily");
+  const dailyChargeRiderIds = new Set((dailyInstallmentsRaw ?? []).map((r) => r.rider_id));
+
   const riderIds = [...new Set([
     ...deliveries.map(resolvedIdOf),
     ...attendance.map(resolvedIdOf),
+    ...dailyChargeRiderIds,
   ])].filter((id): id is string => !!id);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,9 +71,48 @@ export async function generatePayrollDetails(
   const [{ data: installments }, { data: autoTypes }] = await Promise.all([
     client.from("rider_installments").select("*").eq("active", true)
       .lte("next_deduction_date", run.period_end),
-    (client as any).from("deduction_types").select("id, name, recurring_amount")
+    (client as any).from("deduction_types").select("id, name, recurring_amount, trigger_frequency")
       .eq("active", true).eq("auto_recurring", true),
   ]);
+
+  // Auto-recurring "monthly_once" (mis. BPJS) cuma boleh kepotong SEKALI per
+  // bulan kalender per rider, LINTAS CLIENT manapun dia digaji — beda dari
+  // "every_payroll_run" (default) yang emang kepotong tiap run. Tanpa ini,
+  // client dengan >1 periode/bulan bakal kena BPJS berkali-kali.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const monthlyTypeIds = ((autoTypes ?? []) as any[])
+    .filter((t) => t.trigger_frequency === "monthly_once")
+    .map((t) => t.id);
+  const chargedThisMonth = new Set<string>();
+  if (monthlyTypeIds.length > 0 && riderIds.length > 0) {
+    const runMonth = run.period_end.slice(0, 7); // 'YYYY-MM'
+    const monthStart = `${runMonth}-01`;
+    const monthEnd = new Date(Number(runMonth.slice(0, 4)), Number(runMonth.slice(5, 7)), 0)
+      .toISOString().slice(0, 10); // hari terakhir bulan itu
+    const { data: runsThisMonth } = await (client as any).from("payroll_runs")
+      .select("id").gte("period_end", monthStart).lte("period_end", monthEnd);
+    const runIdsThisMonth = (runsThisMonth ?? []).map((r: { id: string }) => r.id);
+    if (runIdsThisMonth.length > 0) {
+      const { data: detailsThisMonth } = await (client as any).from("payroll_details")
+        .select("id, rider_id").in("run_id", runIdsThisMonth).in("rider_id", riderIds);
+      const detailIdToRider = new Map(
+        (detailsThisMonth ?? []).map((d: { id: string; rider_id: string }) => [d.id, d.rider_id]),
+      );
+      const detailIds = [...detailIdToRider.keys()];
+      if (detailIds.length > 0) {
+        const { data: dedsThisMonth } = await (client as any).from("payroll_deductions")
+          .select("detail_id, deduction_type_id").in("detail_id", detailIds).in("deduction_type_id", monthlyTypeIds);
+        for (const d of (dedsThisMonth ?? []) as { detail_id: string; deduction_type_id: string }[]) {
+          const rId = detailIdToRider.get(d.detail_id);
+          if (rId) chargedThisMonth.add(`${rId}|${d.deduction_type_id}`);
+        }
+      }
+    }
+  }
+
+  const spanDays = Math.round(
+    (new Date(`${run.period_end}T00:00:00Z`).getTime() - new Date(`${run.period_start}T00:00:00Z`).getTime()) / 86_400_000,
+  ) + 1;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const detailsToInsert: any[] = [];
@@ -75,9 +127,13 @@ export async function generatePayrollDetails(
     const deliveryCount = rDelivs.length;
     const attendanceFee = rAttend.reduce((s, a) => s + Number(a.fee || 0), 0);
 
-    // Skip rider yang gak ada kerja sama sekali periode ini — jangan bikin
-    // baris payroll buat rider yang gross-nya nol.
-    if (deliveryCount === 0 && attendanceFee === 0) continue;
+    // Rider yang gak ada kerja sama sekali periode ini TETAP dibikinin baris
+    // payroll kalau dia punya cicilan mode='daily' aktif (sewa jalan terus
+    // walau rider libur) — asal client run ini emang "rumah"-nya rider itu
+    // (atau run "Semua Client"), biar gak dobel-tagih di run client lain.
+    const hasDailyCharge =
+      dailyChargeRiderIds.has(rider.id) && (run.client_id === null || run.client_id === rider.client_id);
+    if (deliveryCount === 0 && attendanceFee === 0 && !hasDailyCharge) continue;
 
     const incentiveTotal = 0;
     const penalty = 0;
@@ -86,12 +142,16 @@ export async function generatePayrollDetails(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rInstall = (installments ?? []).filter((i: any) => i.rider_id === rider.id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const installTotal = rInstall.reduce((s: number, i: any) => s + Number(i.per_period_amount), 0);
+    const installAmounts = rInstall.map((i: any) =>
+      i.mode === "daily" ? Number(i.daily_rate || 0) * spanDays : Number(i.per_period_amount || 0),
+    );
+    const installTotal = installAmounts.reduce((s: number, a: number) => s + a, 0);
 
-    const autoTotal = gross > 0
+    const autoApplicable = gross > 0
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ? (autoTypes ?? []).reduce((s: number, t: any) => s + (Number(t.recurring_amount) || 0), 0)
-      : 0;
+      ? ((autoTypes ?? []) as any[]).filter((t) => !(t.trigger_frequency === "monthly_once" && chargedThisMonth.has(`${rider.id}|${t.id}`)))
+      : [];
+    const autoTotal = autoApplicable.reduce((s: number, t) => s + (Number(t.recurring_amount) || 0), 0);
 
     const totalDed = installTotal + autoTotal;
     const net = Math.max(0, gross - totalDed);
@@ -106,22 +166,25 @@ export async function generatePayrollDetails(
       attendance_fee: attendanceFee, incentive: incentiveTotal, penalty,
       gross_earning: gross, total_deduction: totalDed, net_pay: net,
     });
-    for (const ins of rInstall) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rInstall.forEach((ins: any, idx: number) => {
+      const amount = installAmounts[idx];
       deductionsToInsert.push({
         detail_id: detailId, deduction_type_id: ins.deduction_type_id,
-        installment_id: ins.id, description: `Cicilan ${ins.installments_paid + 1}/${ins.installment_count}`,
-        amount: ins.per_period_amount,
+        installment_id: ins.id,
+        description: ins.mode === "daily"
+          ? `Sewa ${spanDays} hari x Rp${Number(ins.daily_rate || 0).toLocaleString("id-ID")}`
+          : `Cicilan ${ins.installments_paid + 1}/${ins.installment_count}`,
+        amount,
       });
-    }
-    if (gross > 0) {
-      for (const t of autoTypes ?? []) {
-        const amt = Number(t.recurring_amount) || 0;
-        if (amt <= 0) continue;
-        deductionsToInsert.push({
-          detail_id: detailId, deduction_type_id: t.id,
-          installment_id: null, description: t.name, amount: amt,
-        });
-      }
+    });
+    for (const t of autoApplicable) {
+      const amt = Number(t.recurring_amount) || 0;
+      if (amt <= 0) continue;
+      deductionsToInsert.push({
+        detail_id: detailId, deduction_type_id: t.id,
+        installment_id: null, description: t.name, amount: amt,
+      });
     }
   }
 
