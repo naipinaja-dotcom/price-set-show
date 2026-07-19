@@ -42,4 +42,23 @@ describe("resolvePeriodIfDue", () => {
     // Fri-Mon belum jatuh tempo di hari yang sama
     expect(resolvePeriodIfDue(new Date("2026-07-17T00:00:00Z"), friMon.start, friMon.end)).toBeNull();
   });
+
+  it("closeSameDay=true: Selasa(2)-Kamis(4) jatuh tempo PAS hari Kamis itu sendiri (bukan besoknya)", () => {
+    // 2026-07-16 = Kamis
+    expect(resolvePeriodIfDue(new Date("2026-07-16T10:00:00Z"), 2, 4, true)).toEqual({
+      periodStart: "2026-07-14", // Selasa
+      periodEnd: "2026-07-16", // Kamis (hari ini)
+    });
+  });
+
+  it("closeSameDay=true: belum jatuh tempo sehari sebelumnya (Rabu)", () => {
+    // 2026-07-15 = Rabu
+    expect(resolvePeriodIfDue(new Date("2026-07-15T10:00:00Z"), 2, 4, true)).toBeNull();
+  });
+
+  it("closeSameDay=false (default) tetap nunggu besok walau endWeekday match hari ini", () => {
+    // 2026-07-16 = Kamis — dengan closeSameDay default (false), harusnya BELUM
+    // jatuh tempo hari ini, baru besok (Jumat).
+    expect(resolvePeriodIfDue(new Date("2026-07-16T10:00:00Z"), 2, 4)).toBeNull();
+  });
 });

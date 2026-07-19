@@ -18,6 +18,7 @@ type Schedule = {
   weekdays: number[];
   period_start_weekday: number | null;
   period_end_weekday: number | null;
+  close_same_day: boolean;
   active: boolean;
   clients: { name: string } | null;
   riders: { full_name: string; employee_id: string } | null;
@@ -56,7 +57,7 @@ export function PayrollReminderPanel() {
     (supabase as any)
       .from("payroll_reminder_schedules")
       .select(
-        "id, label, client_id, rider_id, weekdays, period_start_weekday, period_end_weekday, active, clients(name), riders(full_name, employee_id)",
+        "id, label, client_id, rider_id, weekdays, period_start_weekday, period_end_weekday, close_same_day, active, clients(name), riders(full_name, employee_id)",
       )
       .order("created_at", { ascending: false })
       .then(({ data }: { data: Schedule[] | null }) => setSchedules(data ?? []));
@@ -181,6 +182,7 @@ export function PayrollReminderPanel() {
                     <span className="text-primary">
                       {" "}
                       · Periode {WEEKDAYS[s.period_start_weekday]}–{WEEKDAYS[s.period_end_weekday]}
+                      {s.close_same_day ? " (tutup hari sama)" : ""}
                     </span>
                   )}
                 </div>

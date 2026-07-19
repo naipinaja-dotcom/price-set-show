@@ -13,6 +13,7 @@ export type ScheduleRow = {
   weekdays: number[];
   period_start_weekday: number | null;
   period_end_weekday: number | null;
+  close_same_day: boolean;
 };
 
 export function ScheduleFormModal({
@@ -37,6 +38,7 @@ export function ScheduleFormModal({
   const [periodOn, setPeriodOn] = useState(false);
   const [periodStartWeekday, setPeriodStartWeekday] = useState(1); // Senin
   const [periodEndWeekday, setPeriodEndWeekday] = useState(0); // Minggu
+  const [closeSameDay, setCloseSameDay] = useState(false);
 
   const toggleDay = (d: number) =>
     setWeekdays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
@@ -60,10 +62,12 @@ export function ScheduleFormModal({
     if (clientIds.length === 0 && riderIds.length === 0)
       return toast.error("Pilih minimal 1 client atau rider");
     if (weekdays.length === 0) return toast.error("Pilih minimal 1 hari");
-    const period = periodOn ? { period_start_weekday: periodStartWeekday, period_end_weekday: periodEndWeekday } : { period_start_weekday: null, period_end_weekday: null };
+    const period = periodOn
+      ? { period_start_weekday: periodStartWeekday, period_end_weekday: periodEndWeekday, close_same_day: closeSameDay }
+      : { period_start_weekday: null, period_end_weekday: null, close_same_day: false };
     const rows: ScheduleRow[] = [
       ...clientIds.map((id) => ({ label: label.trim(), client_id: id, rider_id: null, weekdays, ...period })),
-      ...riderIds.map((id) => ({ label: label.trim(), client_id: null, rider_id: id, weekdays, period_start_weekday: null, period_end_weekday: null })),
+      ...riderIds.map((id) => ({ label: label.trim(), client_id: null, rider_id: id, weekdays, period_start_weekday: null, period_end_weekday: null, close_same_day: false })),
     ];
     onSave(rows);
   };
@@ -215,6 +219,24 @@ export function ScheduleFormModal({
                     ))}
                   </select>
                 </div>
+              )}
+              {periodOn && (
+                <label className="flex items-start gap-2 mt-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={closeSameDay}
+                    onChange={(e) => setCloseSameDay(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span className="text-xs">
+                    <span className="font-medium">Tutup di hari yang sama</span>{" "}
+                    <span className="text-muted-foreground">
+                      — dihitung PAS di hari terakhir periode ({WEEKDAYS[periodEndWeekday]}), bukan besoknya.
+                      Cuma aman kalau ada cutoff operasional reliable (mis. semua kiriman hari itu udah
+                      pasti selesai jam 17:00 WIB, sama jamnya kayak cron sore). Kalau ragu, biarin OFF.
+                    </span>
+                  </span>
+                </label>
               )}
             </div>
           )}

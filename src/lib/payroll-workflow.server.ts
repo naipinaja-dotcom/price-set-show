@@ -65,44 +65,57 @@ export interface PayrollWorkflowResult {
 
 // Default kalau client belum di-custom di Reminder Calendar: Senin(1)-Minggu(0),
 // sama ritme dengan Weekly PNL Push.
-const DEFAULT_PERIOD_WEEKDAYS = { start: 1, end: 0 };
+const DEFAULT_PERIOD_WEEKDAYS = { start: 1, end: 0, closeSameDay: false };
 
-// 0=Minggu..6=Sabtu (sama seperti kolom weekdays yang udah ada). Periode
-// dianggap JATUH TEMPO hari ini kalau KEMARIN persis hari terakhirnya
-// (endWeekday) — baru dihitung setelah periode itu benar-benar tutup, bukan
-// di hari terakhirnya sendiri. Support wrap-around minggu (mis. Jumat->Senin).
+// 0=Minggu..6=Sabtu (sama seperti kolom weekdays yang udah ada). Default:
+// periode dianggap JATUH TEMPO hari ini kalau KEMARIN persis hari
+// terakhirnya (endWeekday) — baru dihitung SEHARI SETELAH periode itu
+// tutup, karena gak ada cara tau apa datanya udah lengkap di hari itu
+// sendiri. Support wrap-around minggu (mis. Jumat->Senin).
+//
+// closeSameDay=true: dihitung PAS di hari terakhir periode itu sendiri
+// (endWeekday === HARI INI, bukan kemarin) — cuma aman kalau ada cutoff
+// operasional reliable, dan itu tanggung jawab admin yang nyalain opsi ini
+// di Reminder Calendar (lihat komentar migration
+// 20260720000003_payroll_period_close_same_day.sql). Amannya di sini
+// terjamin dari JADWAL CRON-nya sendiri: cron sore jalan jam 17:00 WIB,
+// sama persis sama cutoff yang diasumsikan closeSameDay — bukan dari
+// pengecekan jam tambahan di function ini.
 export function resolvePeriodIfDue(
   today: Date,
   startWeekday: number,
   endWeekday: number,
+  closeSameDay = false,
 ): { periodStart: string; periodEnd: string } | null {
-  const yesterday = new Date(today);
-  yesterday.setUTCDate(today.getUTCDate() - 1);
-  if (yesterday.getUTCDay() !== endWeekday) return null;
+  const refDay = new Date(today);
+  if (!closeSameDay) refDay.setUTCDate(today.getUTCDate() - 1);
+  if (refDay.getUTCDay() !== endWeekday) return null;
 
   const spanDays = ((endWeekday - startWeekday + 7) % 7) + 1;
-  const start = new Date(yesterday);
-  start.setUTCDate(yesterday.getUTCDate() - (spanDays - 1));
+  const start = new Date(refDay);
+  start.setUTCDate(refDay.getUTCDate() - (spanDays - 1));
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  return { periodStart: fmt(start), periodEnd: fmt(yesterday) };
+  return { periodStart: fmt(start), periodEnd: fmt(refDay) };
 }
 
-async function loadClientPeriodSchedules(admin: SupabaseAdmin): Promise<Map<string, { start: number; end: number }[]>> {
+async function loadClientPeriodSchedules(
+  admin: SupabaseAdmin,
+): Promise<Map<string, { start: number; end: number; closeSameDay: boolean }[]>> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (admin as any)
     .from("payroll_reminder_schedules")
-    .select("client_id, period_start_weekday, period_end_weekday")
+    .select("client_id, period_start_weekday, period_end_weekday, close_same_day")
     .not("client_id", "is", null)
     .is("rider_id", null) // periode = konsep level-client, bukan per-rider
     .eq("active", true)
     .not("period_start_weekday", "is", null);
   if (error) throw new Error(`Gagal ambil jadwal periode: ${error.message}`);
 
-  const byClient = new Map<string, { start: number; end: number }[]>();
+  const byClient = new Map<string, { start: number; end: number; closeSameDay: boolean }[]>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const s of (data ?? []) as any[]) {
     const arr = byClient.get(s.client_id) ?? [];
-    arr.push({ start: s.period_start_weekday, end: s.period_end_weekday });
+    arr.push({ start: s.period_start_weekday, end: s.period_end_weekday, closeSameDay: !!s.close_same_day });
     byClient.set(s.client_id, arr);
   }
   return byClient;
@@ -282,7 +295,7 @@ export async function runPayrollWorkflow(opts: {
       const clientPeriods = periodsByClient.get(c.id) ?? [DEFAULT_PERIOD_WEEKDAYS];
 
       for (const p of clientPeriods) {
-        const period = resolvePeriodIfDue(today, p.start, p.end);
+        const period = resolvePeriodIfDue(today, p.start, p.end, p.closeSameDay);
         if (!period) continue; // periode ini belum jatuh tempo hari ini
 
         const run = await findOrCreatePayrollRun(
