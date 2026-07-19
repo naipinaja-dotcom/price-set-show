@@ -1,0 +1,43 @@
+-- Payroll Workflow — pg_cron scheduling (OES AI Workforce, payroll pertama)
+--
+-- Sama seperti supabase/migrations/20260712010000_payroll_reminder_cron.sql —
+-- di-comment out karena butuh 2 nilai yang cuma diketahui pas deploy:
+--   1. URL production project ini (mis. https://xxxx.vercel.app)
+--   2. Isi env PAYROLL_WORKFLOW_SECRET yang sama persis dengan yang di-set di server
+--
+-- Cara aktivasi (jalankan manual di Supabase SQL Editor):
+--   1. Pastikan extension "pg_cron" & "pg_net" aktif (Database -> Extensions).
+--   2. Copy blok SQL di bawah, ganti <PRODUCTION_URL> dan <PAYROLL_WORKFLOW_SECRET>.
+--   3. Jalankan di SQL Editor.
+--   4. Cek jadwal aktif: SELECT * FROM cron.job;
+--   5. Cek histori run: SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10;
+--
+-- Jadwal: SETIAP HARI 01:00 UTC (08:00 WIB) — HARUS harian, bukan cuma Senin,
+-- karena periode gajian sekarang custom per client (lihat migration
+-- 20260720000002_payroll_period_schedule.sql & Reminder Calendar) — ada client
+-- yang periodenya tutup hari Kamis, ada yang Senin, dst. Endpoint sendiri yang
+-- nentuin client mana yang periodenya jatuh tempo hari itu (lihat
+-- src/lib/payroll-workflow.server.ts, resolvePeriodIfDue) — kalau gak ada yang
+-- jatuh tempo, workflow tetap jalan tapi runs[] kosong (bukan error).
+
+-- create extension if not exists pg_cron;
+-- create extension if not exists pg_net;
+--
+-- select cron.schedule(
+--   'payroll-workflow-daily',
+--   '0 1 * * *', -- tiap hari 01:00 UTC (08:00 WIB)
+--   $$
+--   select net.http_post(
+--     url := '<PRODUCTION_URL>/api/payroll-workflow',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'x-payroll-workflow-secret', '<PAYROLL_WORKFLOW_SECRET>'
+--     ),
+--     body := '{"trigger": "scheduler"}'::jsonb
+--   );
+--   $$
+-- );
+
+-- Untuk ganti jadwal atau matikan cron:
+--   select cron.unschedule('payroll-workflow-daily');
+--   -- lalu jalankan ulang cron.schedule(...) di atas dengan jadwal baru.

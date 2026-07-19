@@ -37,7 +37,7 @@ async function inChunks<T>(
 function UploadPage() {
   const [tab, setTab] = useState<"delivery" | "attendance">("delivery");
   return (
-    <AdminLayout title="Upload Data">
+    <AdminLayout title="Upload Data" subtitle="Import CSV delivery dan attendance">
       <div className="flex gap-1 p-1 bg-muted rounded-md w-fit mb-5">
         {(["delivery", "attendance"] as const).map((t) => (
           <button

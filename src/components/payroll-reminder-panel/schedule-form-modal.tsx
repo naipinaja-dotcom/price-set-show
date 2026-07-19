@@ -1,0 +1,239 @@
+import { useState } from "react";
+import { toast } from "sonner";
+
+type Client = { id: string; name: string };
+type Rider = { id: string; full_name: string; employee_id: string };
+
+const WEEKDAYS = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+
+export type ScheduleRow = {
+  label: string;
+  client_id: string | null;
+  rider_id: string | null;
+  weekdays: number[];
+  period_start_weekday: number | null;
+  period_end_weekday: number | null;
+};
+
+export function ScheduleFormModal({
+  clients,
+  riders,
+  saving,
+  onClose,
+  onSave,
+}: {
+  clients: Client[];
+  riders: Rider[];
+  saving: boolean;
+  onClose: () => void;
+  onSave: (rows: ScheduleRow[]) => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [clientIds, setClientIds] = useState<string[]>([]);
+  const [riderIds, setRiderIds] = useState<string[]>([]);
+  const [clientSearch, setClientSearch] = useState("");
+  const [riderSearch, setRiderSearch] = useState("");
+  const [weekdays, setWeekdays] = useState<number[]>([]);
+  const [periodOn, setPeriodOn] = useState(false);
+  const [periodStartWeekday, setPeriodStartWeekday] = useState(1); // Senin
+  const [periodEndWeekday, setPeriodEndWeekday] = useState(0); // Minggu
+
+  const toggleDay = (d: number) =>
+    setWeekdays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
+  const toggleClient = (id: string) =>
+    setClientIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const toggleRider = (id: string) =>
+    setRiderIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const visibleClients = clients.filter((c) =>
+    c.name.toLowerCase().includes(clientSearch.toLowerCase()),
+  );
+  const visibleRiders = riders.filter((r) =>
+    `${r.full_name} ${r.employee_id}`.toLowerCase().includes(riderSearch.toLowerCase()),
+  );
+
+  // 1 baris = 1 client ATAU 1 rider (bukan kombinasi silang) — pilih banyak
+  // client/rider sekaligus di sini cuma bikin banyak baris identik dalam
+  // 1x submit, biar ga perlu buka form berkali-kali buat tiap client.
+  const submit = () => {
+    if (!label.trim()) return toast.error("Label wajib diisi");
+    if (clientIds.length === 0 && riderIds.length === 0)
+      return toast.error("Pilih minimal 1 client atau rider");
+    if (weekdays.length === 0) return toast.error("Pilih minimal 1 hari");
+    const period = periodOn ? { period_start_weekday: periodStartWeekday, period_end_weekday: periodEndWeekday } : { period_start_weekday: null, period_end_weekday: null };
+    const rows: ScheduleRow[] = [
+      ...clientIds.map((id) => ({ label: label.trim(), client_id: id, rider_id: null, weekdays, ...period })),
+      ...riderIds.map((id) => ({ label: label.trim(), client_id: null, rider_id: id, weekdays, period_start_weekday: null, period_end_weekday: null })),
+    ];
+    onSave(rows);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-card rounded-lg w-full max-w-md p-5 max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-lg font-semibold mb-4">Jadwal Reminder Baru</h2>
+        <div className="space-y-3 text-sm">
+          <div>
+            <label className="font-medium">Label</label>
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="mis. Batch Senin & Kamis"
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Dipakai buat semua client/rider yang dipilih di bawah — kalau mau label beda per
+              client, submit terpisah.
+            </p>
+          </div>
+          <div>
+            <label className="font-medium">
+              Client{" "}
+              <span className="font-normal text-muted-foreground">
+                (bisa pilih lebih dari satu)
+              </span>
+            </label>
+            <input
+              value={clientSearch}
+              onChange={(e) => setClientSearch(e.target.value)}
+              placeholder="Cari client…"
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs"
+            />
+            <div className="mt-1 max-h-32 overflow-y-auto rounded-md border border-border divide-y divide-border">
+              {visibleClients.length === 0 ? (
+                <p className="p-2 text-xs text-muted-foreground">Tidak ada match</p>
+              ) : (
+                visibleClients.map((c) => (
+                  <label
+                    key={c.id}
+                    className="flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer hover:bg-muted/50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={clientIds.includes(c.id)}
+                      onChange={() => toggleClient(c.id)}
+                    />
+                    {c.name}
+                  </label>
+                ))
+              )}
+            </div>
+            {clientIds.length > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {clientIds.length} client dipilih.
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="font-medium">
+              Rider{" "}
+              <span className="font-normal text-muted-foreground">
+                (opsional — buat reminder khusus rider tertentu, bisa pilih lebih dari satu)
+              </span>
+            </label>
+            <input
+              value={riderSearch}
+              onChange={(e) => setRiderSearch(e.target.value)}
+              placeholder="Cari nama / kode rider…"
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs"
+            />
+            <div className="mt-1 max-h-32 overflow-y-auto rounded-md border border-border divide-y divide-border">
+              {riderSearch.trim() === "" ? (
+                <p className="p-2 text-xs text-muted-foreground">
+                  Ketik buat cari rider ({riders.length} total)
+                </p>
+              ) : visibleRiders.length === 0 ? (
+                <p className="p-2 text-xs text-muted-foreground">Tidak ada match</p>
+              ) : (
+                visibleRiders.slice(0, 50).map((r) => (
+                  <label
+                    key={r.id}
+                    className="flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer hover:bg-muted/50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={riderIds.includes(r.id)}
+                      onChange={() => toggleRider(r.id)}
+                    />
+                    {r.full_name} ({r.employee_id})
+                  </label>
+                ))
+              )}
+            </div>
+            {riderIds.length > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">{riderIds.length} rider dipilih.</p>
+            )}
+          </div>
+          <div>
+            <label className="font-medium">Hari Berulang</label>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {WEEKDAYS.map((name, d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => toggleDay(d)}
+                  className={`px-2.5 py-1 rounded text-xs border ${weekdays.includes(d) ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
+          {clientIds.length > 0 && (
+            <div className="rounded-md border border-border p-3">
+              <label className="flex items-center gap-2 font-medium cursor-pointer">
+                <input type="checkbox" checked={periodOn} onChange={(e) => setPeriodOn(e.target.checked)} />
+                Periode perhitungan payroll custom
+              </label>
+              <p className="text-xs text-muted-foreground mt-1">
+                Kosongin kalau client ini mingguan Senin–Minggu biasa. Isi kalau siklusnya beda (mis.
+                Selasa–Kamis) — client dengan 2x gajian seminggu tinggal bikin 2 jadwal terpisah dengan
+                periode masing-masing (contoh Wicked Pies: Selasa–Kamis & Jumat–Senin).
+              </p>
+              {periodOn && (
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  <select
+                    value={periodStartWeekday}
+                    onChange={(e) => setPeriodStartWeekday(Number(e.target.value))}
+                    className="rounded-md border border-border bg-background px-2 py-1.5"
+                  >
+                    {WEEKDAYS.map((name, d) => (
+                      <option key={d} value={d}>{name}</option>
+                    ))}
+                  </select>
+                  <span className="text-muted-foreground">sampai</span>
+                  <select
+                    value={periodEndWeekday}
+                    onChange={(e) => setPeriodEndWeekday(Number(e.target.value))}
+                    className="rounded-md border border-border bg-background px-2 py-1.5"
+                  >
+                    {WEEKDAYS.map((name, d) => (
+                      <option key={d} value={d}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded border border-border">
+            Batal
+          </button>
+          <button
+            onClick={submit}
+            disabled={saving}
+            className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50"
+          >
+            {saving
+              ? "Menyimpan…"
+              : `Simpan${clientIds.length + riderIds.length > 1 ? ` (${clientIds.length + riderIds.length} jadwal)` : ""}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

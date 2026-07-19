@@ -52,7 +52,13 @@ export interface RiderIdentity {
 // nggak — biar baris itu tetap kehitung/ketemu namanya, bukan diam-diam ke-skip.
 // Dipakai baca (Hitung Fee, Payroll Run), BUKAN bikin rider baru (beda dari
 // resolveOrCreateRiders yang khusus upload).
-export async function resolveRiderIdentities(rows: RiderIdentityRow[]): Promise<{
+// `client` opsional buat caller server-only (cron/workflow) yang gak punya
+// session admin login — supabase (anon) di atas dipakai default biar semua
+// caller browser yang ada sekarang gak berubah perilakunya.
+export async function resolveRiderIdentities(
+  rows: RiderIdentityRow[],
+  client: typeof supabase = supabase,
+): Promise<{
   byId: Map<string, RiderIdentity>;
   byCode: Map<string, RiderIdentity>;
   resolvedIdOf: (row: RiderIdentityRow) => string | null;
@@ -64,8 +70,8 @@ export async function resolveRiderIdentities(rows: RiderIdentityRow[]): Promise<
   const byCode = new Map<string, RiderIdentity>();
 
   const queries: Promise<{ data: RiderIdentity[] | null }>[] = [];
-  if (ids.length > 0) queries.push(supabase.from("riders").select("id, full_name, employee_id, client_id").in("id", ids) as any);
-  if (codes.length > 0) queries.push(supabase.from("riders").select("id, full_name, employee_id, client_id").in("employee_id", codes) as any);
+  if (ids.length > 0) queries.push(client.from("riders").select("id, full_name, employee_id, client_id").in("id", ids) as any);
+  if (codes.length > 0) queries.push(client.from("riders").select("id, full_name, employee_id, client_id").in("employee_id", codes) as any);
   const results = await Promise.all(queries);
   for (const res of results) {
     for (const r of res.data ?? []) {

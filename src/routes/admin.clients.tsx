@@ -43,6 +43,16 @@ function schemeLabel(type: string | undefined) {
   return SCHEME_LABEL[type] ?? type;
 }
 
+function clientInitials(name: string) {
+  return name
+    .split(" ")
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
 function downloadCSV(rows: Client[], schemeOf: Map<string, string>) {
   const header = ["No", "Kode", "Client", "Skema Revenue", "Dibuat"];
   const lines = rows.map((c, i) =>
@@ -131,78 +141,95 @@ function ClientsPage() {
     usePagination(filtered, 10);
 
   return (
-    <AdminLayout title="Client" subtitle={`${rows.length} client terdaftar`}>
+    <AdminLayout title="Clients" subtitle={`${rows.length} client terdaftar`}>
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="relative flex-1 min-w-[180px] max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative flex-1 min-w-[200px] max-w-md">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari client…"
-            className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-background outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Cari nama client..."
+            className="w-full rounded-lg border border-border bg-card pl-9 pr-3 py-2 text-[12px] outline-none focus:border-primary transition-colors"
           />
         </div>
-        <div className="flex-1" />
-        <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />
-        <button
-          onClick={() => downloadCSV(filtered, schemeOf)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-muted transition-colors"
-        >
-          <Download className="w-3.5 h-3.5" /> Download
-        </button>
-        <button
-          onClick={() => {
-            setEdit(null);
-            setOpen(true);
-          }}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-sm hover:opacity-90 transition-opacity"
-        >
-          <Plus className="w-3.5 h-3.5" /> Tambah
-        </button>
+        <div className="flex gap-2 items-center ml-auto">
+          <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />
+          <button
+            onClick={() => downloadCSV(filtered, schemeOf)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-[11px] text-muted-foreground hover:border-primary-border hover:text-primary transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" /> Download
+          </button>
+          <button
+            onClick={() => {
+              setEdit(null);
+              setOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-[11px] font-medium hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-3.5 h-3.5" /> Tambah client
+          </button>
+        </div>
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-auto">
+        <table className="w-full text-[12px] whitespace-nowrap">
           <thead>
-            <tr className="bg-primary text-primary-foreground text-[11px] font-semibold uppercase tracking-wide text-left">
-              <th className="px-3 py-2.5 w-10">No</th>
-              <th className="px-3 py-2.5 w-28">Kode Client</th>
-              <th className="px-3 py-2.5">Client</th>
-              <th className="px-3 py-2.5">Skema Revenue</th>
-              <th className="px-3 py-2.5">Tanggal Dibuat</th>
-              <th className="px-3 py-2.5 text-right w-20">Aksi</th>
+            <tr className="border-b border-border">
+              <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">
+                Client
+              </th>
+              <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">
+                Skema Revenue
+              </th>
+              <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">
+                Tanggal Dibuat
+              </th>
+              <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider pr-3">
+                Aksi
+              </th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} className="p-6 text-center text-muted-foreground">
-                  <Loader2 className="w-4 h-4 inline animate-spin mr-1" />
-                  Memuat…
+                <td colSpan={4} className="p-8 text-center">
+                  <Loader2 className="w-4 h-4 animate-spin inline text-primary" />
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-6 text-center text-muted-foreground">
+                <td colSpan={4} className="p-8 text-center text-muted-foreground text-[11px]">
                   Belum ada client
                 </td>
               </tr>
             ) : (
-              paged.map((c, i) => {
+              paged.map((c) => {
                 const scheme = schemeLabel(schemeOf.get(c.id));
                 return (
                   <tr
                     key={c.id}
-                    className={`border-t border-border hover:bg-muted/30 transition-colors ${i % 2 === 1 ? "bg-muted/10" : "bg-card"}`}
+                    className="border-b border-border last:border-b-0 hover:bg-muted/40 transition-colors cursor-pointer"
                   >
-                    <td className="px-3 py-2.5 text-muted-foreground tabular-nums text-[12px]">
-                      {from + i}
+                    <td className="p-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-primary-soft grid place-items-center text-[11px] font-semibold text-primary flex-shrink-0">
+                          {clientInitials(c.name)}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-foreground">{c.name}</div>
+                          <div
+                            className="text-[10px] text-muted-foreground"
+                            style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                          >
+                            {c.code}
+                          </div>
+                        </div>
+                      </div>
                     </td>
-                    <td className="px-3 py-2.5 font-mono text-[12px] font-semibold">{c.code}</td>
-                    <td className="px-3 py-2.5 font-medium">{c.name}</td>
-                    <td className="px-3 py-2.5">
+                    <td className="p-3">
                       {scheme ? (
                         <span className="text-[11px] font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">
                           {scheme}
@@ -211,31 +238,29 @@ function ClientsPage() {
                         <span className="text-[11px] text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 text-[12px] text-muted-foreground">
+                    <td className="p-3 text-muted-foreground">
                       {c.created_at
                         ? new Date(c.created_at).toLocaleDateString("id-ID", {
                             day: "2-digit",
                             month: "2-digit",
                             year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
                           })
                         : "—"}
                     </td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="text-right pr-3">
                       <button
                         onClick={() => {
                           setEdit(c);
                           setOpen(true);
                         }}
-                        className="p-1.5 hover:bg-muted rounded-md transition-colors"
+                        className="p-1.5 hover:bg-muted rounded-md mr-1 text-muted-foreground hover:text-foreground transition-colors"
                         title="Edit"
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => remove(c.id)}
-                        className="p-1.5 hover:bg-muted rounded-md text-destructive transition-colors"
+                        className="p-1.5 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-md transition-colors"
                         title="Hapus"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -319,7 +344,12 @@ function ClientModal({
         {/* Tab — Export Template cuma relevan buat client yang udah ada (perlu client_id) */}
         {initial && (
           <div className="flex gap-1 p-1 bg-muted rounded-md mb-4 mt-3">
-            {([["info", "Info"], ["export", "Export Template"]] as const).map(([k, l]) => (
+            {(
+              [
+                ["info", "Info"],
+                ["export", "Export Template"],
+              ] as const
+            ).map(([k, l]) => (
               <button
                 key={k}
                 type="button"
@@ -431,8 +461,9 @@ function ExportTemplateTab({ clientId, onClose }: { clientId: string; onClose: (
       <div className="flex items-start gap-2 rounded-md border border-primary-border bg-primary-soft px-3 py-2.5 mb-3">
         <FileSpreadsheet className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
         <p className="text-xs text-primary-soft-foreground leading-relaxed">
-          Kolom yang dicentang akan muncul di export "Ringkasan" Finance Worksheet — berlaku otomatis
-          tiap kali export payroll run yang di-scope ke client ini. Kolom "Driver Name" selalu tampil.
+          Kolom yang dicentang akan muncul di export "Ringkasan" Finance Worksheet — berlaku
+          otomatis tiap kali export payroll run yang di-scope ke client ini. Kolom "Driver Name"
+          selalu tampil.
         </p>
       </div>
       <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">

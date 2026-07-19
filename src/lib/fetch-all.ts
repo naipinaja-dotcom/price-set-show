@@ -8,11 +8,12 @@ type SupabaseClient = typeof supabase;
 export async function fetchAllRows<T>(
   builder: (client: SupabaseClient, from: number, to: number) => ReturnType<any["range"]>,
   pageSize = 1000,
+  client: SupabaseClient = supabase,
 ): Promise<T[]> {
   const results: T[] = [];
   let from = 0;
   while (true) {
-    const { data, error } = await builder(supabase, from, from + pageSize - 1);
+    const { data, error } = await builder(client, from, from + pageSize - 1);
     if (error) throw error;
     results.push(...(data ?? []));
     if (!data || data.length < pageSize) break;

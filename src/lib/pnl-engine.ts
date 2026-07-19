@@ -28,12 +28,26 @@ export interface PnlResult {
   totMarginPct: number;
 }
 
-// skema aktif: yang khusus client itu diutamakan, lalu yang "semua client"
+// skema aktif: harus emang berlaku hari ini (effective_from..effective_to),
+// lalu yang khusus client itu diutamakan atas "semua client", lalu yang
+// effective_from/created_at paling baru menang kalau masih ada dobel.
 export function pickPricingScheme(schemes: PricingScheme[], clientId: string, kind: SchemeFor) {
+  const today = new Date().toISOString().slice(0, 10);
   const cands = schemes.filter(
-    (s) => s.scheme_for === kind && s.params?.version === 1 && (s.client_id === clientId || s.client_id === null)
+    (s) =>
+      s.scheme_for === kind &&
+      s.params?.version === 1 &&
+      (s.client_id === clientId || s.client_id === null) &&
+      s.effective_from <= today &&
+      (!s.effective_to || s.effective_to >= today)
   );
-  return cands.sort((a, b) => (a.client_id === clientId ? -1 : 1) - (b.client_id === clientId ? -1 : 1))[0];
+  return cands.sort((a, b) => {
+    const aSpecific = a.client_id === clientId;
+    const bSpecific = b.client_id === clientId;
+    if (aSpecific !== bSpecific) return aSpecific ? -1 : 1;
+    if (a.effective_from !== b.effective_from) return a.effective_from > b.effective_from ? -1 : 1;
+    return a.created_at > b.created_at ? -1 : 1;
+  })[0];
 }
 
 export function computePnl(

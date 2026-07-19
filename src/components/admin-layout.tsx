@@ -222,9 +222,9 @@ export function AdminLayout({
                 type="button"
                 onClick={() => switchMode(m)}
                 className={
-                  "text-[12px] font-semibold py-1.5 rounded-md transition-colors " +
+                  "text-[12px] font-semibold py-1.5 rounded-md transition-all duration-200 " +
                   (mode === m
-                    ? "bg-primary text-primary-foreground shadow-sm"
+                    ? "bg-primary text-primary-foreground shadow-[0_2px_8px_rgba(124,92,252,0.3)]"
                     : "text-muted-foreground hover:text-foreground")
                 }
               >

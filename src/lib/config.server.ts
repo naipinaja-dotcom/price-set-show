@@ -55,5 +55,10 @@ export function getServerConfig() {
     openRouterApiKey: process.env.OPENROUTER_API_KEY?.trim(),
     hermesModel: (process.env.HERMES_MODEL || "nousresearch/hermes-3-llama-3.1-405b").trim(),
     cooInsightSecret: process.env.COO_INSIGHT_SECRET?.trim(),
+
+    // Payroll Workflow (lihat src/lib/payroll-workflow.server.ts) — cron
+    // mingguan generate+validate+audit payroll. Sama polanya dgn
+    // payrollReminderSecret, header `x-payroll-workflow-secret`.
+    payrollWorkflowSecret: process.env.PAYROLL_WORKFLOW_SECRET?.trim(),
   };
 }

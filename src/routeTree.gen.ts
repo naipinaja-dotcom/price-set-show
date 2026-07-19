@@ -18,8 +18,10 @@ import { Route as RiderProfileRouteImport } from './routes/rider.profile'
 import { Route as RiderPayslipsRouteImport } from './routes/rider.payslips'
 import { Route as RiderDashboardRouteImport } from './routes/rider.dashboard'
 import { Route as ApiPnlWeeklyPushRouteImport } from './routes/api.pnl-weekly-push'
+import { Route as ApiPayrollWorkflowRouteImport } from './routes/api.payroll-workflow'
 import { Route as ApiPayrollReminderRouteImport } from './routes/api.payroll-reminder'
 import { Route as ApiExecutiveDashboardRouteImport } from './routes/api.executive-dashboard'
+import { Route as ApiDataImportRouteImport } from './routes/api.data-import'
 import { Route as ApiCooInsightRouteImport } from './routes/api.coo-insight'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as AdminUploadRouteImport } from './routes/admin.upload'
@@ -89,6 +91,11 @@ const ApiPnlWeeklyPushRoute = ApiPnlWeeklyPushRouteImport.update({
   path: '/api/pnl-weekly-push',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPayrollWorkflowRoute = ApiPayrollWorkflowRouteImport.update({
+  id: '/api/payroll-workflow',
+  path: '/api/payroll-workflow',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPayrollReminderRoute = ApiPayrollReminderRouteImport.update({
   id: '/api/payroll-reminder',
   path: '/api/payroll-reminder',
@@ -97,6 +104,11 @@ const ApiPayrollReminderRoute = ApiPayrollReminderRouteImport.update({
 const ApiExecutiveDashboardRoute = ApiExecutiveDashboardRouteImport.update({
   id: '/api/executive-dashboard',
   path: '/api/executive-dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataImportRoute = ApiDataImportRouteImport.update({
+  id: '/api/data-import',
+  path: '/api/data-import',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiCooInsightRoute = ApiCooInsightRouteImport.update({
@@ -241,8 +253,10 @@ export interface FileRoutesByFullPath {
   '/admin/upload': typeof AdminUploadRoute
   '/admin/users': typeof AdminUsersRoute
   '/api/coo-insight': typeof ApiCooInsightRoute
+  '/api/data-import': typeof ApiDataImportRoute
   '/api/executive-dashboard': typeof ApiExecutiveDashboardRoute
   '/api/payroll-reminder': typeof ApiPayrollReminderRoute
+  '/api/payroll-workflow': typeof ApiPayrollWorkflowRoute
   '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/rider/dashboard': typeof RiderDashboardRoute
   '/rider/payslips': typeof RiderPayslipsRoute
@@ -277,8 +291,10 @@ export interface FileRoutesByTo {
   '/admin/upload': typeof AdminUploadRoute
   '/admin/users': typeof AdminUsersRoute
   '/api/coo-insight': typeof ApiCooInsightRoute
+  '/api/data-import': typeof ApiDataImportRoute
   '/api/executive-dashboard': typeof ApiExecutiveDashboardRoute
   '/api/payroll-reminder': typeof ApiPayrollReminderRoute
+  '/api/payroll-workflow': typeof ApiPayrollWorkflowRoute
   '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/rider/dashboard': typeof RiderDashboardRoute
   '/rider/payslips': typeof RiderPayslipsRoute
@@ -314,8 +330,10 @@ export interface FileRoutesById {
   '/admin/upload': typeof AdminUploadRoute
   '/admin/users': typeof AdminUsersRoute
   '/api/coo-insight': typeof ApiCooInsightRoute
+  '/api/data-import': typeof ApiDataImportRoute
   '/api/executive-dashboard': typeof ApiExecutiveDashboardRoute
   '/api/payroll-reminder': typeof ApiPayrollReminderRoute
+  '/api/payroll-workflow': typeof ApiPayrollWorkflowRoute
   '/api/pnl-weekly-push': typeof ApiPnlWeeklyPushRoute
   '/rider/dashboard': typeof RiderDashboardRoute
   '/rider/payslips': typeof RiderPayslipsRoute
@@ -352,8 +370,10 @@ export interface FileRouteTypes {
     | '/admin/upload'
     | '/admin/users'
     | '/api/coo-insight'
+    | '/api/data-import'
     | '/api/executive-dashboard'
     | '/api/payroll-reminder'
+    | '/api/payroll-workflow'
     | '/api/pnl-weekly-push'
     | '/rider/dashboard'
     | '/rider/payslips'
@@ -388,8 +408,10 @@ export interface FileRouteTypes {
     | '/admin/upload'
     | '/admin/users'
     | '/api/coo-insight'
+    | '/api/data-import'
     | '/api/executive-dashboard'
     | '/api/payroll-reminder'
+    | '/api/payroll-workflow'
     | '/api/pnl-weekly-push'
     | '/rider/dashboard'
     | '/rider/payslips'
@@ -424,8 +446,10 @@ export interface FileRouteTypes {
     | '/admin/upload'
     | '/admin/users'
     | '/api/coo-insight'
+    | '/api/data-import'
     | '/api/executive-dashboard'
     | '/api/payroll-reminder'
+    | '/api/payroll-workflow'
     | '/api/pnl-weekly-push'
     | '/rider/dashboard'
     | '/rider/payslips'
@@ -442,8 +466,10 @@ export interface RootRouteChildren {
   RiderRoute: typeof RiderRouteWithChildren
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ApiCooInsightRoute: typeof ApiCooInsightRoute
+  ApiDataImportRoute: typeof ApiDataImportRoute
   ApiExecutiveDashboardRoute: typeof ApiExecutiveDashboardRoute
   ApiPayrollReminderRoute: typeof ApiPayrollReminderRoute
+  ApiPayrollWorkflowRoute: typeof ApiPayrollWorkflowRoute
   ApiPnlWeeklyPushRoute: typeof ApiPnlWeeklyPushRoute
 }
 
@@ -512,6 +538,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPnlWeeklyPushRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/payroll-workflow': {
+      id: '/api/payroll-workflow'
+      path: '/api/payroll-workflow'
+      fullPath: '/api/payroll-workflow'
+      preLoaderRoute: typeof ApiPayrollWorkflowRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/payroll-reminder': {
       id: '/api/payroll-reminder'
       path: '/api/payroll-reminder'
@@ -524,6 +557,13 @@ declare module '@tanstack/react-router' {
       path: '/api/executive-dashboard'
       fullPath: '/api/executive-dashboard'
       preLoaderRoute: typeof ApiExecutiveDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data-import': {
+      id: '/api/data-import'
+      path: '/api/data-import'
+      fullPath: '/api/data-import'
+      preLoaderRoute: typeof ApiDataImportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/coo-insight': {
@@ -763,8 +803,10 @@ const rootRouteChildren: RootRouteChildren = {
   RiderRoute: RiderRouteWithChildren,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   ApiCooInsightRoute: ApiCooInsightRoute,
+  ApiDataImportRoute: ApiDataImportRoute,
   ApiExecutiveDashboardRoute: ApiExecutiveDashboardRoute,
   ApiPayrollReminderRoute: ApiPayrollReminderRoute,
+  ApiPayrollWorkflowRoute: ApiPayrollWorkflowRoute,
   ApiPnlWeeklyPushRoute: ApiPnlWeeklyPushRoute,
 }
 export const routeTree = rootRouteImport

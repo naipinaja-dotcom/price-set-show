@@ -84,8 +84,13 @@ function PricingListPage() {
   const schemeGroups = [...groupMap.values()];
 
   const renderSchemeRow = (s: PricingScheme, indented = false) => (
-    <tr key={s.id} className="border-t border-border hover:bg-muted/30">
-      <td className={"px-4 py-3 font-medium" + (indented ? " pl-9" : "")}>{s.name}</td>
+    <tr
+      key={s.id}
+      className="border-b border-border last:border-b-0 hover:bg-muted/40 transition-colors"
+    >
+      <td className={"px-4 py-3 font-medium text-foreground" + (indented ? " pl-9" : "")}>
+        {s.name}
+      </td>
       <td className="px-4 py-3 text-muted-foreground">{s.client_name ?? "Semua Client"}</td>
       <td className="px-4 py-3">
         <span
@@ -134,11 +139,11 @@ function PricingListPage() {
     <AdminLayout title="Pricing Schemes" subtitle="Skema kalkulasi pendapatan rider per client">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2">
-          <label className="text-xs text-muted-foreground">Filter Client</label>
+          <label className="text-[11px] text-muted-foreground">Filter Client</label>
           <select
             value={filterClient}
             onChange={(e) => setFilterClient(e.target.value)}
-            className="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs"
+            className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] outline-none focus:border-primary transition-colors"
           >
             <option value="all">Semua Client</option>
             <option value="all-clients">Berlaku Semua Client</option>
@@ -151,9 +156,9 @@ function PricingListPage() {
         </div>
         <Link
           to="/admin/pricing/new"
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:opacity-90"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-[11px] font-medium hover:opacity-90 transition-opacity"
         >
-          <Plus className="w-4 h-4" /> Tambah Skema
+          <Plus className="w-3.5 h-3.5" /> Tambah Skema
         </Link>
       </div>
 
@@ -294,7 +299,7 @@ function PricingListPage() {
         </div>
       )}
 
-      <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
         {filtered.length === 0 ? (
           <div className="p-10 text-center">
             <div className="w-12 h-12 rounded-full bg-primary-soft text-primary grid place-items-center mx-auto mb-3">
@@ -306,21 +311,31 @@ function PricingListPage() {
             </p>
             <button
               onClick={() => navigate({ to: "/admin/pricing/new" })}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
             >
               <Plus className="w-4 h-4" /> Tambah Skema
             </button>
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-muted/60">
-              <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-2.5 font-medium">Nama Skema</th>
-                <th className="px-4 py-2.5 font-medium">Client</th>
-                <th className="px-4 py-2.5 font-medium">Untuk</th>
-                <th className="px-4 py-2.5 font-medium">Tipe</th>
-                <th className="px-4 py-2.5 font-medium">Berlaku</th>
-                <th className="px-4 py-2.5 font-medium w-24" />
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                  Nama Skema
+                </th>
+                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                  Client
+                </th>
+                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                  Untuk
+                </th>
+                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                  Tipe
+                </th>
+                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                  Berlaku
+                </th>
+                <th className="px-4 py-3 w-24" />
               </tr>
             </thead>
             <tbody>
@@ -333,7 +348,7 @@ function PricingListPage() {
                   <Fragment key={g.key}>
                     <tr
                       onClick={() => toggleGroup(g.key)}
-                      className="border-t border-border hover:bg-muted/30 cursor-pointer bg-muted/20"
+                      className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer bg-muted/20 transition-colors"
                     >
                       <td className="px-4 py-3" colSpan={6}>
                         <div className="flex items-center gap-2">

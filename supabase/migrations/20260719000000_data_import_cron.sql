@@ -1,0 +1,50 @@
+-- Daily Data Import — pg_cron scheduling
+--
+-- Tarik data delivery_records & attendance_logs dari sistem eksternal
+-- (REST API / direct DB) setiap hari jam 06:00 WIB (23:00 UTC hari
+-- sebelumnya). Data kemarin otomatis di-import, dedup terhadap data
+-- yang sudah ada.
+--
+-- Ini BUKAN migration otomatis. Isinya sengaja di-comment out karena
+-- butuh 2 nilai yang cuma diketahui pas deploy:
+--   1. URL production (mis. https://dash-payroll-engine.vercel.app)
+--   2. Isi env DATA_IMPORT_SECRET
+--
+-- Cara aktivasi (jalankan manual di Supabase SQL Editor):
+--   1. Pastikan pg_cron & pg_net sudah aktif (Dashboard -> Database ->
+--      Extensions). Kalau sudah setup cron lain, kemungkinan sudah aktif.
+--   2. Copy blok SQL di bawah, ganti dua placeholder:
+--        <PRODUCTION_URL>       -> domain production (tanpa trailing slash)
+--        <DATA_IMPORT_SECRET>   -> isi env DATA_IMPORT_SECRET
+--   3. Jalankan di SQL Editor.
+--   4. Cek: SELECT * FROM cron.job;
+--   5. Monitor: SELECT * FROM cron.job_run_details
+--      ORDER BY start_time DESC LIMIT 10;
+
+-- create extension if not exists pg_cron;
+-- create extension if not exists pg_net;
+--
+-- select cron.schedule(
+--   'daily-data-import',
+--   '0 23 * * *', -- 23:00 UTC = 06:00 WIB keesokan harinya
+--   $$
+--   select net.http_post(
+--     url := '<PRODUCTION_URL>/api/data-import',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'x-data-import-secret', '<DATA_IMPORT_SECRET>'
+--     ),
+--     body := '{}'::jsonb
+--   );
+--   $$
+-- );
+
+-- Untuk ganti jadwal atau matikan:
+--   select cron.unschedule('daily-data-import');
+--   -- lalu jalankan ulang cron.schedule(...) dengan jadwal baru.
+
+-- Untuk import manual tanggal tertentu (misal backfill):
+--   curl -X POST https://dash-payroll-engine.vercel.app/api/data-import \
+--     -H "Content-Type: application/json" \
+--     -H "x-data-import-secret: <secret>" \
+--     -d '{"date": "2026-07-15"}'

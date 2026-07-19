@@ -107,19 +107,29 @@ function buildRangeRow(r: RangeRowState): RangeRow {
   };
 }
 
-function buildRangeDimension(d: RangeDimensionState): RangeDimensionConfig {
-  return { enabled: d.enabled, accumulate: d.accumulate, rows: d.rows.map(buildRangeRow) };
+// `enabled` diterima sebagai parameter (dari checkbox/subtype), BUKAN dibaca
+// dari d.enabled — field itu cuma keikut loadDeliveryState() pas buka skema
+// lama, gak pernah di-toggle checkbox (sama persis bug yang kejadian di
+// buildDeliveryConfig, cuma nempel satu langkah lebih dalam).
+function buildRangeDimension(enabled: boolean, d: RangeDimensionState): RangeDimensionConfig {
+  return { enabled, accumulate: d.accumulate, rows: d.rows.map(buildRangeRow) };
 }
 
 export function deliveryEnvelopeType(_subtype: unknown, _d: DeliveryState): PricingCalcType {
   return "modular_v2";
 }
 
-export function buildDeliveryConfig(_subtype: unknown, d: ModularDeliveryState): ModularDeliveryConfig {
-  const weightDim = buildRangeDimension(d.weight);
+export function buildDeliveryConfig(subtype: unknown, d: ModularDeliveryState): ModularDeliveryConfig {
+  // Sumber kebenaran "dimensi mana yang aktif" adalah checkbox Distance/Weight
+  // (subtype) di pricing-form.tsx, BUKAN d.distance.enabled/d.weight.enabled —
+  // dua field itu cuma keikut dari loadDeliveryState() pas buka skema lama,
+  // gak pernah di-toggle checkbox-nya, jadi kalau dipakai balik di sini
+  // hasilnya selalu null/default meski tabelnya udah diisi di layar.
+  const dims = (subtype as { distance?: boolean; weight?: boolean } | null) || { distance: false, weight: false };
+  const weightDim = buildRangeDimension(!!dims.weight, d.weight);
   return {
-    distance: d.distance.enabled ? buildRangeDimension(d.distance) : null,
-    weight: d.weight.enabled
+    distance: dims.distance ? buildRangeDimension(true, d.distance) : null,
+    weight: dims.weight
       ? {
           ...weightDim,
           mode: d.weight.mode,
@@ -142,7 +152,7 @@ export function buildDeliveryConfig(_subtype: unknown, d: ModularDeliveryState):
     match_column: d.match_column,
     rates: d.rates.map((r) => ({ key: r.key, rate: parseRupiah(r.rate) })),
     unit_basis: d.unit_basis,
-    _dims: { distance: d.distance.enabled, weight: d.weight.enabled },
+    _dims: { distance: !!dims.distance, weight: !!dims.weight },
   };
 }
 
@@ -301,7 +311,12 @@ function RangeTableEditor({
   const addRow = (type: "flat" | "tier") => {
     const last = rows[rows.length - 1];
     const from = last && last.to.trim() !== "" ? last.to : last ? "" : "0";
-    onChange([...rows, emptyRangeRow(type, from || "0")]);
+    const row = emptyRangeRow(type, from || "0");
+    // Base fee nerusin dari baris sebelumnya (jangkar buat rumus tier: base_fee
+    // + ceil(span/step)*add_per_step) — tetep bisa diubah manual kalau band ini
+    // memang mau base yang beda.
+    if (last) row.base_fee = last.base_fee;
+    onChange([...rows, row]);
   };
 
   const inputCls =

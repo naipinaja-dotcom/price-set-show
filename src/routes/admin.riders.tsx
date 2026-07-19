@@ -97,81 +97,95 @@ function RidersPage() {
     </span>;
   };
 
+  const getInitials = (name: string) =>
+    name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+
   return (
-    <AdminLayout title="Riders">
-      <div className="relative mb-3 max-w-md">
-        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Cari nama atau kode MTR…"
-          className="w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-        />
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex gap-2 flex-wrap">
-          {(["all", ...STATUS_ORDER] as const).map((s) => (
-            <button key={s} onClick={() => setFilter(s)}
-              className={`px-3 py-1 text-xs rounded-full border ${filter === s ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>
-              {s === "all" ? "Semua" : STATUS_LABEL[s]}
-            </button>
-          ))}
+    <AdminLayout title="Riders" subtitle="Kelola data rider dan status operasional">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative flex-1 min-w-[200px] max-w-md">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Cari nama, kode, atau nomor HP..."
+            className="w-full rounded-lg border border-border bg-card pl-9 pr-3 py-2 text-[12px] outline-none focus:border-primary transition-colors"
+          />
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-1 flex-wrap">
+          {(["all", ...STATUS_ORDER] as const).map((s) => {
+            const count = s === "all" ? rows.length : rows.filter((r) => r.status === s).length;
+            return (
+              <button key={s} onClick={() => setFilter(s)}
+                className={`px-3 py-1.5 text-[11px] rounded-full border transition-colors ${filter === s ? "bg-primary text-primary-foreground border-primary font-medium" : "border-border text-muted-foreground hover:border-primary-border hover:text-foreground"}`}>
+                {s === "all" ? "Semua" : STATUS_LABEL[s]}
+                <span className="ml-1 opacity-70" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px" }}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex gap-2 items-center ml-auto">
           <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />
           <button onClick={() => setImportOpen(true)}
-            className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">
-            <Upload className="w-4 h-4" /> Import CSV
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-[11px] text-muted-foreground hover:border-primary-border hover:text-primary transition-colors">
+            <Upload className="w-3.5 h-3.5" /> Import CSV
           </button>
           <button onClick={() => { setEdit(null); setOpen(true); }}
-            className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm">
-            <Plus className="w-4 h-4" /> Tambah Rider
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-[11px] font-medium hover:opacity-90 transition-opacity">
+            <Plus className="w-3.5 h-3.5" /> Tambah rider
           </button>
         </div>
       </div>
-      <div className="rounded-lg border border-border overflow-auto">
-        <table className="w-full text-sm whitespace-nowrap">
-          <thead className="bg-muted text-left sticky top-0">
-            <tr>
-              <th className="p-3">Kode Mitra</th>
-              <th className="p-3">NIK</th>
-              <th className="p-3">Nama</th>
-              <th className="p-3">Nomor WhatsApp</th>
-              <th className="p-3">Email</th>
-              <th className="p-3">Nomor Rekening</th>
-              <th className="p-3">Nama Bank</th>
-              <th className="p-3">Nama Pemilik Rekening</th>
-              <th className="p-3">Tanggal Lahir</th>
-              <th className="p-3">Tempat Lahir</th>
-              <th className="p-3">Status</th>
-              <th className="text-right pr-3">Aksi</th>
+
+      {/* Table */}
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-auto">
+        <table className="w-full text-[12px] whitespace-nowrap">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">Rider</th>
+              <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">NIK</th>
+              <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">WhatsApp</th>
+              <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">Bank</th>
+              <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">No. Rekening</th>
+              <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">Status</th>
+              <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider pr-3">Aksi</th>
             </tr>
           </thead>
           <tbody>
-            {loading ? <tr><td colSpan={12} className="p-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline" /></td></tr>
-            : filtered.length === 0 ? <tr><td colSpan={12} className="p-6 text-center text-muted-foreground">Tidak ada rider</td></tr>
-            : paged.map((r) => (
-              <tr key={r.id} className="border-t border-border hover:bg-muted/30">
-                <td className="p-3 font-mono text-xs">{r.employee_id}</td>
-                <td className="p-3">{r.nik ?? "—"}</td>
-                <td className="p-3 font-medium">{r.full_name}</td>
-                <td className="p-3">{r.phone ?? "—"}</td>
-                <td className="p-3">{r.email ?? "—"}</td>
-                <td className="p-3 font-mono text-xs">{r.bank_account ?? "—"}</td>
-                <td className="p-3">{r.bank_name ?? "—"}</td>
-                <td className="p-3">{r.bank_account_holder ?? "—"}</td>
-                <td className="p-3">{r.birth_date ?? "—"}</td>
-                <td className="p-3">{r.birth_place ?? "—"}</td>
-                <td className="p-3">{statusBadge(r.status)}</td>
-                <td className="text-right pr-3">
-                  <button onClick={() => { setEdit(r); setOpen(true); }} className="p-1.5 hover:bg-muted rounded mr-1" title="Edit"><Pencil className="w-4 h-4" /></button>
-                  <button onClick={() => handleDelete(r)} disabled={deletingId === r.id} title="Hapus rider permanen"
-                    className="p-1.5 hover:bg-destructive/10 text-destructive hover:text-destructive rounded disabled:opacity-50">
-                    {deletingId === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {loading ? (
+              <tr><td colSpan={7} className="p-8 text-center"><Loader2 className="w-4 h-4 animate-spin inline text-primary" /></td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={7} className="p-8 text-center text-muted-foreground text-[11px]">Tidak ada rider ditemukan</td></tr>
+            ) : (
+              paged.map((r) => (
+                <tr key={r.id} className="border-b border-border last:border-b-0 hover:bg-muted/40 transition-colors cursor-pointer">
+                  <td className="p-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-primary-soft grid place-items-center text-[11px] font-semibold text-primary flex-shrink-0">
+                        {getInitials(r.full_name)}
+                      </div>
+                      <div>
+                        <div className="font-semibold text-foreground">{r.full_name}</div>
+                        <div className="text-[10px] text-muted-foreground" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{r.employee_id}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="p-3 text-muted-foreground">{r.nik ?? "—"}</td>
+                  <td className="p-3 text-muted-foreground">{r.phone ?? "—"}</td>
+                  <td className="p-3 text-muted-foreground">{r.bank_name ?? "—"}</td>
+                  <td className="p-3 text-muted-foreground" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px" }}>{r.bank_account ?? "—"}</td>
+                  <td className="p-3">{statusBadge(r.status)}</td>
+                  <td className="text-right pr-3">
+                    <button onClick={() => { setEdit(r); setOpen(true); }} className="p-1.5 hover:bg-muted rounded-md mr-1 text-muted-foreground hover:text-foreground transition-colors" title="Edit"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => handleDelete(r)} disabled={deletingId === r.id} title="Hapus rider"
+                      className="p-1.5 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-md disabled:opacity-50 transition-colors">
+                      {deletingId === r.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

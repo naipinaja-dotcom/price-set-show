@@ -12,10 +12,17 @@ export interface PayrollRunLite {
   client_id: string | null;
   period_start: string;
   period_end: string;
+  status?: string;
 }
 
-export async function generatePayrollDetails(run: PayrollRunLite): Promise<{ detailCount: number }> {
-  await supabase.from("payroll_details").delete().eq("run_id", run.id);
+// `client` opsional: default-nya client browser (anon) yang dipakai selama ini
+// dari Hitung Fee/Payroll Run. Cron/workflow server-only (gak ada session admin)
+// wajib kirim getSupabaseAdmin() di sini — lihat payroll-workflow.server.ts.
+export async function generatePayrollDetails(
+  run: PayrollRunLite,
+  client: typeof supabase = supabase,
+): Promise<{ detailCount: number }> {
+  await client.from("payroll_details").delete().eq("run_id", run.id);
 
   const [deliveries, attendance] = await Promise.all([
     fetchAllRows<{ rider_id: string | null; driver_code: string | null; fee: number | null }>((sb, from, to) => {
@@ -23,16 +30,16 @@ export async function generatePayrollDetails(run: PayrollRunLite): Promise<{ det
         .gte("delivery_date", run.period_start).lte("delivery_date", run.period_end);
       if (run.client_id) q = q.eq("client_id", run.client_id);
       return q.range(from, to);
-    }),
+    }, 1000, client),
     fetchAllRows<{ rider_id: string | null; driver_code: string | null; fee: number | null }>((sb, from, to) => {
       let q = (sb as any).from("attendance_logs").select("rider_id, driver_code, fee")
         .gte("log_date", run.period_start).lte("log_date", run.period_end);
       if (run.client_id) q = q.eq("client_id", run.client_id);
       return q.range(from, to);
-    }),
+    }, 1000, client),
   ]);
 
-  const { resolvedIdOf } = await resolveRiderIdentities([...deliveries, ...attendance]);
+  const { resolvedIdOf } = await resolveRiderIdentities([...deliveries, ...attendance], client);
   const riderIds = [...new Set([
     ...deliveries.map(resolvedIdOf),
     ...attendance.map(resolvedIdOf),
@@ -41,7 +48,7 @@ export async function generatePayrollDetails(run: PayrollRunLite): Promise<{ det
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let riders: any[] = [];
   if (riderIds.length > 0) {
-    const { data, error } = await supabase.from("riders")
+    const { data, error } = await client.from("riders")
       .select("id, client_id, employee_id, full_name")
       .in("id", riderIds);
     if (error) throw error;
@@ -49,9 +56,9 @@ export async function generatePayrollDetails(run: PayrollRunLite): Promise<{ det
   }
 
   const [{ data: installments }, { data: autoTypes }] = await Promise.all([
-    supabase.from("rider_installments").select("*").eq("active", true)
+    client.from("rider_installments").select("*").eq("active", true)
       .lte("next_deduction_date", run.period_end),
-    (supabase as any).from("deduction_types").select("id, name, recurring_amount")
+    (client as any).from("deduction_types").select("id, name, recurring_amount")
       .eq("active", true).eq("auto_recurring", true),
   ]);
 
@@ -119,11 +126,11 @@ export async function generatePayrollDetails(run: PayrollRunLite): Promise<{ det
   }
 
   if (detailsToInsert.length) {
-    const { error: e1 } = await supabase.from("payroll_details").insert(detailsToInsert);
+    const { error: e1 } = await client.from("payroll_details").insert(detailsToInsert);
     if (e1) throw e1;
   }
   if (deductionsToInsert.length) {
-    const { error: e2 } = await supabase.from("payroll_deductions").insert(deductionsToInsert);
+    const { error: e2 } = await client.from("payroll_deductions").insert(deductionsToInsert);
     if (e2) throw e2;
   }
 
@@ -135,13 +142,16 @@ export async function generatePayrollDetails(run: PayrollRunLite): Promise<{ det
 // bikin baru status "draft". Dipanggil otomatis abis commit() di Hitung Fee,
 // biar run-nya langsung ready direview di Payroll Run — gak perlu klik "Buat
 // Run" manual lagi.
-export async function findOrCreatePayrollRun(opts: {
-  clientId: string | null;
-  clientName: string;
-  periodStart: string;
-  periodEnd: string;
-}): Promise<PayrollRunLite> {
-  let q = (supabase as any).from("payroll_runs").select("id, client_id, period_start, period_end, status")
+export async function findOrCreatePayrollRun(
+  opts: {
+    clientId: string | null;
+    clientName: string;
+    periodStart: string;
+    periodEnd: string;
+  },
+  client: typeof supabase = supabase,
+): Promise<PayrollRunLite> {
+  let q = (client as any).from("payroll_runs").select("id, client_id, period_start, period_end, status")
     .eq("period_start", opts.periodStart).eq("period_end", opts.periodEnd)
     .neq("status", "published");
   q = opts.clientId ? q.eq("client_id", opts.clientId) : q.is("client_id", null);
@@ -150,7 +160,7 @@ export async function findOrCreatePayrollRun(opts: {
   if (existing) return existing;
 
   const name = `Payroll ${opts.clientName} periode ${opts.periodStart} → ${opts.periodEnd}`;
-  const { data: created, error: createErr } = await (supabase as any).from("payroll_runs")
+  const { data: created, error: createErr } = await (client as any).from("payroll_runs")
     .insert({ name, period_type: "weekly", period_start: opts.periodStart, period_end: opts.periodEnd, client_id: opts.clientId })
     .select("id, client_id, period_start, period_end, status").single();
   if (createErr) throw createErr;
