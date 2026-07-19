@@ -120,7 +120,15 @@ function buildEnvelope(
       category === "delivery" && f.addKgOn && !(subtype as DeliveryDimensions | null)?.weight
         ? { enabled: true, tier: buildStepTier(f.addKg) }
         : null,
-    multi_drop: f.multiDropOn ? { fee_per_extra_shipment: parseRupiah(f.multiDropFee) } : null,
+    // Sama seperti Add-KG di atas — cuma masuk akal buat kategori delivery
+    // (multi_drop dihitung dari delivery_records.delivery_date, gak ada
+    // ekuivalennya di attendance/hybrid). calcAttendanceScheme/calcHybridScheme
+    // gak pernah baca field ini, jadi kalau gak di-gate di sini toggle-nya
+    // nyantol gak kepake (sama kelasnya sama bug billing_addons di atas).
+    multi_drop:
+      category === "delivery" && f.multiDropOn
+        ? { fee_per_extra_shipment: parseRupiah(f.multiDropFee) }
+        : null,
     billing_addons:
       schemeFor === "client" && f.billingOn
         ? {
@@ -514,17 +522,19 @@ function PricingFormInner({
           </ToggleBlock>
         )}
 
-        <ToggleBlock
-          label="Multi-drop (kiriman ke-2 dst)"
-          hint="Otomatis mulai kiriman ke-2 dalam hari yang sama, per rider."
-          on={f.multiDropOn}
-          onToggle={(on) => patch({ multiDropOn: on })}
-        >
-          <div className="flex flex-col gap-1.5 max-w-xs">
-            <FieldLabel>Fee per kiriman ekstra (Rp)</FieldLabel>
-            <RupiahInput value={f.multiDropFee} onChange={(v) => patch({ multiDropFee: v })} />
-          </div>
-        </ToggleBlock>
+        {category === "delivery" && (
+          <ToggleBlock
+            label="Multi-drop (kiriman ke-2 dst)"
+            hint="Otomatis mulai kiriman ke-2 dalam hari yang sama, per rider."
+            on={f.multiDropOn}
+            onToggle={(on) => patch({ multiDropOn: on })}
+          >
+            <div className="flex flex-col gap-1.5 max-w-xs">
+              <FieldLabel>Fee per kiriman ekstra (Rp)</FieldLabel>
+              <RupiahInput value={f.multiDropFee} onChange={(v) => patch({ multiDropFee: v })} />
+            </div>
+          </ToggleBlock>
+        )}
 
         {schemeFor === "client" && (
           <ToggleBlock

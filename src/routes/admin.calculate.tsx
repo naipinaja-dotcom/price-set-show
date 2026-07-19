@@ -394,7 +394,11 @@ function CalculatePage() {
     const isCombined = ranScheme.category === "hybrid";
     const r = isAttendance ? attResult : isCombined ? combinedResult : result;
     if (!r) return;
-    const total = !isAttendance && result?.billing ? result.billing.final : r.subtotal;
+    // r.grandTotal udah nerapin billing_addons buat ketiga kategori (delivery/
+    // attendance/hybrid) — sebelumnya di sini cuma baca `result?.billing`
+    // (state skema delivery) walau skema yang lagi jalan attendance/hybrid,
+    // jadi billing-nya kebaca dari run yang gak nyambung sama sekali.
+    const total = r.grandTotal;
     if (
       !(await confirmDialog({
         title: "Simpan sebagai invoice?",
@@ -419,7 +423,7 @@ function CalculatePage() {
         status: "draft",
         detail_breakdown: {
           per_rider: r.perRider,
-          billing: !isAttendance ? (result?.billing ?? null) : null,
+          billing: r.billing ?? null,
           warnings: r.warnings,
         },
       });
@@ -742,11 +746,22 @@ function CalculatePage() {
             <SummaryCard label="Baris di-skip" value={String(combinedResult.skippedRows)} />
             <SummaryCard label="Subtotal" value={formatRupiah(combinedResult.subtotal)} />
             <SummaryCard
-              label="Total Fee Rider"
-              value={formatRupiah(combinedResult.subtotal)}
+              label={ranScheme.scheme_for === "client" ? "Total Tagihan" : "Total Fee Rider"}
+              value={formatRupiah(combinedResult.grandTotal)}
               highlight
             />
           </div>
+          {combinedResult.billing && (
+            <div className="rounded-md border border-border bg-card px-4 py-3 mb-4 text-sm space-y-1">
+              <Line label="Subtotal" value={formatRupiah(combinedResult.subtotal)} />
+              {combinedResult.billing.floored && <Line label="→ dinaikkan ke Min Charge" value="" muted />}
+              <Line label="+ Admin Fee" value={formatRupiah(combinedResult.billing.admin_fee)} />
+              <Line label="+ PPN" value={formatRupiah(combinedResult.billing.ppn)} />
+              <div className="border-t border-border mt-2 pt-2">
+                <Line label="Total Tagihan" value={formatRupiah(combinedResult.billing.final)} bold />
+              </div>
+            </div>
+          )}
 
           {combinedResult.warnings.length > 0 && (
             <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 mb-4 flex items-start gap-2.5 text-xs text-warning">
@@ -931,11 +946,22 @@ function CalculatePage() {
             <SummaryCard label="Baris absen (fee 0)" value={String(attResult.absentRows)} />
             <SummaryCard label="Subtotal" value={formatRupiah(attResult.subtotal)} />
             <SummaryCard
-              label="Total Fee Attendance"
-              value={formatRupiah(attResult.subtotal)}
+              label={ranScheme.scheme_for === "client" ? "Total Tagihan" : "Total Fee Attendance"}
+              value={formatRupiah(attResult.grandTotal)}
               highlight
             />
           </div>
+          {attResult.billing && (
+            <div className="rounded-md border border-border bg-card px-4 py-3 mb-4 text-sm space-y-1">
+              <Line label="Subtotal" value={formatRupiah(attResult.subtotal)} />
+              {attResult.billing.floored && <Line label="→ dinaikkan ke Min Charge" value="" muted />}
+              <Line label="+ Admin Fee" value={formatRupiah(attResult.billing.admin_fee)} />
+              <Line label="+ PPN" value={formatRupiah(attResult.billing.ppn)} />
+              <div className="border-t border-border mt-2 pt-2">
+                <Line label="Total Tagihan" value={formatRupiah(attResult.billing.final)} bold />
+              </div>
+            </div>
+          )}
 
           {attResult.warnings.length > 0 && (
             <div className="rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5 mb-4 flex items-start gap-2.5 text-xs text-warning">

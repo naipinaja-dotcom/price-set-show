@@ -72,6 +72,26 @@ export interface CalcResult {
   anomalies: RowAnomaly[]; // ga bikin gagal komputasi, cuma diflag buat dicek manual
 }
 
+// Billing add-ons (min charge → +admin fee → ×(1+PPN%)) berlaku di level
+// INVOICE, jadi harus sama di ketiga engine (delivery/attendance/hybrid) —
+// bukan cuma calcScheme. Sebelumnya calcAttendanceScheme & calcHybridScheme
+// gak pernah nerapin ini sama sekali walau form-nya ngasih toggle Billing
+// Add-ons buat scheme_for="client" di kategori manapun.
+function applyBillingAddons(
+  subtotal: number,
+  billingAddons: PricingEnvelope["billing_addons"],
+): { billing?: CalcResult["billing"]; grandTotal: number } {
+  if (!billingAddons) return { grandTotal: subtotal };
+  let amt = subtotal;
+  const floored = amt < (Number(billingAddons.min_charge) || 0);
+  if (floored) amt = Number(billingAddons.min_charge) || 0;
+  const admin = Number(billingAddons.admin_fee_flat) || 0;
+  amt += admin;
+  const ppn = amt * ((Number(billingAddons.ppn_percent) || 0) / 100);
+  const grandTotal = amt + ppn;
+  return { billing: { floored, admin_fee: admin, ppn, final: grandTotal }, grandTotal };
+}
+
 // ---------------- helpers ----------------
 const norm = (s: unknown) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 const riderKey = (r: { rider_id?: string | null; driver_code?: string | null }) => r.rider_id || r.driver_code || "(tanpa rider)";
@@ -443,19 +463,7 @@ export function calcScheme(env: PricingEnvelope, rows: DeliveryRow[]): CalcResul
   const subtotal = perRow.reduce((s, r) => s + r.fee, 0);
 
   // ---- billing add-ons (khusus scheme client) → level invoice ----
-  let billing: CalcResult["billing"] | undefined;
-  let grandTotal = subtotal;
-  if (env.billing_addons) {
-    const b = env.billing_addons;
-    let amt = subtotal;
-    const floored = amt < (Number(b.min_charge) || 0);
-    if (floored) amt = Number(b.min_charge) || 0;
-    const admin = Number(b.admin_fee_flat) || 0;
-    amt += admin;
-    const ppn = amt * ((Number(b.ppn_percent) || 0) / 100);
-    grandTotal = amt + ppn;
-    billing = { floored, admin_fee: admin, ppn, final: grandTotal };
-  }
+  const { billing, grandTotal } = applyBillingAddons(subtotal, env.billing_addons);
 
   if (skipped > 0) warnings.push(`${skipped} baris di-skip (status bukan COMPLETED).`);
 
@@ -539,6 +547,8 @@ export interface AttendanceCalcResult {
   perRow: AttendanceRowFee[];
   perRider: AttendanceRiderLine[];
   subtotal: number;
+  billing?: CalcResult["billing"];
+  grandTotal: number;
   totalRows: number;
   absentRows: number;
   warnings: string[];
@@ -558,6 +568,8 @@ export interface CombinedCalcResult {
   perRow: RowFee[];
   perRider: CombinedRiderLine[];
   subtotal: number;
+  billing?: CalcResult["billing"];
+  grandTotal: number;
   completedRows: number;
   skippedRows: number;
   skippedPerRider: SkippedRiderLine[];
@@ -763,11 +775,12 @@ export function calcHybridScheme(
   }
   const perRider = [...riderSummary.values()].sort((a, b) => b.total - a.total);
   const subtotal = perRider.reduce((s, r) => s + r.total, 0);
+  const { billing, grandTotal } = applyBillingAddons(subtotal, env.billing_addons);
 
   if (skipped > 0) warnings.push(`${skipped} baris di-skip (status bukan COMPLETED).`);
   if (attendanceLogs.length === 0) warnings.push("Tidak ada data absensi — daily fee & bonus ontime tidak dihitung.");
 
-  return { perRow, perRider, subtotal, completedRows: completed.length, skippedRows: skipped, skippedPerRider, warnings, anomalies };
+  return { perRow, perRider, subtotal, billing, grandTotal, completedRows: completed.length, skippedRows: skipped, skippedPerRider, warnings, anomalies };
 }
 
 export function calcAttendanceScheme(env: PricingEnvelope, logs: AttendanceLogRow[], deliveryRows?: DeliveryRow[]): AttendanceCalcResult {
@@ -839,7 +852,8 @@ export function calcAttendanceScheme(env: PricingEnvelope, logs: AttendanceLogRo
   const perRider = [...riderMap.values()].sort((a, b) => b.total - a.total);
 
   const subtotal = perRow.reduce((s, r) => s + r.fee, 0);
+  const { billing, grandTotal } = applyBillingAddons(subtotal, env.billing_addons);
   if (absentRows > 0) warnings.push(`${absentRows} baris absen (fee 0).`);
 
-  return { perRow, perRider, subtotal, totalRows: logs.length, absentRows, warnings };
+  return { perRow, perRider, subtotal, billing, grandTotal, totalRows: logs.length, absentRows, warnings };
 }

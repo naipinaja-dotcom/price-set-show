@@ -451,3 +451,42 @@ describe("calcScheme — modular_v2 rate_by tanpa dimensi", () => {
     expect(res.perRow[0].fee).toBe(0);
   });
 });
+
+// ==================================================================
+// billing_addons — regression: calcAttendanceScheme/calcHybridScheme dulu
+// gak pernah nerapin billing_addons sama sekali (min_charge/admin_fee/ppn),
+// walau form ngasih toggle-nya buat scheme_for="client" di kategori manapun.
+// ==================================================================
+describe("billing_addons diterapkan di semua kategori", () => {
+  const billing = { min_charge: 0, admin_fee_flat: 5000, ppn_percent: 10 };
+
+  it("calcAttendanceScheme: subtotal + admin_fee, lalu ×(1+ppn%)", () => {
+    const e = env({
+      type: "attendance",
+      billing_addons: billing,
+      config: { full_fee: 100000, standard_minutes: 480 },
+    });
+    const res = calcAttendanceScheme(e, [
+      { rider_id: "R1", log_date: "2026-07-01", duration_minutes: 480, is_late: false, is_absent: false },
+    ]);
+    expect(res.subtotal).toBe(100000);
+    // (100000 + 5000) * 1.10 = 115500
+    expect(res.grandTotal).toBe(115500);
+    expect(res.billing?.admin_fee).toBe(5000);
+  });
+
+  it("calcHybridScheme: billing_addons juga diterapkan ke grandTotal", () => {
+    const e = env({
+      type: "combined",
+      billing_addons: billing,
+      config: { full_fee: 100000, standard_minutes: 480, ontime_bonus: 0, order_by: "distance", order_tier: null },
+    });
+    const res = calcHybridScheme(
+      e,
+      [row({ rider_id: "R1", distance_km: 0 })],
+      [{ rider_id: "R1", log_date: "2026-07-01", duration_minutes: 480, is_late: false, is_absent: false }],
+    );
+    expect(res.subtotal).toBe(100000);
+    expect(res.grandTotal).toBe(115500);
+  });
+});

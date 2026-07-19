@@ -145,6 +145,28 @@ function computeInteractive(p: InteractiveCalcProps, inp: CalcInputs): WorkedExa
     return { steps, total: { label: "Total", amount: total }, notes };
   }
 
+  // Distance/Weight dua-duanya OFF — skema flat murni dibedain per kolom/
+  // delivery-type (sama seperti fallback di calcModularDeliveryComponent,
+  // pricing-calc.ts). Sebelumnya preview ini jatuh ke fallback 0 di bawah
+  // walau skemanya beneran ngitung tarif kalau di-Save.
+  if (p.category === "delivery" && !dims.distance && !dims.weight) {
+    const steps: ExStep[] = [];
+    let total = 0;
+    if (p.delivery.rate_by !== "flat") {
+      const hit = p.delivery.rates.find((r) => norm(r.key) === norm(inp.area));
+      const fee = hit ? parseRupiah(hit.rate) : 0;
+      steps.push({
+        text: `Flat per ${p.delivery.rate_by === "delivery_type" ? "Antar/Kembali" : "kolom"}: "${inp.area}"${hit ? "" : " (tidak ada tarif cocok)"}`,
+        amount: fee,
+      });
+      total += fee;
+    } else {
+      steps.push({ text: "Rate baris Flat masih 'Flat' — belum ada tarif buat diterapin tanpa Distance/Weight.", amount: 0 });
+    }
+    modNotes();
+    return { steps, total: { label: "Total", amount: total }, notes };
+  }
+
   if (p.category === "attendance") {
     const a = p.attendance;
     const env: PricingEnvelope = { version: 1, type: "attendance", config: buildAttendanceConfig(a), add_kg: null, multi_drop: null, billing_addons: null };
