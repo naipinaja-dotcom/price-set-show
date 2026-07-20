@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { parseRupiah } from "@/lib/format";
 import { confirmDialog } from "@/components/confirm-dialog";
+import { BulkActionBar } from "@/components/bulk-action-bar";
+import { useBulkSelect } from "@/hooks/use-bulk-select";
 import { toast } from "sonner";
 import { Plus, Trash2, Loader2, X } from "lucide-react";
 import type { DType } from "./types";
@@ -20,6 +22,8 @@ export function DTypesTab() {
     trigger_frequency: "every_payroll_run" as "every_payroll_run" | "monthly_once",
   });
   const [saving, setSaving] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const bulk = useBulkSelect(rows.map((r) => r.id));
 
   const load = async () => {
     setLoading(true);
@@ -100,6 +104,34 @@ export function DTypesTab() {
       return;
     }
     toast.error(error.message);
+  };
+
+  const handleBulkDelete = async () => {
+    if (
+      !(await confirmDialog({
+        title: `Hapus ${bulk.count} jenis potongan?`,
+        description: "Jenis yang masih dipakai cicilan/potongan tercatat gak akan kehapus — hapus itu satu-satu biar bisa dipilih nonaktifkan aja.",
+        confirmText: "Hapus",
+      }))
+    )
+      return;
+    setBulkDeleting(true);
+    const { error } = await (supabase as any)
+      .from("deduction_types")
+      .delete()
+      .in("id", [...bulk.selected]);
+    setBulkDeleting(false);
+    if (error) {
+      const inUse = (error as any).code === "23503" || /foreign key/i.test(error.message);
+      return toast.error(
+        inUse
+          ? "Sebagian masih dipakai cicilan/potongan tercatat — gak ada yang kehapus. Hapus satu-satu biar bisa ditawarin nonaktifkan."
+          : error.message,
+      );
+    }
+    toast.success(`${bulk.count} jenis potongan dihapus`);
+    bulk.clear();
+    load();
   };
 
   const toggleActive = async (r: DType) => {
@@ -251,6 +283,14 @@ export function DTypesTab() {
         <table className="w-full text-[12px]">
           <thead>
             <tr className="border-b border-border">
+              <th className="p-3 w-8">
+                <input
+                  type="checkbox"
+                  checked={bulk.allSelected}
+                  onChange={bulk.toggleAll}
+                  className="rounded border-border"
+                />
+              </th>
               <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">
                 Kode
               </th>
@@ -272,13 +312,13 @@ export function DTypesTab() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} className="p-8 text-center">
+                <td colSpan={7} className="p-8 text-center">
                   <Loader2 className="w-4 h-4 animate-spin inline text-primary" />
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-8 text-center text-muted-foreground text-[11px]">
+                <td colSpan={7} className="p-8 text-center text-muted-foreground text-[11px]">
                   Belum ada jenis potongan
                 </td>
               </tr>
@@ -288,6 +328,14 @@ export function DTypesTab() {
                   key={r.id}
                   className="border-b border-border last:border-b-0 hover:bg-muted/40 transition-colors"
                 >
+                  <td className="p-3">
+                    <input
+                      type="checkbox"
+                      checked={bulk.selected.has(r.id)}
+                      onChange={() => bulk.toggle(r.id)}
+                      className="rounded border-border"
+                    />
+                  </td>
                   <td
                     className="p-3 text-muted-foreground"
                     style={{ fontFamily: "'JetBrains Mono', monospace" }}
@@ -332,6 +380,13 @@ export function DTypesTab() {
           </tbody>
         </table>
       </div>
+      <BulkActionBar
+        count={bulk.count}
+        label="jenis potongan"
+        deleting={bulkDeleting}
+        onDelete={handleBulkDelete}
+        onClear={bulk.clear}
+      />
     </div>
   );
 }

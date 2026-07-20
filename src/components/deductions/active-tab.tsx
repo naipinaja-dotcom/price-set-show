@@ -4,6 +4,8 @@ import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { usePagination } from "@/lib/use-pagination";
 import { parseRupiah } from "@/lib/format";
 import { confirmDialog } from "@/components/confirm-dialog";
+import { BulkActionBar } from "@/components/bulk-action-bar";
+import { useBulkSelect } from "@/hooks/use-bulk-select";
 import { toast } from "sonner";
 import { Loader2, Trash2, Pencil } from "lucide-react";
 import type { DType, Inst, Rider } from "./types";
@@ -16,6 +18,7 @@ export function ActiveTab() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [ef, setEf] = useState({
     deduction_type_id: "",
+    mode: "fixed" as "fixed" | "daily",
     total_amount: 0,
     installment_count: 1,
     daily_rate: 0,
@@ -23,6 +26,7 @@ export function ActiveTab() {
     notes: "",
   });
   const [saving, setSaving] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -55,6 +59,7 @@ export function ActiveTab() {
     setEditingId(r.id);
     setEf({
       deduction_type_id: r.deduction_type_id,
+      mode: (r.mode as "fixed" | "daily") ?? "fixed",
       total_amount: r.total_amount ?? 0,
       installment_count: r.installment_count ?? 1,
       daily_rate: r.daily_rate ?? 0,
@@ -63,18 +68,34 @@ export function ActiveTab() {
     });
   };
 
-  // Koreksi jadwal cicilan yang salah input. mode='fixed': per_period_amount
-  // dihitung ulang dari total_amount/installment_count (rumus sama persis
-  // dengan waktu bikin cicilan baru, AddTab.save). mode='daily': cuma
-  // daily_rate yang relevan. TIDAK menyentuh riwayat payroll_deductions yang
-  // sudah tercatat — cuma proyeksi ke depan (potongan otomatis di run berikutnya).
+  // Koreksi jadwal cicilan yang salah input, TERMASUK ganti mode ('fixed'
+  // cicilan <-> 'daily' sewa harian) kalau ternyata salah pilih pas bikin.
+  // mode='fixed': per_period_amount dihitung ulang dari total_amount/
+  // installment_count (rumus sama persis dengan waktu bikin cicilan baru,
+  // AddTab.save). mode='daily': cuma daily_rate yang relevan, installment_count
+  // & installments_paid direset ke 0 karena gak ada konsep "lunas" di mode ini.
+  // TIDAK menyentuh riwayat payroll_deductions yang sudah tercatat — cuma
+  // proyeksi ke depan (potongan otomatis di run berikutnya).
   const saveEdit = async (r: Inst) => {
     if (!ef.deduction_type_id) return toast.error("Lengkapi jenis potongan");
+    if (ef.mode !== r.mode && r.installments_paid > 0) {
+      return toast.error(
+        `Mode gak bisa diganti — cicilan ini udah kepotong ${r.installments_paid}× di mode lama.`,
+      );
+    }
     setSaving(true);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const update: any = { deduction_type_id: ef.deduction_type_id, next_deduction_date: ef.next_deduction_date || null, notes: ef.notes || null };
-    if (r.mode === "daily") {
+    const update: any = {
+      deduction_type_id: ef.deduction_type_id,
+      mode: ef.mode,
+      next_deduction_date: ef.next_deduction_date || null,
+      notes: ef.notes || null,
+    };
+    if (ef.mode === "daily") {
       update.daily_rate = ef.daily_rate;
+      update.total_amount = null;
+      update.installment_count = null;
+      update.per_period_amount = null;
     } else {
       if (ef.installment_count < r.installments_paid) {
         setSaving(false);
@@ -85,6 +106,7 @@ export function ActiveTab() {
       update.total_amount = ef.total_amount;
       update.installment_count = ef.installment_count;
       update.per_period_amount = +(ef.total_amount / ef.installment_count).toFixed(2);
+      update.daily_rate = null;
     }
     const { error } = await supabase.from("rider_installments").update(update).eq("id", r.id);
     setSaving(false);
@@ -93,6 +115,27 @@ export function ActiveTab() {
       "Cicilan diperbarui — perubahan ini cuma berlaku ke potongan berikutnya, riwayat yang sudah tercatat tidak berubah.",
     );
     setEditingId(null);
+    load();
+  };
+
+  const bulk = useBulkSelect(rows.map((r) => r.id));
+
+  const handleBulkDelete = async () => {
+    if (
+      !(await confirmDialog({
+        title: `Hapus ${bulk.count} cicilan?`,
+        description:
+          "Cicilan yang dicentang akan dihapus. Yang sudah pernah kepotong tetap aman di riwayat payroll, cuma berhenti & hilang dari daftar ini.",
+        confirmText: "Hapus",
+      }))
+    )
+      return;
+    setBulkDeleting(true);
+    const { error } = await supabase.from("rider_installments").delete().in("id", [...bulk.selected]);
+    setBulkDeleting(false);
+    if (error) return toast.error(error.message);
+    toast.success(`${bulk.count} cicilan dihapus`);
+    bulk.clear();
     load();
   };
 
@@ -131,6 +174,14 @@ export function ActiveTab() {
         <table className="w-full text-[12px]">
           <thead>
             <tr className="border-b border-border">
+              <th className="p-3 w-8">
+                <input
+                  type="checkbox"
+                  checked={bulk.allSelected}
+                  onChange={bulk.toggleAll}
+                  className="rounded border-border"
+                />
+              </th>
               <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider p-3">
                 Rider
               </th>
@@ -152,13 +203,13 @@ export function ActiveTab() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} className="p-8 text-center">
+                <td colSpan={7} className="p-8 text-center">
                   <Loader2 className="w-4 h-4 animate-spin inline text-primary" />
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-8 text-center text-muted-foreground text-[11px]">
+                <td colSpan={7} className="p-8 text-center text-muted-foreground text-[11px]">
                   Tidak ada cicilan aktif
                 </td>
               </tr>
@@ -166,6 +217,14 @@ export function ActiveTab() {
               paged.map((r) => (
                 <Fragment key={r.id}>
                   <tr className="border-b border-border last:border-b-0 hover:bg-muted/40 transition-colors">
+                    <td className="p-3">
+                      <input
+                        type="checkbox"
+                        checked={bulk.selected.has(r.id)}
+                        onChange={() => bulk.toggle(r.id)}
+                        className="rounded border-border"
+                      />
+                    </td>
                     <td className="p-3">
                       <div className="flex items-center gap-2.5">
                         <div className="w-8 h-8 rounded-full bg-primary-soft grid place-items-center text-[11px] font-semibold text-primary flex-shrink-0">
@@ -228,7 +287,7 @@ export function ActiveTab() {
                   </tr>
                   {editingId === r.id && (
                     <tr className="border-b border-border/60 bg-muted/20">
-                      <td colSpan={6} className="p-3">
+                      <td colSpan={7} className="p-3">
                         <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 items-end text-sm">
                           <div>
                             <label className="text-xs font-medium text-muted-foreground">
@@ -251,7 +310,26 @@ export function ActiveTab() {
                               ))}
                             </select>
                           </div>
-                          {r.mode === "daily" ? (
+                          <div>
+                            <label className="text-xs font-medium text-muted-foreground">
+                              Mode
+                            </label>
+                            <select
+                              value={ef.mode}
+                              disabled={r.installments_paid > 0}
+                              title={
+                                r.installments_paid > 0
+                                  ? `Gak bisa diganti — udah kepotong ${r.installments_paid}×`
+                                  : undefined
+                              }
+                              onChange={(e) => setEf({ ...ef, mode: e.target.value as "fixed" | "daily" })}
+                              className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm disabled:opacity-50"
+                            >
+                              <option value="fixed">Cicilan (fixed)</option>
+                              <option value="daily">Sewa harian (daily)</option>
+                            </select>
+                          </div>
+                          {ef.mode === "daily" ? (
                             <div>
                               <label className="text-xs font-medium text-muted-foreground">
                                 Tarif per Hari (Rp)
@@ -356,6 +434,13 @@ export function ActiveTab() {
           total={total}
         />
       )}
+      <BulkActionBar
+        count={bulk.count}
+        label="cicilan"
+        deleting={bulkDeleting}
+        onDelete={handleBulkDelete}
+        onClear={bulk.clear}
+      />
     </div>
   );
 }

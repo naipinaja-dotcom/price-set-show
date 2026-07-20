@@ -8,6 +8,7 @@ import { toCSV, downloadCSV } from "@/lib/csv";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { toast } from "sonner";
 import { Download, Loader2, Trash2, CheckCircle2 } from "lucide-react";
+import { ClientCombobox } from "@/components/client-combobox";
 
 export const Route = createFileRoute("/admin/invoices")({ component: InvoicesPage });
 
@@ -79,11 +80,13 @@ function InvoicesPage() {
   return (
     <AdminLayout title="Invoices" subtitle="Invoice client yang sudah di-commit dari Hitung Fee (sisi revenue)">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}
-          className="rounded-md border border-border bg-background px-3 py-2 text-sm min-w-[220px]">
-          <option value="">— semua client —</option>
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <ClientCombobox
+          value={clientFilter}
+          onChange={setClientFilter}
+          placeholder="— semua client —"
+          className="min-w-[220px] text-sm py-2"
+          options={clients.map((c) => ({ value: c.id, label: c.name }))}
+        />
         <div className="flex items-center gap-2">
           {filtered.length > 0 && <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />}
           <button onClick={exportCSV} disabled={!filtered.length}

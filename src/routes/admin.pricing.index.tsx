@@ -13,6 +13,10 @@ import { pricingLabel } from "@/lib/pricing-types";
 import { describeScheme } from "@/lib/rate-card";
 import { formatTanggal } from "@/lib/format";
 import { toast } from "sonner";
+import { confirmDialog } from "@/components/confirm-dialog";
+import { ClientCombobox } from "@/components/client-combobox";
+import { BulkActionBar } from "@/components/bulk-action-bar";
+import { useBulkSelect } from "@/hooks/use-bulk-select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,9 +38,10 @@ function PricingListPage() {
   const [clients, setClients] = useState<MockClient[]>([]);
   const [filterClient, setFilterClient] = useState<string>("all");
   const [toDelete, setToDelete] = useState<PricingScheme | null>(null);
-  // Baris tabel dikelompokkan per client: kalau 1 client punya >1 skema
-  // (biasanya pasangan Rider + Client), tampil sebagai 1 baris ringkas yang
-  // bisa diklik buat expand — bukan selalu 2 baris terpisah kayak sebelumnya.
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  // Baris tabel dikelompokkan per client: skema Rider (cost) tampil sebagai
+  // baris utama, skema Client (billing) & rider tambahan disembunyikan sampai
+  // baris ini diklik — jadi tabel gak keliatan dobel per client secara default.
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) =>
     setExpandedGroups((prev) => {
@@ -83,15 +88,74 @@ function PricingListPage() {
   }
   const schemeGroups = [...groupMap.values()];
 
-  const renderSchemeRow = (s: PricingScheme, indented = false) => (
+  const bulk = useBulkSelect(filtered.map((s) => s.id));
+
+  const handleBulkDelete = async () => {
+    if (
+      !(await confirmDialog({
+        title: `Hapus ${bulk.count} skema?`,
+        description: "Semua skema yang dicentang akan dihapus permanen.",
+        confirmText: "Hapus",
+      }))
+    )
+      return;
+    setBulkDeleting(true);
+    try {
+      await Promise.all([...bulk.selected].map((id) => deletePricingScheme(id)));
+      toast.success(`${bulk.count} skema dihapus`);
+      bulk.clear();
+      refresh();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+    setBulkDeleting(false);
+  };
+
+  const renderSchemeRow = (
+    s: PricingScheme,
+    indented = false,
+    expandable = false,
+    isOpen = false,
+    onToggle?: () => void,
+  ) => (
     <tr
       key={s.id}
       className="border-b border-border last:border-b-0 hover:bg-muted/40 transition-colors"
     >
-      <td className={"px-4 py-3 font-medium text-foreground" + (indented ? " pl-9" : "")}>
-        {s.name}
+      <td className="px-4 py-3 w-8">
+        <input
+          type="checkbox"
+          checked={bulk.selected.has(s.id)}
+          onChange={() => bulk.toggle(s.id)}
+          className="rounded border-border"
+        />
       </td>
-      <td className="px-4 py-3 text-muted-foreground">{s.client_name ?? "Semua Client"}</td>
+      <td
+        className={"px-4 py-3 font-medium text-foreground" + (indented ? " pl-9" : "")}
+        onClick={onToggle}
+        role={onToggle ? "button" : undefined}
+      >
+        <div className="flex items-center gap-2">
+          {expandable && (
+            <ChevronRight
+              className={`w-3.5 h-3.5 text-muted-foreground flex-shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`}
+            />
+          )}
+          {s.name}
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <button
+          type="button"
+          onClick={() => {
+            setFilterClient(s.client_id ?? "all-clients");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+          className="text-muted-foreground hover:text-primary hover:underline transition-colors text-left"
+        >
+          {s.client_name ?? "Semua Client"}
+        </button>
+      </td>
       <td className="px-4 py-3">
         <span
           className={
@@ -140,19 +204,15 @@ function PricingListPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2">
           <label className="text-[11px] text-muted-foreground">Filter Client</label>
-          <select
+          <ClientCombobox
             value={filterClient}
-            onChange={(e) => setFilterClient(e.target.value)}
-            className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] outline-none focus:border-primary transition-colors"
-          >
-            <option value="all">Semua Client</option>
-            <option value="all-clients">Berlaku Semua Client</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={setFilterClient}
+            options={[
+              { value: "all", label: "Semua Client" },
+              { value: "all-clients", label: "Berlaku Semua Client" },
+              ...clients.map((c) => ({ value: c.id, label: c.name })),
+            ]}
+          />
         </div>
         <Link
           to="/admin/pricing/new"
@@ -320,6 +380,14 @@ function PricingListPage() {
           <table className="w-full text-[12px]">
             <thead>
               <tr className="border-b border-border">
+                <th className="px-4 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={bulk.allSelected}
+                    onChange={bulk.toggleAll}
+                    className="rounded border-border"
+                  />
+                </th>
                 <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
                   Nama Skema
                 </th>
@@ -340,33 +408,21 @@ function PricingListPage() {
             </thead>
             <tbody>
               {schemeGroups.map((g) => {
-                if (g.items.length === 1) {
-                  return renderSchemeRow(g.items[0]);
-                }
+                // Baris utama yang selalu keliatan = skema Rider (cost) —
+                // skema Client (billing) & rider tambahan cuma nongol pas expand.
+                const primary = g.items.find((i) => i.scheme_for === "rider") ?? g.items[0];
+                const rest = g.items.filter((i) => i.id !== primary.id);
                 const isOpen = expandedGroups.has(g.key);
                 return (
                   <Fragment key={g.key}>
-                    <tr
-                      onClick={() => toggleGroup(g.key)}
-                      className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer bg-muted/20 transition-colors"
-                    >
-                      <td className="px-4 py-3" colSpan={6}>
-                        <div className="flex items-center gap-2">
-                          <ChevronRight
-                            className={`w-4 h-4 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
-                          />
-                          <span className="font-medium">{g.clientName}</span>
-                          <span className="text-[11px] text-muted-foreground">
-                            · {g.items.length} skema (
-                            {g.items
-                              .map((i) => (i.scheme_for === "client" ? "Client" : "Rider"))
-                              .join(" · ")}
-                            )
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                    {isOpen && g.items.map((s) => renderSchemeRow(s, true))}
+                    {renderSchemeRow(
+                      primary,
+                      false,
+                      rest.length > 0,
+                      isOpen,
+                      rest.length > 0 ? () => toggleGroup(g.key) : undefined,
+                    )}
+                    {isOpen && rest.map((s) => renderSchemeRow(s, true))}
                   </Fragment>
                 );
               })}
@@ -374,6 +430,14 @@ function PricingListPage() {
           </table>
         )}
       </div>
+
+      <BulkActionBar
+        count={bulk.count}
+        label="skema"
+        deleting={bulkDeleting}
+        onDelete={handleBulkDelete}
+        onClear={bulk.clear}
+      />
 
       <AlertDialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
         <AlertDialogContent>

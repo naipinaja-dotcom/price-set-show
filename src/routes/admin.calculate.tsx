@@ -22,6 +22,7 @@ import {
 import { formatRupiah } from "@/lib/format";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
+import { ClientCombobox } from "@/components/client-combobox";
 import { resolveRiderIdentities } from "@/lib/rider-lookup";
 import { findOrCreatePayrollRun, generatePayrollDetails } from "@/lib/payroll-generate";
 import { useAuth } from "@/lib/auth";
@@ -464,21 +465,16 @@ function CalculatePage() {
       <div className="rounded-lg border border-border bg-card p-5 mb-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
         <div className="flex flex-col gap-1.5">
           <label className="font-medium text-muted-foreground">Client</label>
-          <select
+          <ClientCombobox
             value={clientId}
-            onChange={(e) => {
-              setClientId(e.target.value);
+            onChange={(v) => {
+              setClientId(v);
               setSchemeId("");
             }}
-            className="w-full rounded-md border border-border bg-background px-3 py-2"
-          >
-            <option value="">— pilih client —</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            placeholder="— pilih client —"
+            className="w-full text-sm py-2"
+            options={clients.map((c) => ({ value: c.id, label: c.name }))}
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="font-medium text-muted-foreground">Skema</label>

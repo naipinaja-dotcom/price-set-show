@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { usePostHog } from "@posthog/react";
 import { AdminLayout } from "@/components/admin-layout";
+import { ClientCombobox } from "@/components/client-combobox";
 import {
   PRICING_CATEGORIES,
   DELIVERY_DIMENSIONS,
@@ -335,18 +336,13 @@ function PricingFormInner({
           </div>
           <div className="flex flex-col gap-1.5">
             <FieldLabel>Client</FieldLabel>
-            <select
+            <ClientCombobox
               value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              className="w-full text-sm rounded-md border border-border bg-card px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Semua Client</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              onChange={setClientId}
+              placeholder="Semua Client"
+              className="w-full text-sm py-1.5"
+              options={clients.map((c) => ({ value: c.id, label: c.name }))}
+            />
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

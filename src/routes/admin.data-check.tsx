@@ -5,6 +5,7 @@ import { AdminLayout } from "@/components/admin-layout";
 import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
 import { toast } from "sonner";
 import { Loader2, Search } from "lucide-react";
+import { ClientCombobox } from "@/components/client-combobox";
 
 // Search params opsional — diisi otomatis kalau dibuka dari link "Cek Data"
 // di Payroll Run (bawa periode run aktif), biar gak perlu pilih ulang manual.
@@ -115,11 +116,13 @@ function DataCheckPage() {
       <div className="rounded-lg border border-border bg-card p-5 mb-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
         <div className="flex flex-col gap-1.5">
           <label className="font-medium text-muted-foreground">Client <span className="font-normal">(opsional)</span></label>
-          <select value={clientId} onChange={(e) => setClientId(e.target.value)}
-            className="w-full rounded-md border border-border bg-background px-3 py-2">
-            <option value="">— semua client —</option>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <ClientCombobox
+            value={clientId}
+            onChange={setClientId}
+            placeholder="— semua client —"
+            className="w-full text-sm py-2"
+            options={clients.map((c) => ({ value: c.id, label: c.name }))}
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="font-medium text-muted-foreground">Kode Rider <span className="font-normal">(opsional, mis. MTR0006460)</span></label>

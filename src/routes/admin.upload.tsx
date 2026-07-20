@@ -10,6 +10,7 @@ import { cleanDuplicateDeliveries } from "@/lib/delivery-dedup";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { Upload, FileText, Loader2, AlertTriangle, X, RefreshCw, Trash2 } from "lucide-react";
+import { ClientCombobox } from "@/components/client-combobox";
 
 export const Route = createFileRoute("/admin/upload")({ component: UploadPage });
 
@@ -552,19 +553,14 @@ function DeliveryUpload() {
             </span>
           )}
         </label>
-        <select
+        <ClientCombobox
           value={clientId}
-          onChange={(e) => setClientId(e.target.value)}
+          onChange={setClientId}
           disabled={hasClientColumn}
-          className="mt-1 w-full max-w-sm rounded-md border border-border bg-background px-3 py-2 text-sm disabled:opacity-50"
-        >
-          <option value="">— pilih client —</option>
-          {clients.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+          placeholder="— pilih client —"
+          className="mt-1 w-full max-w-sm text-sm py-2"
+          options={clients.map((c) => ({ value: c.id, label: c.name }))}
+        />
         <p className="text-xs text-muted-foreground mt-1">
           {hasClientColumn
             ? "Client dideteksi otomatis per baris dari file (1 file boleh campur banyak client)."
@@ -991,18 +987,13 @@ function AttendanceUpload() {
         <label className="block text-xs font-medium text-muted-foreground mb-1">
           Client (opsional — override jika CSV tidak punya kolom client)
         </label>
-        <select
+        <ClientCombobox
           value={clientId}
-          onChange={(e) => setClientId(e.target.value)}
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <option value="">— dari kolom CSV / kosongkan jika CSV sudah ada client —</option>
-          {clients.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+          onChange={setClientId}
+          placeholder="— dari kolom CSV / kosongkan jika CSV sudah ada client —"
+          className="w-full text-sm py-2"
+          options={clients.map((c) => ({ value: c.id, label: c.name }))}
+        />
       </div>
       <label className="block">
         <input
