@@ -6,7 +6,7 @@
 | Product | DASH Payroll (internal name: price-set-show) |
 | Owner / Operator | Dash Electric |
 | Document status | Living reference — reflects system as built, updated as features ship |
-| Last updated | 17 July 2026 |
+| Last updated | 21 July 2026 |
 | Stack | React + TypeScript, TanStack Router/Start, Supabase (Postgres, Auth, RLS), Tailwind CSS |
 
 ---
@@ -229,6 +229,32 @@ Goal: let an admin delete a `payroll_runs` row while it is still `status = draft
 - **Open design question:** should deleting a draft run also warn if a `fee_calculation_audit_log` entry still points at it (so the admin understands that deleting the run does not undo the underlying fee commit on `delivery_records`/`attendance_logs` — those fees remain written and would simply regenerate into a new run on the next commit or "Generate Ulang")?
 - **Suggested pattern:** gated on `activeRun.status === "draft"`, reuse the existing `confirmDialog` pattern already used elsewhere on this screen (e.g. in Generate Ulang's confirmation), calling a hard delete on `payroll_runs.id`.
 
+### 9.3 Deduction Summary Report ("Ringkasan Potongan")
+**Status: designed, mockup approved, not yet implemented in code.**
+
+Goal: give admin/finance a rolled-up view of total `payroll_deductions` collected — by client, by `deduction_types`, and per-rider — which today can only be answered by a manual query. This was identified as a reporting gap while auditing how deductions relate to margin/PNL (see 9.3.1 below); it is a new reporting surface, not a change to any existing calculation.
+
+**9.3.1 Explicit non-goal — this does not touch PNL/margin**
+Confirmed by code audit (`src/lib/pnl-engine.ts`, `src/routes/admin.pnl.tsx`, `pnl_weekly_snapshots`): margin is computed purely as `(client-scheme gross fee) − (rider-scheme gross fee)` from raw `delivery_records`/`attendance_logs`. `payroll_deductions` is never read by the PNL engine and must **stay** that way — deduction money is a rider-side cash-flow offset (cicilan/potongan repayment), not a Dash cost or revenue line, so it must not be netted into Cost/Margin KPIs. This report is an intentionally separate, parallel reporting surface, analogous to how `report_summary_weekly` already exists alongside (not inside) the PNL engine.
+
+**9.3.2 Placement**
+- Lives as a third tab inside the existing **Reports** page (`admin.reports.tsx`), alongside "Per Rider (Finance)" and "Ringkasan per Client" — not a new sidebar item. `admin.reports.tsx`'s local `mode` state extends from `"client" | "rider"` to `"client" | "rider" | "deduction"`, with a third button labeled "Ringkasan Potongan".
+- Rendered via a new component, `src/components/deduction-summary.tsx` (kept out of `admin.reports.tsx` itself, following the existing `FinanceWorksheet` pattern, to stay under the project's 500-line-per-file limit).
+
+**9.3.3 Data source**
+Aggregates `payroll_deductions` joined to `payroll_details` → `payroll_runs`/`riders`/`clients` (same grain/join path already used by `report_summary_weekly` and `FinanceWorksheet`) — no new table required. Filterable by client and period, with CSV export matching the existing Reports conventions.
+
+**9.3.4 Content (per approved mockup)**
+- KPI cards: total potongan for the period, split installment vs. auto-recurring, and count of installments fully paid off in the period.
+- Per-client rollup table (rider count + total).
+- Per-deduction-type rollup table (by `deduction_types.name`, tagged installment vs. auto-recurring).
+- Composition chart (donut) by deduction type.
+- Per-rider breakdown table (Kode Mitra, name, client, deduction type, installment progress where applicable, amount) — server-paginated, following the same pattern as `admin.data-check.tsx` ("Cek Data").
+- A visible disclaimer banner in the UI itself stating this is a cash-flow metric, separate from Margin/PNL, to prevent misreading it as a cost figure.
+
+**9.3.5 Open item**
+No company-wide historical rollup exists yet beyond the per-run/per-client sums already in `admin.reports.tsx`'s Client Report tab (see Section 9.3.3) — this report closes that gap going forward but does not backfill a "total ever collected" figure; it computes live from existing rows for whatever period/client filter is selected.
+
 ---
 
 ## 10. Module: Deductions (`admin.deductions.tsx`)
@@ -251,6 +277,7 @@ Goal: let an admin delete a `payroll_runs` row while it is still `status = draft
 ### 11.1 Reports (`admin.reports.tsx`)
 - "Per Rider (Finance)" mode renders the Finance Worksheet component for a selected payroll run — the rider-level summary and the export governed by the per-client Export Template (Section 5.1).
 - "Ringkasan per Client" mode aggregates from the `report_summary_weekly` view (never queries `payroll_details` directly, by design, to guarantee the same numbers appear everywhere), grouped by client, with CSV export.
+- "Ringkasan Potongan" mode — **planned, not yet built** (see Section 9.3) — will aggregate `payroll_deductions` by client, deduction type, and rider, as a third tab alongside the two above. Explicitly does not feed into or read from the PNL/margin engine (Section 12).
 
 ### 11.2 Invoices (`admin.invoices.tsx`)
 - Lists `invoice_details` created from "Commit ke Invoice" in the Hitung Fee flow. Filterable by client, exportable to CSV, with a grand-total footer.
