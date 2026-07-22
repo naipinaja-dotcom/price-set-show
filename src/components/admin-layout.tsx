@@ -395,8 +395,8 @@ export function AdminLayout({
             )}
           </div>
 
-          {/* Payroll overdue badge */}
-          {overdue.overdue && (
+          {/* Payroll overdue badge — cuma relevan di mode Payroll, gak nyambung sama sekali di mode PnL/Intelligence */}
+          {mode === "payroll" && overdue.overdue && (
             <Link
               to="/admin/payroll"
               className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors flex-shrink-0"

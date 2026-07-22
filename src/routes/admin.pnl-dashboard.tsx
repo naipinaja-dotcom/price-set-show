@@ -12,8 +12,7 @@ import { useIntelligenceDate } from "@/lib/use-intelligence-date";
 import { triggerWeeklyPnlPushManual } from "@/lib/api/pnl-push.functions";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm-dialog";
-import { Loader2, TrendingUp, ArrowRight, AlertTriangle, Send, CheckCircle2, XCircle, DollarSign, TrendingDown, Percent, Activity, BellRing, Trash2, ChevronDown, ChevronUp } from "lucide-react";
-import { usePayrollOverdue } from "@/lib/use-payroll-overdue";
+import { Loader2, TrendingUp, ArrowRight, AlertTriangle, Send, CheckCircle2, XCircle, DollarSign, TrendingDown, Percent, Activity, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Line, LineChart, ReferenceLine } from "recharts";
 
 function autoGranularity(from: string, to: string): TrendGranularity {
@@ -47,7 +46,6 @@ function ExecutiveDashboard() {
   const [clients, setClients] = useState<ClientLite[]>([]);
   const [schemes, setSchemes] = useState<PricingScheme[]>([]);
   const { from, setFrom, to, setTo, resetToDefault } = useIntelligenceDate();
-  const overdueStatus = usePayrollOverdue();
   const [running, setRunning] = useState(false);
   const [perClient, setPerClient] = useState<ClientPnl[] | null>(null);
   const [snapshots, setSnapshots] = useState<PnlSnapshot[]>([]);
@@ -209,21 +207,6 @@ function ExecutiveDashboard() {
           )}
         </div>
       </div>
-
-      {/* ── Payroll overdue notice (P1) ── */}
-      {overdueStatus.overdue && (
-        <Link
-          to="/admin/payroll"
-          className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/8 px-4 py-3 mb-5 hover:bg-amber-500/15 transition-colors"
-        >
-          <BellRing className="w-4 h-4 text-amber-500 flex-shrink-0 animate-pulse" />
-          <span className="text-sm text-amber-600 dark:text-amber-400">
-            <b>Payroll run belum dibuat</b> — periode terakhir berakhir {overdueStatus.lastPeriodEnd},
-            sudah terlambat {overdueStatus.daysLate} hari.
-          </span>
-          <ArrowRight className="w-4 h-4 text-amber-500 ml-auto flex-shrink-0" />
-        </Link>
-      )}
 
       {/* ── KPI cards ── */}
       {perClient && (
