@@ -44,7 +44,7 @@ function ReportsPage() {
   const run = runs.find((r) => r.id === runId);
 
   return (
-    <AdminLayout title="Reports" subtitle="Laporan mingguan, PnL, dan COO Insight">
+    <AdminLayout title="Reports" subtitle="Laporan mingguan, PnL, dan Ops Insight">
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <div>
           <label className="text-sm font-medium">Payroll Run</label>

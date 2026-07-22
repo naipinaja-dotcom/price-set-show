@@ -168,7 +168,7 @@ function DashboardPage() {
     },
     { type: "warn" as const, text: "5 rider belum upload attendance" },
     { type: "warn" as const, text: "Disbursement Client A jatuh tempo besok" },
-    { type: "info" as const, text: "COO Insight report baru tersedia" },
+    { type: "info" as const, text: "Ops Insight report baru tersedia" },
   ];
 
   const alertStyles = {
