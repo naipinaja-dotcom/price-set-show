@@ -81,6 +81,7 @@ interface DeliveryPreview {
   overwriteDashIds: string[]; // dash id lama yang dihapus dulu sebelum insert
   overwriteSamples: { dash: string; provider: string }[];
   fileRepeatCount: number; // baris yang persis dobel DI DALAM file itu sendiri → di-skip
+  droppedStatusCount: number; // status selain COMPLETED/FAILED (mis. PENDING_PICKUP) → dibuang, gak diupload
   anomalyCount: number;
   anomalySamples: { dash: string; provider: string }[];
   unmatchedClients: string[];
@@ -268,7 +269,7 @@ function DeliveryUpload() {
       return clientId || null; // baris tanpa nilai client -> pakai default dropdown
     };
 
-    const records = rows.map((r) => {
+    const recordsRaw = rows.map((r) => {
       const driverCode = get(r, "driver_code");
       return {
         client_id: hasClientColumn ? resolveClientId(get(r, "client_name")) : clientId || null,
@@ -288,6 +289,21 @@ function DeliveryUpload() {
         service_type: get(r, "service_type"),
       };
     });
+
+    // Cuma COMPLETED & FAILED yang berguna buat payroll/analytics — status
+    // transien kayak PENDING_PICKUP cuma numpuk noise di Shipment Analytics
+    // tanpa pernah kepake di mana pun (calcScheme dkk cuma baca "completed").
+    // Dibuang di sini (gak pernah masuk delivery_records) daripada disimpan
+    // terus dihapus belakangan.
+    const ALLOWED_STATUSES = new Set(["COMPLETED", "FAILED"]);
+    const records = recordsRaw.filter((r) =>
+      ALLOWED_STATUSES.has(
+        String(r.status ?? "")
+          .trim()
+          .toUpperCase(),
+      ),
+    );
+    const droppedStatusCount = recordsRaw.length - records.length;
 
     // Deteksi duplikat: kunci = dash_delivery_id DAN provider_order_id
     // dua-duanya harus sama baru dianggap duplikat. Kalau cuma salah satu
@@ -370,12 +386,13 @@ function DeliveryUpload() {
     setAnalyzing(false);
     setPreview({
       records: finalRecords,
-      totalRows: records.length,
+      totalRows: recordsRaw.length,
       newCount: finalRecords.length - overwriteDashIds.length,
       overwriteCount: overwriteDashIds.length,
       overwriteDashIds,
       overwriteSamples,
       fileRepeatCount,
+      droppedStatusCount,
       anomalyCount: anomalySamples.length,
       anomalySamples: anomalySamples.slice(0, 50),
       unmatchedClients: Array.from(unmatchedClients),
@@ -489,6 +506,9 @@ function DeliveryUpload() {
           : "") +
         (preview.fileRepeatCount
           ? ` · ${preview.fileRepeatCount} baris dobel di file di-skip`
+          : "") +
+        (preview.droppedStatusCount
+          ? ` · ${preview.droppedStatusCount} baris status bukan Completed/Failed dibuang`
           : "") +
         (preview.createdRiderCodes.length
           ? ` · ${preview.createdRiderCodes.length} rider baru otomatis terdaftar`

@@ -55,25 +55,18 @@ function getSourceConfig(): {
   delivery: ImportSource | null;
   attendance: ImportSource | null;
 } {
-  const delivType = process.env.IMPORT_DELIVERY_SOURCE_TYPE as
-    | "rest_api"
-    | "database"
-    | undefined;
+  const delivType = process.env.IMPORT_DELIVERY_SOURCE_TYPE as "rest_api" | "database" | undefined;
   const delivUrl = process.env.IMPORT_DELIVERY_SOURCE_URL;
   const delivToken = process.env.IMPORT_DELIVERY_AUTH_TOKEN;
 
-  const attType = process.env.IMPORT_ATTENDANCE_SOURCE_TYPE as
-    | "rest_api"
-    | "database"
-    | undefined;
+  const attType = process.env.IMPORT_ATTENDANCE_SOURCE_TYPE as "rest_api" | "database" | undefined;
   const attUrl = process.env.IMPORT_ATTENDANCE_SOURCE_URL;
   const attToken = process.env.IMPORT_ATTENDANCE_AUTH_TOKEN;
 
   return {
     delivery:
       delivType && delivUrl ? { type: delivType, url: delivUrl, authToken: delivToken } : null,
-    attendance:
-      attType && attUrl ? { type: attType, url: attUrl, authToken: attToken } : null,
+    attendance: attType && attUrl ? { type: attType, url: attUrl, authToken: attToken } : null,
   };
 }
 
@@ -113,9 +106,7 @@ async function fetchFromDatabase<T>(source: ImportSource, query: string): Promis
 
 // ── Rider resolution (server-side) ──────────────────────────────
 
-async function resolveRiders(
-  codes: string[],
-): Promise<Map<string, string>> {
+async function resolveRiders(codes: string[]): Promise<Map<string, string>> {
   const sb = getSupabaseAdmin();
   const unique = [...new Set(codes.filter(Boolean).map((c) => c.trim()))];
   const map = new Map<string, string>();
@@ -136,10 +127,7 @@ async function resolveRiders(
       full_name: code,
       status: "active" as const,
     }));
-    const { data: inserted } = await sb
-      .from("riders")
-      .insert(toInsert)
-      .select("id, employee_id");
+    const { data: inserted } = await sb.from("riders").insert(toInsert).select("id, employee_id");
     (inserted ?? []).forEach((r: any) => map.set(r.employee_id, r.id));
   }
 
@@ -148,18 +136,13 @@ async function resolveRiders(
 
 // ── Client resolution ────────────────────────────────────────────
 
-async function resolveClients(
-  names: string[],
-): Promise<Map<string, string>> {
+async function resolveClients(names: string[]): Promise<Map<string, string>> {
   const sb = getSupabaseAdmin();
   const unique = [...new Set(names.filter(Boolean).map((n) => n.trim()))];
   const map = new Map<string, string>();
   if (unique.length === 0) return map;
 
-  const { data: existing } = await sb
-    .from("clients")
-    .select("id, name")
-    .in("name", unique);
+  const { data: existing } = await sb.from("clients").select("id, name").in("name", unique);
   (existing ?? []).forEach((c: any) => map.set(c.name, c.id));
   return map;
 }
@@ -176,9 +159,7 @@ export function verifyImportSecret(header: string | null): boolean {
  * Import yesterday's delivery records + attendance from configured external
  * sources. Deduplicates against existing rows in the database.
  */
-export async function runDailyImport(
-  targetDate?: string,
-): Promise<ImportResult> {
+export async function runDailyImport(targetDate?: string): Promise<ImportResult> {
   const sb = getSupabaseAdmin();
   const result: ImportResult = {
     deliveries: { fetched: 0, inserted: 0, skipped: 0 },
@@ -189,8 +170,7 @@ export async function runDailyImport(
   const config = getSourceConfig();
   // Default: yesterday (WIB = UTC+7)
   const date =
-    targetDate ??
-    new Date(Date.now() + 7 * 3600_000 - 86400_000).toISOString().slice(0, 10);
+    targetDate ?? new Date(Date.now() + 7 * 3600_000 - 86400_000).toISOString().slice(0, 10);
 
   // ── 1. Delivery records ────────────────────────────────────────
   if (config.delivery) {
@@ -234,9 +214,23 @@ export async function runDailyImport(
           });
         }
 
-        // Insert in chunks
+        // Insert in chunks. Cuma COMPLETED & FAILED yang berguna buat payroll/
+        // analytics — status transien kayak PENDING_PICKUP dibuang di sini
+        // (gak pernah masuk delivery_records), sama seperti upload manual
+        // (lihat admin.upload.tsx).
+        const ALLOWED_STATUSES = new Set(["COMPLETED", "FAILED"]);
         const toInsert = rows
           .filter((r) => {
+            if (
+              !ALLOWED_STATUSES.has(
+                String(r.status ?? "")
+                  .trim()
+                  .toUpperCase(),
+              )
+            ) {
+              result.deliveries.skipped++;
+              return false;
+            }
             const key = `${r.dash_delivery_id ?? ""}|${r.provider_order_id ?? ""}`;
             if (key !== "|" && existingKeys.has(key)) {
               result.deliveries.skipped++;
@@ -248,7 +242,7 @@ export async function runDailyImport(
             batch_id: batchId,
             rider_id: riderMap.get(r.driver_code) ?? null,
             driver_code: r.driver_code,
-            client_id: r.client_name ? clientMap.get(r.client_name) ?? null : null,
+            client_id: r.client_name ? (clientMap.get(r.client_name) ?? null) : null,
             delivery_date: r.delivery_date,
             awb: r.awb ?? null,
             district: r.district ?? null,
@@ -326,7 +320,7 @@ export async function runDailyImport(
             batch_id: batchId,
             rider_id: riderMap.get(r.driver_code) ?? null,
             driver_code: r.driver_code,
-            client_id: r.client_name ? clientMap.get(r.client_name) ?? null : null,
+            client_id: r.client_name ? (clientMap.get(r.client_name) ?? null) : null,
             client_name: r.client_name ?? null,
             log_date: r.log_date,
             clock_in: r.clock_in ?? null,
