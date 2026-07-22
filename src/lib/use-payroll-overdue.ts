@@ -17,10 +17,25 @@ function diffDays(fromISO: string, toISO: string): number {
   return Math.floor((b - a) / 86_400_000);
 }
 
-export function usePayrollOverdue(): OverdueStatus & { refresh: () => void } {
-  const [status, setStatus] = useState<OverdueStatus>({ overdue: false, daysLate: 0, lastPeriodEnd: null });
+// AdminLayout re-mounts on every route navigation (rendered per-page, not
+// hoisted once), which re-mounts this hook and re-fires the query on every
+// sidebar click. Payroll runs don't change second-to-second, so a short
+// module-level cache avoids refetching the same answer dozens of times a
+// minute — the real fix is hoisting AdminLayout to a persistent parent
+// layout, this is the safe stopgap that doesn't touch page structure.
+let cache: { status: OverdueStatus; fetchedAt: number } | null = null;
+const CACHE_TTL_MS = 60_000;
 
-  const check = async () => {
+export function usePayrollOverdue(): OverdueStatus & { refresh: () => void } {
+  const [status, setStatus] = useState<OverdueStatus>(
+    cache?.status ?? { overdue: false, daysLate: 0, lastPeriodEnd: null },
+  );
+
+  const check = async (force = false) => {
+    if (!force && cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
+      setStatus(cache.status);
+      return;
+    }
     const { data } = await supabase
       .from("payroll_runs")
       .select("period_end")
@@ -28,14 +43,24 @@ export function usePayrollOverdue(): OverdueStatus & { refresh: () => void } {
       .limit(1)
       .single();
 
-    if (!data?.period_end) return setStatus({ overdue: false, daysLate: 0, lastPeriodEnd: null });
-
-    const today = new Date().toISOString().slice(0, 10);
-    const daysLate = diffDays(data.period_end, today) - GRACE_DAYS;
-    setStatus({ overdue: daysLate > 0, daysLate: Math.max(0, daysLate), lastPeriodEnd: data.period_end });
+    const next: OverdueStatus = !data?.period_end
+      ? { overdue: false, daysLate: 0, lastPeriodEnd: null }
+      : (() => {
+          const today = new Date().toISOString().slice(0, 10);
+          const daysLate = diffDays(data.period_end, today) - GRACE_DAYS;
+          return {
+            overdue: daysLate > 0,
+            daysLate: Math.max(0, daysLate),
+            lastPeriodEnd: data.period_end,
+          };
+        })();
+    cache = { status: next, fetchedAt: Date.now() };
+    setStatus(next);
   };
 
-  useEffect(() => { check(); }, []);
+  useEffect(() => {
+    check();
+  }, []);
 
-  return { ...status, refresh: check };
+  return { ...status, refresh: () => check(true) };
 }
