@@ -17,6 +17,8 @@ import { confirmDialog } from "@/components/confirm-dialog";
 import { ClientCombobox } from "@/components/client-combobox";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { useBulkSelect } from "@/hooks/use-bulk-select";
+import { PageSizeSelect, PaginationBar } from "@/components/pagination-bar";
+import { usePagination } from "@/lib/use-pagination";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -87,6 +89,8 @@ function PricingListPage() {
     g.items.push(s);
   }
   const schemeGroups = [...groupMap.values()];
+  const { pageSize, setPageSize, page, setPage, totalPages, paged, from, to, total } =
+    usePagination(schemeGroups, 20);
 
   const bulk = useBulkSelect(filtered.map((s) => s.id));
 
@@ -214,12 +218,17 @@ function PricingListPage() {
             ]}
           />
         </div>
-        <Link
-          to="/admin/pricing/new"
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-[11px] font-medium hover:opacity-90 transition-opacity"
-        >
-          <Plus className="w-3.5 h-3.5" /> Tambah Skema
-        </Link>
+        <div className="flex items-center gap-2">
+          {schemeGroups.length > 0 && (
+            <PageSizeSelect pageSize={pageSize} setPageSize={setPageSize} />
+          )}
+          <Link
+            to="/admin/pricing/new"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-[11px] font-medium hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-3.5 h-3.5" /> Tambah Skema
+          </Link>
+        </div>
       </div>
 
       {isSingleClient && (
@@ -407,7 +416,7 @@ function PricingListPage() {
               </tr>
             </thead>
             <tbody>
-              {schemeGroups.map((g) => {
+              {paged.map((g) => {
                 // Baris utama yang selalu keliatan = skema Rider (cost) —
                 // skema Client (billing) & rider tambahan cuma nongol pas expand.
                 const primary = g.items.find((i) => i.scheme_for === "rider") ?? g.items[0];
@@ -430,6 +439,16 @@ function PricingListPage() {
           </table>
         )}
       </div>
+      {schemeGroups.length > 0 && (
+        <PaginationBar
+          page={page}
+          totalPages={totalPages}
+          setPage={setPage}
+          from={from}
+          to={to}
+          total={total}
+        />
+      )}
 
       <BulkActionBar
         count={bulk.count}
