@@ -11,7 +11,8 @@ import { useAuth } from "@/lib/auth";
 import { useIntelligenceDate } from "@/lib/use-intelligence-date";
 import { triggerWeeklyPnlPushManual } from "@/lib/api/pnl-push.functions";
 import { toast } from "sonner";
-import { Loader2, TrendingUp, ArrowRight, AlertTriangle, Send, CheckCircle2, XCircle, DollarSign, TrendingDown, Percent, Activity, BellRing } from "lucide-react";
+import { confirmDialog } from "@/components/confirm-dialog";
+import { Loader2, TrendingUp, ArrowRight, AlertTriangle, Send, CheckCircle2, XCircle, DollarSign, TrendingDown, Percent, Activity, BellRing, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { usePayrollOverdue } from "@/lib/use-payroll-overdue";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Line, LineChart, ReferenceLine } from "recharts";
 
@@ -51,6 +52,8 @@ function ExecutiveDashboard() {
   const [perClient, setPerClient] = useState<ClientPnl[] | null>(null);
   const [snapshots, setSnapshots] = useState<PnlSnapshot[]>([]);
   const [pushing, setPushing] = useState(false);
+  const [showPnlHistory, setShowPnlHistory] = useState(true);
+  const [deletingSnapshotId, setDeletingSnapshotId] = useState<string | null>(null);
 
   const loadSnapshots = () => {
     (supabase as any)
@@ -100,6 +103,32 @@ function ExecutiveDashboard() {
     } finally {
       setPushing(false);
     }
+  };
+
+  const deleteSnapshot = async (s: PnlSnapshot) => {
+    if (!(await confirmDialog({
+      title: "Hapus riwayat push ini?",
+      description: `Periode ${s.week_start} → ${s.week_end} akan dihapus dari riwayat. Ini cuma catatan pengiriman, tidak membatalkan Slack/Email yang sudah terkirim.`,
+      confirmText: "Hapus", danger: true,
+    }))) return;
+    setDeletingSnapshotId(s.id);
+    const { error } = await (supabase as any).from("pnl_weekly_snapshots").delete().eq("id", s.id);
+    setDeletingSnapshotId(null);
+    if (error) return toast.error(error.message);
+    toast.success("Riwayat dihapus");
+    loadSnapshots();
+  };
+
+  const clearAllSnapshots = async () => {
+    if (!(await confirmDialog({
+      title: "Hapus semua riwayat push?",
+      description: `Semua ${snapshots.length} baris riwayat Weekly PNL Push akan dihapus. Ini cuma catatan pengiriman, tidak membatalkan Slack/Email yang sudah terkirim.`,
+      confirmText: "Hapus Semua", danger: true,
+    }))) return;
+    const { error } = await (supabase as any).from("pnl_weekly_snapshots").delete().not("id", "is", null);
+    if (error) return toast.error(error.message);
+    toast.success("Semua riwayat dihapus");
+    loadSnapshots();
   };
 
   const run = async () => {
@@ -379,15 +408,27 @@ function ExecutiveDashboard() {
             <h3 className="text-sm font-semibold">Weekly PNL Push</h3>
             <p className="text-[11px] text-muted-foreground mt-0.5">Dikirim otomatis tiap Senin 07:00 WIB ke Slack &amp; Email (butuh pg_cron aktif).</p>
           </div>
-          <button
-            onClick={testWeeklyPush} disabled={pushing}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors cursor-pointer"
-          >
-            {pushing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-            {pushing ? "Mengirim…" : "Test Kirim Sekarang"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={testWeeklyPush} disabled={pushing}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors cursor-pointer"
+            >
+              {pushing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              {pushing ? "Mengirim…" : "Test Kirim Sekarang"}
+            </button>
+            {snapshots.length > 0 && showPnlHistory && (
+              <button onClick={clearAllSnapshots} title="Hapus semua riwayat"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 text-destructive px-2.5 py-2 text-xs hover:bg-destructive/10 transition-colors">
+                <Trash2 className="w-3.5 h-3.5" /> Hapus Semua
+              </button>
+            )}
+            <button onClick={() => setShowPnlHistory((v) => !v)} title={showPnlHistory ? "Sembunyikan riwayat" : "Tampilkan riwayat"}
+              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-2 text-xs text-muted-foreground hover:bg-muted transition-colors">
+              {showPnlHistory ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          </div>
         </div>
-        {snapshots.length === 0 ? (
+        {!showPnlHistory ? null : snapshots.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4 text-center">Belum ada histori push.</p>
         ) : (
           <div className="overflow-x-auto -mx-1">
@@ -399,6 +440,7 @@ function ExecutiveDashboard() {
                   <th className="text-center text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2">Slack</th>
                   <th className="text-center text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2">Email</th>
                   <th className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2">Trigger</th>
+                  <th className="w-10" />
                 </tr>
               </thead>
               <tbody>
@@ -425,6 +467,12 @@ function ExecutiveDashboard() {
                       <span className="inline-block text-[10px] font-medium uppercase tracking-wider bg-muted text-muted-foreground rounded px-1.5 py-0.5 capitalize">
                         {s.triggered_by}
                       </span>
+                    </td>
+                    <td className="px-2 py-2.5 text-right">
+                      <button onClick={() => deleteSnapshot(s)} disabled={deletingSnapshotId === s.id} title="Hapus baris ini"
+                        className="text-muted-foreground hover:text-destructive disabled:opacity-50">
+                        {deletingSnapshotId === s.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                      </button>
                     </td>
                   </tr>
                 ))}
