@@ -28,15 +28,35 @@
 // situ), memang harus persetujuan manusia, bukan otomatis.
 import { getSupabaseAdmin } from "./supabase-admin.server";
 import { getServerConfig } from "./config.server";
-import { generatePayrollDetails, findOrCreatePayrollRun, type PayrollRunLite } from "./payroll-generate";
+import {
+  generatePayrollDetails,
+  findOrCreatePayrollRun,
+  type PayrollRunLite,
+} from "./payroll-generate";
 import { callHermes } from "./agents/hermes-client.server";
 import { sendSlackMessage } from "./notify/slack.server";
 import { sendEmail } from "./notify/email.server";
+import { fetchAllRows } from "./fetch-all";
+import { pickPricingScheme } from "./pnl-engine";
+import { normalize } from "./pricing-store";
+import type { PricingScheme } from "./pricing-types";
+import {
+  calcScheme,
+  calcAttendanceScheme,
+  calcHybridScheme,
+  type DeliveryRow,
+  type AttendanceLogRow,
+} from "./pricing-calc";
+import { resolveRiderIdentities } from "./rider-lookup";
 
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
 
 export interface ValidationWarning {
-  type: "missing_bank_account" | "negative_net_pay" | "duplicate_period_payment" | "unresolved_rider";
+  type:
+    | "missing_bank_account"
+    | "negative_net_pay"
+    | "duplicate_period_payment"
+    | "unresolved_rider";
   message: string;
 }
 
@@ -55,6 +75,15 @@ export interface PayrollWorkflowRunResult {
   totalNet: number;
   warnings: ValidationWarning[];
   audit: AuditReport | null;
+  feeAutoComputed: boolean;
+  feeSkipReason?: string;
+}
+
+interface FeeAutoComputeResult {
+  computed: boolean;
+  reason?: string;
+  rowCount?: number;
+  totalFee?: number;
 }
 
 export interface PayrollWorkflowResult {
@@ -115,10 +144,145 @@ async function loadClientPeriodSchedules(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const s of (data ?? []) as any[]) {
     const arr = byClient.get(s.client_id) ?? [];
-    arr.push({ start: s.period_start_weekday, end: s.period_end_weekday, closeSameDay: !!s.close_same_day });
+    arr.push({
+      start: s.period_start_weekday,
+      end: s.period_end_weekday,
+      closeSameDay: !!s.close_same_day,
+    });
     byClient.set(s.client_id, arr);
   }
   return byClient;
+}
+
+// Otomatis menjalankan langkah "Hitung Fee" (yang tadinya cuma bisa manual
+// dari admin.calculate.tsx) untuk 1 client+periode, sebelum generatePayrollDetails
+// dipanggil — biar payroll_details yang di-generate cron ini gross_earning-nya
+// BENERAN kehitung, bukan 0 karena delivery_records/attendance_logs.fee belum
+// pernah disentuh. Pakai persis engine & langkah yang sama dengan commit()
+// manual: pickPricingScheme (resolusi skema aktif, sama seperti PNL Push) ->
+// calcScheme/calcAttendanceScheme/calcHybridScheme -> tulis fee -> audit log.
+// `committed_by` sengaja NULL (beda dari commit manual yang selalu ada user id)
+// biar tetap bisa dibedakan di fee_calculation_audit_log siapa yang commit.
+async function autoComputeFee(
+  admin: SupabaseAdmin,
+  schemes: PricingScheme[],
+  clientId: string,
+  periodStart: string,
+  periodEnd: string,
+): Promise<FeeAutoComputeResult> {
+  const scheme = pickPricingScheme(schemes, clientId, "rider");
+  if (!scheme) return { computed: false, reason: "Belum ada skema rider aktif untuk client ini" };
+
+  const isAttendance = scheme.category === "attendance";
+  const isHybrid = scheme.category === "hybrid";
+
+  const paramsConfig = scheme.params.config as
+    | { delivery_component?: { enabled?: boolean } }
+    | undefined;
+  const needDelivery = !isAttendance || !!paramsConfig?.delivery_component?.enabled;
+  const needAttendance = isAttendance || isHybrid;
+
+  const [deliveryRowsRaw, attRowsRaw] = await Promise.all([
+    needDelivery
+      ? fetchAllRows<DeliveryRow>(
+          (sb, from, to) =>
+            sb
+              .from("delivery_records")
+              .select(
+                "id, rider_id, driver_code, delivery_date, awb, district, distance_km, weight_kg, destination_address, service_type, status, delivery_type",
+              )
+              .eq("client_id", clientId)
+              .gte("delivery_date", periodStart)
+              .lte("delivery_date", periodEnd)
+              .range(from, to),
+          1000,
+          admin as never,
+        )
+      : Promise.resolve([]),
+    needAttendance
+      ? fetchAllRows<AttendanceLogRow>(
+          (sb, from, to) =>
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (sb as never as { from: (t: string) => any })
+              .from("attendance_logs")
+              .select(
+                "id, rider_id, driver_code, log_date, clock_in, duration_minutes, is_late, is_absent",
+              )
+              .eq("client_id", clientId)
+              .gte("log_date", periodStart)
+              .lte("log_date", periodEnd)
+              .range(from, to),
+          1000,
+          admin as never,
+        )
+      : Promise.resolve([]),
+  ]);
+
+  const { resolvedIdOf } = await resolveRiderIdentities(
+    [...deliveryRowsRaw, ...attRowsRaw],
+    admin as never,
+  );
+  const deliveryRows = deliveryRowsRaw.map((r) => ({ ...r, rider_id: resolvedIdOf(r) }));
+  const attRows = attRowsRaw.map((r) => ({ ...r, rider_id: resolvedIdOf(r) }));
+
+  let rows: { id?: string | null; fee: number }[];
+  let table: "delivery_records" | "attendance_logs";
+  if (isHybrid) {
+    rows = calcHybridScheme(scheme.params, deliveryRows, attRows).perRow.filter((r) => r.id);
+    table = "delivery_records";
+  } else if (isAttendance) {
+    rows = calcAttendanceScheme(
+      scheme.params,
+      attRows,
+      needDelivery ? deliveryRows : undefined,
+    ).perRow.filter((r) => r.id);
+    table = "attendance_logs";
+  } else {
+    rows = calcScheme(scheme.params, deliveryRows).perRow.filter((r) => r.id);
+    table = "delivery_records";
+  }
+
+  if (rows.length === 0)
+    return { computed: false, reason: "Tidak ada baris pengiriman/absensi untuk periode ini" };
+
+  const chunkSize = 100;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+
+    const res = await Promise.all(
+      chunk.map((r) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (admin as any)
+          .from(table)
+          .update({ fee: r.fee })
+          .eq("id", r.id as string),
+      ),
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const err = res.find((x: any) => x.error)?.error;
+    if (err) throw new Error(`Gagal simpan fee otomatis (${table}): ${err.message}`);
+  }
+
+  const totalFee = rows.reduce((s, r) => s + Number(r.fee || 0), 0);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: auditErr } = await (admin as any).from("fee_calculation_audit_log").insert({
+    action: "commit_payroll",
+    client_id: clientId,
+    scheme_id: scheme.id,
+    scheme_name: scheme.name ?? null,
+    scheme_snapshot: scheme.params,
+    period_start: periodStart,
+    period_end: periodEnd,
+    row_count: rows.length,
+    total_amount: totalFee,
+    calc_table: table,
+    affected_row_ids: rows.map((r) => r.id).filter(Boolean),
+    committed_by: null,
+  });
+  if (auditErr)
+    console.error("[payroll-workflow] gagal simpan audit log fee otomatis:", auditErr.message);
+
+  return { computed: true, rowCount: rows.length, totalFee };
 }
 
 async function validateRun(
@@ -144,10 +308,16 @@ async function validateRun(
     riderIds.push(d.rider_id);
     const riderName = d.riders?.full_name ?? d.rider_id;
     if (!d.riders?.bank_account) {
-      warnings.push({ type: "missing_bank_account", message: `${riderName} belum punya nomor rekening bank` });
+      warnings.push({
+        type: "missing_bank_account",
+        message: `${riderName} belum punya nomor rekening bank`,
+      });
     }
     if (Number(d.net_pay) < 0) {
-      warnings.push({ type: "negative_net_pay", message: `${riderName} net pay negatif (${d.net_pay})` });
+      warnings.push({
+        type: "negative_net_pay",
+        message: `${riderName} net pay negatif (${d.net_pay})`,
+      });
     }
   }
 
@@ -192,9 +362,14 @@ async function validateRun(
     .gte("delivery_date", run.period_start)
     .lte("delivery_date", run.period_end)
     .eq("client_id", run.client_id ?? undefined);
-  const unresolvedCodes = [...new Set((unresolvedDeliveries ?? []).map((r: { driver_code: string }) => r.driver_code))];
+  const unresolvedCodes = [
+    ...new Set((unresolvedDeliveries ?? []).map((r: { driver_code: string }) => r.driver_code)),
+  ];
   for (const code of unresolvedCodes) {
-    warnings.push({ type: "unresolved_rider", message: `Ada kiriman dengan kode "${code}" yang gak match rider manapun` });
+    warnings.push({
+      type: "unresolved_rider",
+      message: `Ada kiriman dengan kode "${code}" yang gak match rider manapun`,
+    });
   }
 
   return { warnings, totalGross, totalNet };
@@ -211,7 +386,7 @@ async function runAudit(
     const result = await callHermes({
       system:
         "Kamu auditor payroll internal PT. Dash Elektrik. Baca ringkasan run payroll & warning validasi, " +
-        "balas HANYA JSON {\"summary\": string, \"recommendations\": string[]} dalam Bahasa Indonesia — " +
+        'balas HANYA JSON {"summary": string, "recommendations": string[]} dalam Bahasa Indonesia — ' +
         "summary 2-3 kalimat, recommendations actionable & singkat.",
       user: JSON.stringify({
         client: run.clientName,
@@ -233,7 +408,11 @@ async function runAudit(
   }
 }
 
-function buildNotification(result: PayrollWorkflowResult): { subject: string; text: string; html: string } {
+function buildNotification(result: PayrollWorkflowResult): {
+  subject: string;
+  text: string;
+  html: string;
+} {
   const { runs, skippedClients } = result;
   const totalWarnings = runs.reduce((s, r) => s + r.warnings.length, 0);
   const today = new Date().toISOString().slice(0, 10);
@@ -247,16 +426,26 @@ function buildNotification(result: PayrollWorkflowResult): { subject: string; te
       `• *${r.clientName}* (${r.periodStart} → ${r.periodEnd}) — ${r.detailCount} rider, net Rp${Math.round(r.totalNet).toLocaleString("id-ID")}` +
         (r.warnings.length ? ` (⚠️ ${r.warnings.length} warning)` : ""),
     );
+    if (!r.feeAutoComputed) {
+      lines.push(
+        `  ⚠️ *Fee belum kehitung otomatis* — ${r.feeSkipReason}. Angka di atas BUKAN gaji final, cek manual sebelum publish.`,
+      );
+    }
     if (r.audit) lines.push(`  _${r.audit.summary}_`);
   }
-  if (skippedClients.length) lines.push(`Dilewati (udah finalized/published): ${skippedClients.join(", ")}`);
+  if (skippedClients.length)
+    lines.push(`Dilewati (udah finalized/published): ${skippedClients.join(", ")}`);
   lines.push(`Total warning: ${totalWarnings}. Cek Payroll Run untuk review sebelum publish.`);
   const text = lines.join("\n");
 
   const runRows = runs
     .map(
-      (r) => `<li><b>${r.clientName}</b> (${r.periodStart} → ${r.periodEnd}) — ${r.detailCount} rider, net Rp${Math.round(r.totalNet).toLocaleString("id-ID")}` +
+      (r) =>
+        `<li><b>${r.clientName}</b> (${r.periodStart} → ${r.periodEnd}) — ${r.detailCount} rider, net Rp${Math.round(r.totalNet).toLocaleString("id-ID")}` +
         (r.warnings.length ? ` (${r.warnings.length} warning)` : "") +
+        (!r.feeAutoComputed
+          ? `<br/><b style="color:#b8791f">⚠️ Fee belum kehitung otomatis — ${r.feeSkipReason}. Cek manual sebelum publish.</b>`
+          : "") +
         (r.audit ? `<br/><i>${r.audit.summary}</i>` : "") +
         `</li>`,
     )
@@ -280,11 +469,19 @@ export async function runPayrollWorkflow(opts: {
   const today = new Date();
   const startedAt = new Date().toISOString();
 
-  const [{ data: clients, error: clientsErr }, periodsByClient] = await Promise.all([
-    admin.from("clients").select("id, name").eq("active", true),
-    loadClientPeriodSchedules(admin),
-  ]);
+  const [{ data: clients, error: clientsErr }, periodsByClient, { data: schemesRaw }] =
+    await Promise.all([
+      admin.from("clients").select("id, name").eq("active", true),
+      loadClientPeriodSchedules(admin),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (admin as any)
+        .from("pricing_schemes")
+        .select(
+          "id, name, client_id, scheme_for, calc_type, effective_from, effective_to, params, created_at",
+        ),
+    ]);
   if (clientsErr) throw new Error(`Gagal ambil daftar client: ${clientsErr.message}`);
+  const schemes: PricingScheme[] = (schemesRaw ?? []).map(normalize);
 
   const runs: PayrollWorkflowRunResult[] = [];
   const skippedClients: string[] = [];
@@ -299,7 +496,12 @@ export async function runPayrollWorkflow(opts: {
         if (!period) continue; // periode ini belum jatuh tempo hari ini
 
         const run = await findOrCreatePayrollRun(
-          { clientId: c.id, clientName: c.name, periodStart: period.periodStart, periodEnd: period.periodEnd },
+          {
+            clientId: c.id,
+            clientName: c.name,
+            periodStart: period.periodStart,
+            periodEnd: period.periodEnd,
+          },
           admin as never,
         );
         if (run.status !== "draft") {
@@ -307,11 +509,25 @@ export async function runPayrollWorkflow(opts: {
           continue;
         }
 
+        const feeResult = await autoComputeFee(
+          admin,
+          schemes,
+          c.id,
+          period.periodStart,
+          period.periodEnd,
+        );
+
         const { detailCount } = await generatePayrollDetails(run, admin as never);
         if (detailCount === 0) continue; // gak ada aktivitas periode ini — bukan warning, cuma dilewati diam-diam
 
         const { warnings, totalGross, totalNet } = await validateRun(admin, run);
-        const audit = await runAudit({ ...run, clientName: c.name }, detailCount, totalGross, totalNet, warnings);
+        const audit = await runAudit(
+          { ...run, clientName: c.name },
+          detailCount,
+          totalGross,
+          totalNet,
+          warnings,
+        );
 
         runs.push({
           runId: run.id,
@@ -323,6 +539,8 @@ export async function runPayrollWorkflow(opts: {
           totalNet,
           warnings,
           audit,
+          feeAutoComputed: feeResult.computed,
+          feeSkipReason: feeResult.reason,
         });
       }
     }
@@ -341,7 +559,8 @@ export async function runPayrollWorkflow(opts: {
     .from("payroll_workflow_runs")
     .insert({
       trigger_type: opts.triggeredBy,
-      triggered_by: opts.triggeredByUserId ?? (opts.triggeredBy === "cron" ? "system-cron" : "admin"),
+      triggered_by:
+        opts.triggeredByUserId ?? (opts.triggeredBy === "cron" ? "system-cron" : "admin"),
       status,
       started_at: startedAt,
       finished_at: new Date().toISOString(),
@@ -359,4 +578,52 @@ export async function runPayrollWorkflow(opts: {
 export function verifyPayrollWorkflowSecret(headerValue: string | null): boolean {
   const expected = getServerConfig().payrollWorkflowSecret;
   return !!expected && !!headerValue && headerValue === expected;
+}
+
+// Jalankan auto-Hitung-Fee + generate run untuk 1 client+periode EKSPLISIT,
+// tanpa terikat jadwal Reminder Calendar — buat verifikasi/backfill manual
+// (mis. tes fitur ini pakai data bulan lalu). TIDAK kirim notif Slack/Email,
+// biar aman dipakai berulang kali tanpa nge-spam channel.
+export async function runFeeAndPayrollForPeriod(opts: {
+  clientId: string;
+  periodStart: string;
+  periodEnd: string;
+}): Promise<PayrollWorkflowRunResult | { skipped: string }> {
+  const admin = getSupabaseAdmin();
+  const [{ data: client, error: clientErr }, { data: schemesRaw }] = await Promise.all([
+    admin.from("clients").select("id, name").eq("id", opts.clientId).single(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (admin as any)
+      .from("pricing_schemes")
+      .select("id, name, client_id, scheme_for, calc_type, effective_from, effective_to, params, created_at"),
+  ]);
+  if (clientErr || !client) throw new Error(`Client tidak ditemukan: ${clientErr?.message ?? opts.clientId}`);
+  const schemes: PricingScheme[] = (schemesRaw ?? []).map(normalize);
+
+  const run = await findOrCreatePayrollRun(
+    { clientId: client.id, clientName: client.name, periodStart: opts.periodStart, periodEnd: opts.periodEnd },
+    admin as never,
+  );
+  if (run.status !== "draft") return { skipped: `Run udah berstatus ${run.status}` };
+
+  const feeResult = await autoComputeFee(admin, schemes, client.id, opts.periodStart, opts.periodEnd);
+  const { detailCount } = await generatePayrollDetails(run, admin as never);
+  if (detailCount === 0) return { skipped: "Gak ada aktivitas delivery/attendance di periode ini" };
+
+  const { warnings, totalGross, totalNet } = await validateRun(admin, run);
+  const audit = await runAudit({ ...run, clientName: client.name }, detailCount, totalGross, totalNet, warnings);
+
+  return {
+    runId: run.id,
+    clientName: client.name,
+    periodStart: opts.periodStart,
+    periodEnd: opts.periodEnd,
+    detailCount,
+    totalGross,
+    totalNet,
+    warnings,
+    audit,
+    feeAutoComputed: feeResult.computed,
+    feeSkipReason: feeResult.reason,
+  };
 }

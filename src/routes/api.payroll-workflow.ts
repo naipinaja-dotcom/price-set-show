@@ -3,6 +3,7 @@ import { getRequest } from "@tanstack/react-start/server";
 import type {} from "@tanstack/react-start";
 import {
   runPayrollWorkflow,
+  runFeeAndPayrollForPeriod,
   verifyPayrollWorkflowSecret,
 } from "@/lib/payroll-workflow.server";
 import { getPostHogClient } from "@/utils/posthog-server";
@@ -25,11 +26,36 @@ export const Route = createFileRoute("/api/payroll-workflow")({
             headers: { "Content-Type": "application/json" },
           });
         }
-        let body: { trigger?: "scheduler" | "event" | "manual" } = {};
+        let body: {
+          trigger?: "scheduler" | "event" | "manual";
+          clientId?: string;
+          periodStart?: string;
+          periodEnd?: string;
+        } = {};
         try {
           body = await request!.json();
         } catch {
           // body kosong = default trigger "scheduler" (cron)
+        }
+        // Backfill/verifikasi manual untuk 1 client+periode eksplisit (di luar
+        // jadwal Reminder Calendar) — dipakai buat tes fitur ini pakai data
+        // periode lampau, TANPA kirim notif Slack/Email berulang.
+        if (body.trigger === "manual" && body.clientId && body.periodStart && body.periodEnd) {
+          try {
+            const result = await runFeeAndPayrollForPeriod({
+              clientId: body.clientId,
+              periodStart: body.periodStart,
+              periodEnd: body.periodEnd,
+            });
+            return new Response(JSON.stringify({ ok: true, result }), {
+              headers: { "Content-Type": "application/json" },
+            });
+          } catch (e) {
+            return new Response(JSON.stringify({ ok: false, error: (e as Error).message }), {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
         }
         const triggeredBy = body.trigger === "manual" ? "manual" : body.trigger === "event" ? "event" : "cron";
         try {
