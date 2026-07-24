@@ -42,9 +42,9 @@ function ProfilePage() {
             { k: "Tempat, Tgl Lahir", v: rider.birth_place || rider.birth_date ? `${rider.birth_place ?? "-"}, ${rider.birth_date ? formatTanggal(rider.birth_date) : "-"}` : "-" },
             { k: "Status", v: STATUS_LABEL[rider.status] ?? rider.status },
           ].map((r) => (
-            <div key={r.k} className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5">
-              <span className="text-xs text-muted-foreground">{r.k}</span>
-              <span className="text-sm font-medium">{r.v}</span>
+            <div key={r.k} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
+              <span className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap pt-0.5">{r.k}</span>
+              <span className="text-sm font-medium text-right min-w-0 break-words">{r.v}</span>
             </div>
           ))}
         </div>

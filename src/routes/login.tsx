@@ -79,6 +79,21 @@ function LoginPage() {
 
   return (
     <main className="min-h-screen grid lg:grid-cols-2 bg-background">
+      <div className="lg:hidden flex flex-col items-center text-center gap-3 px-6 pt-10 pb-8 bg-primary text-primary-foreground rounded-b-3xl">
+        <img
+          src="/dash-logo.png"
+          alt="DASH"
+          className="h-9 w-auto"
+          style={{ filter: "brightness(0) invert(1)" }}
+        />
+        <p className="text-[11px] font-semibold uppercase tracking-[0.15em] opacity-70">
+          OES Platform · Rider
+        </p>
+        <p className="text-sm opacity-85 max-w-xs">
+          Pantau pendapatanmu, kapan saja dan di mana saja.
+        </p>
+      </div>
+
       <div className="hidden lg:flex flex-col justify-between p-12 bg-primary text-primary-foreground">
         <div className="flex items-center gap-3">
           <img
