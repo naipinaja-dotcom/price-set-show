@@ -892,9 +892,26 @@ function AttendanceUpload() {
     const clientByName = new Map(clients.map((c) => [c.name.trim().toLowerCase(), c.id]));
     const unmatchedClients = new Set<string>();
 
-    const allLogs = rows.map((r) => {
+    // "Clock-out" berisi teks status kayak "(ongoing)" selama shift belum
+    // selesai — bukan jam valid, dan bikin insert gagal (kolom TIME). Duration
+    // ikut kosong buat baris begini, jadi validasi HH:MM di sini dan pakai
+    // duration null sebagai sinyal "belum selesai" buat di-skip di bawah.
+    const isValidTime = (s: string) => /^\d{1,2}:\d{2}(:\d{2})?$/.test(s.trim());
+
+    let ongoingSkipped = 0;
+    const allLogs = rows.flatMap((r) => {
       const code = r[iCode];
       const duration = parseDur(r[iDur] ?? "");
+      const outRaw = (r[iOut] ?? "").trim();
+      if (outRaw && !isValidTime(outRaw)) {
+        // shift belum selesai (mis. "(ongoing)") — skip, bukan force-insert
+        ongoingSkipped++;
+        return [];
+      }
+      if (duration == null) {
+        ongoingSkipped++;
+        return [];
+      }
       const clientNameRaw = r[iClient] ?? null;
       let client_id: string | null = null;
       if (clientNameRaw) {
@@ -904,7 +921,7 @@ function AttendanceUpload() {
       }
       if (!client_id && clientId) client_id = clientId;
       const otpRaw = iOtp >= 0 ? (r[iOtp] ?? "").trim().toLowerCase() : "";
-      return {
+      return [{
         batch_id: batch.id,
         rider_id: code ? (riderMap.get(code) ?? null) : null,
         driver_code: code,
@@ -912,11 +929,11 @@ function AttendanceUpload() {
         client_id,
         log_date: parseIndoDate(r[iDate] ?? "") || new Date().toISOString().slice(0, 10),
         clock_in: r[iIn] || null,
-        clock_out: r[iOut] || null,
+        clock_out: outRaw || null,
         duration_minutes: duration,
         is_absent: !r[iIn],
         is_late: otpRaw === "late",
-      };
+      }];
     });
 
     // Deteksi duplikat: kunci = driver_code + log_date (1 rider cuma boleh 1 log
@@ -980,11 +997,13 @@ function AttendanceUpload() {
       row_count: inserted,
       overwrite_count: overwriteIds.length,
       new_rider_count: createdCodes.length,
+      ongoing_skipped: ongoingSkipped,
     });
     toast.success(
       `Berhasil upload ${inserted} log absensi` +
         (overwriteIds.length ? ` · ${overwriteIds.length} data lama ditimpa (diperbarui)` : "") +
         (fileRepeatCount ? ` · ${fileRepeatCount} baris dobel di file di-skip` : "") +
+        (ongoingSkipped ? ` · ${ongoingSkipped} shift masih ongoing di-skip` : "") +
         (createdCodes.length ? ` · ${createdCodes.length} rider baru otomatis terdaftar` : ""),
     );
     if (unmatchedClients.size > 0) {
